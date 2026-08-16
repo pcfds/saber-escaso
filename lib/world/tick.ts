@@ -224,6 +224,16 @@ export async function step() {
       await db.from('agendas')
         .update({ state: 'abandonada', ended_tick: nextTick })
         .eq('person_id', muerto.id).eq('state', 'activa')
+
+      // Las agendas corren antes que la muerte en el mismo tick, así que un
+      // muerto puede haber "conseguido" algo y "puesto a" otra cosa segundos
+      // antes de morirse. El director lee esos eventos y narra a un fantasma
+      // laburando — pasó de verdad: «Ren sigue en la Casa Quemada persiguiendo
+      // algo nuevo». Se descartan antes de escribirlos.
+      const vivos = events.filter((e) =>
+        !(e.kind.startsWith('agenda_') && e.detail?.person === muerto.name))
+      events.length = 0
+      events.push(...vivos)
     }
   }
 
