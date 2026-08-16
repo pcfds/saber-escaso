@@ -60,6 +60,19 @@ export function mapaHtml(token: string, playerName: string): string {
   #vidabarra{height:100%;width:100%;background:#6fb99e;transition:width .18s,background .18s}
   #vidatxt{font:11px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#98a29c;min-width:44px}
   .flash{position:fixed;inset:0;background:#ce8b84;opacity:0;pointer-events:none;z-index:4;transition:opacity .13s}
+  .cronbtn{position:fixed;right:18px;top:58px;z-index:5;background:#6fb99e;color:#0f1416;border:0;
+    font:inherit;font-size:13px;padding:8px 14px;cursor:pointer}
+  .overlay{position:fixed;inset:0;background:rgba(10,14,15,.86);z-index:9;display:none;
+    align-items:center;justify-content:center;padding:24px}
+  .ovcaja{max-width:620px;background:#1c2224;border-top:2px solid #6fb99e;padding:26px 28px}
+  .ovcaja p{white-space:pre-wrap;margin:0 0 18px}
+  .ovcaja button{background:#6fb99e;color:#0f1416;border:0;font:inherit;font-size:14px;padding:9px 16px;cursor:pointer}
+  .opcs{display:flex;flex-direction:column;gap:8px;margin:0 0 18px}
+  .opcs button{background:transparent;color:#dde3de;border:1px solid #2c3538;text-align:left;font-size:13.5px}
+  .opcs button:disabled{opacity:.45;cursor:default}
+  #pgente button{background:#6fb99e;color:#0f1416;border:0;font:inherit;font-size:13px;
+    padding:7px 11px;margin:6px 4px 0 0;cursor:pointer}
+  #pgente button:disabled{opacity:.5;cursor:default}
 </style></head>
 <body>
 <canvas id="cv"></canvas>
@@ -69,6 +82,8 @@ export function mapaHtml(token: string, playerName: string): string {
 <div class="tip">WASD: caminar · espacio: golpear · arrastrar: girar · rueda: acercar</div>
 <div class=vida><div class=vidawrap><div id=vidabarra></div></div><span id=vidatxt>100</span></div>
 <div class=flash id=flash></div>
+<button class=cronbtn id=cronbtn>¿Qué pasó?</button>
+<div class=overlay id=overlay><div class=ovcaja><p id=ovtxt></p><button id=ovcerrar>seguir jugando</button></div></div>
 <div class=cargando id=cargando>cargando el valle…</div>
 
 <script type="importmap">
@@ -286,6 +301,16 @@ async function cargar() {
       f.position.set(info.def.x + Math.cos(a) * r, 0, info.def.z + Math.sin(a) * r)
       f.lookAt(info.def.x, 0, info.def.z)
       scene.add(f)
+
+      // Clickeable: un disco invisible a sus pies. Más fácil de acertar que
+      // la cápsula, sobre todo desde lejos.
+      const hit = new THREE.Mesh(new THREE.CircleGeometry(1.5, 16),
+        new THREE.MeshBasicMaterial({ visible: false }))
+      hit.rotation.x = -Math.PI / 2
+      hit.position.set(f.position.x, 0.06, f.position.z)
+      hit.userData = { tipo: 'npc', nombre: persona.name, oficio: persona.trade }
+      scene.add(hit)
+      clicables.push(hit)
       const lb = etiqueta(persona.name, 0.85)
       lb.position.set(f.position.x, 2.5, f.position.z)
       scene.add(lb)
@@ -545,20 +570,109 @@ addEventListener('pointerup', (e) => {
   ray.setFromCamera(puntero, camera)
   const hit = ray.intersectObjects(clicables)[0]
   const panel = document.getElementById('panel')
-  if (hit) {
-    const u = hit.object.userData
+  if (!hit) { panel.style.display = 'none'; return }
+  const u = hit.object.userData
+  panel.style.display = 'block'
+
+  if (u.tipo === 'npc') {
+    const cerca = jugador &&
+      Math.hypot(jugador.mesh.position.x - hit.object.position.x,
+                 jugador.mesh.position.z - hit.object.position.z) < 7
     document.getElementById('pnombre').textContent = u.nombre
-    document.getElementById('pdesc').textContent = u.descripcion
-    const gente = document.getElementById('pgente')
-    if (u.slug === lugarActual) {
-      gente.innerHTML = 'Estás acá.'
+    document.getElementById('pdesc').textContent = u.oficio
+    const acc = document.getElementById('pgente')
+    if (!cerca) {
+      acc.innerHTML = '<i>Acercate caminando para hablarle.</i>'
     } else {
-      gente.innerHTML = '<button id="irbtn">Ir a ' + u.nombre + '</button>'
-      document.getElementById('irbtn').onclick = () => irA(u.slug, u.nombre)
+      acc.innerHTML = '<button id="hablarbtn">Hablar con ' + u.nombre + '</button>'
+      document.getElementById('hablarbtn').onclick = () => hablar(u.nombre)
     }
-    panel.style.display = 'block'
-  } else panel.style.display = 'none'
+    return
+  }
+
+  // Es un lugar.
+  document.getElementById('pnombre').textContent = u.nombre
+  document.getElementById('pdesc').textContent = u.descripcion
+  const acc = document.getElementById('pgente')
+  if (u.slug === lugarActual) {
+    acc.innerHTML = '<button data-v="trabajar">Trabajar acá</button>'
+    acc.querySelector('button').onclick = (e) => hacer('trabajar', null, e.target)
+  } else {
+    acc.innerHTML = '<button id="irbtn">Ir a ' + u.nombre + '</button>'
+    document.getElementById('irbtn').onclick = () => irA(u.slug, u.nombre)
+  }
 })
+
+// Las acciones viven acá adentro. Antes había que salir del 3D a la pantalla
+// de texto para hacer cualquier cosa — eran dos aplicaciones distintas.
+async function hacer(verbo, objetivo, boton) {
+  const previo = boton.textContent
+  for (const b of document.querySelectorAll('#pgente button')) b.disabled = true
+  boton.textContent = '…'
+  await fetch('/j/' + D.token + '/act', {
+    method: 'POST',
+    body: new URLSearchParams(objetivo ? { verb: verbo, target: objetivo } : { verb: verbo }),
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  })
+  boton.textContent = previo
+  await mirar('Hiciste algo. Esto es lo que se ve desde donde estás:')
+}
+
+// Hablar con un NPC. Dice algo que sale de su estado real —lo que persigue,
+// lo que recuerda de vos, si confía— y ofrece respuestas que hacen algo.
+async function hablar(nombre) {
+  const ov = document.getElementById('overlay')
+  const txt = document.getElementById('ovtxt')
+  const caja = ov.querySelector('.ovcaja')
+  ov.style.display = 'flex'
+  txt.textContent = nombre + ' levanta la vista…'
+  for (const b of caja.querySelectorAll('.opcs')) b.remove()
+
+  const r = await fetch('/j/' + D.token + '/hablar', {
+    method: 'POST',
+    body: new URLSearchParams({ npc: nombre }),
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  })
+  const d = await r.json()
+  if (d.error) { txt.textContent = d.error; return }
+
+  const tono = { calido: '#6fb99e', neutral: '#dde3de', seco: '#98a29c', hostil: '#ce8b84' }
+  txt.innerHTML = '<b style="color:' + (tono[d.animo] || '#dde3de') + '">' + nombre + '</b><br>“' +
+    d.saludo.replace(/</g, '&lt;') + '”'
+
+  const cont = document.createElement('div')
+  cont.className = 'opcs'
+  for (const o of d.opciones) {
+    const b = document.createElement('button')
+    b.textContent = o.texto
+    b.disabled = !o.posible
+    b.title = o.posible ? '' : (o.porque || '')
+    if (!o.posible && o.porque) b.textContent += ' — ' + o.porque
+    b.onclick = async () => {
+      for (const x of cont.querySelectorAll('button')) x.disabled = true
+      b.textContent = '…'
+      await fetch('/j/' + D.token + '/act', {
+        method: 'POST',
+        body: new URLSearchParams({ verb: o.verbo, target: nombre }),
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      })
+      location.reload()
+    }
+    cont.appendChild(b)
+  }
+  caja.insertBefore(cont, document.getElementById('ovcerrar'))
+}
+
+// La crónica, sin salir del valle.
+async function mirar(encabezado) {
+  const ov = document.getElementById('overlay')
+  const txt = document.getElementById('ovtxt')
+  ov.style.display = 'flex'
+  txt.textContent = 'un momento…'
+  const r = await fetch('/j/' + D.token + '/cronica', { method: 'POST' })
+  const j = await r.json()
+  txt.textContent = (encabezado ? encabezado + '\\n\\n' : '') + j.text
+}
 
 
 async function irA(slug, nombre) {
@@ -607,6 +721,8 @@ function animar() {
   renderer.render(scene, camera)
 }
 
+document.getElementById('cronbtn').onclick = () => mirar()
+document.getElementById('ovcerrar').onclick = () => { document.getElementById('overlay').style.display = 'none' }
 cargar().then(()=>{ pintarVida(); iniciarPresencia(); animar() }).catch((e) => {
   document.getElementById('cargando').textContent = 'no se pudo cargar: ' + e.message
 })

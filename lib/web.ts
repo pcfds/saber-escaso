@@ -11,6 +11,7 @@ import { createServer } from 'node:http'
 import { db, getRegion } from './db.js'
 import { step } from './world/tick.js'
 import { narrate } from './world/director.js'
+import { hablarCon } from './world/dialogo.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
 const esc = (s: string) =>
@@ -257,6 +258,40 @@ export async function handler(
         })
         await step()
         return back(token)
+      }
+
+      if (req.method === 'POST' && parts[2] === 'hablar') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        const quien = f.get('npc') ?? ''
+        try {
+          const d = await hablarCon(found.player.id, found.player.name, quien)
+          // Hablar también cuenta como acto en el mundo: el NPC te registra.
+          await db.from('actions').insert({
+            player_id: found.player.id, verb: 'hablar',
+            target: quien, submitted_tick: found.region.tick,
+          })
+          return json(d)
+        } catch (e) {
+          return json({ error: (e as Error).message })
+        }
+      }
+
+      // Igual que /look pero devuelve JSON: lo usa el 3D para mostrar la
+      // crónica sin sacarte del valle.
+      if (req.method === 'POST' && parts[2] === 'cronica') {
+        const found = await byToken(token)
+        if (!found) return json({ text: 'No existe ese jugador.' })
+        const hay = found.region.tick > found.player.last_seen_tick
+        if (!hay) {
+          const { data: ultima } = await db.from('chronicles')
+            .select('text').eq('player_id', found.player.id)
+            .order('to_tick', { ascending: false }).limit(1).maybeSingle()
+          return json({ text: ultima?.text ?? 'Todavía no pasó nada digno de contar.' })
+        }
+        const c = await narrate(found.player.name)
+        return json({ text: c.text })
       }
 
       if (req.method === 'POST' && parts[2] === 'look') {
