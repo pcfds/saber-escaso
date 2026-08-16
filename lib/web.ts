@@ -266,7 +266,7 @@ export async function handler(
         const f = await body(req)
         const quien = f.get('npc') ?? ''
         try {
-          const d = await hablarCon(found.player.id, found.player.name, quien)
+          const d = await hablarCon(found.player.id, found.player.name, quien, f.get('dice') ?? '')
           // Hablar también cuenta como acto en el mundo: el NPC te registra.
           await db.from('actions').insert({
             player_id: found.player.id, verb: 'hablar',

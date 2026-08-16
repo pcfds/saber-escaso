@@ -31,7 +31,10 @@ REGLAS:
 - Si estás trabado en lo que perseguís, es lo primero que se te sale por la boca.
 - Nunca digas números, porcentajes, ni nombres de sistemas. Nada de "confianza
   35". Se dice "todavía no te conozco".
-- No preguntes "¿en qué puedo ayudarte?". Nadie habla así.`
+- No preguntes "¿en qué puedo ayudarte?". Nadie habla así.
+- Si te dicen algo, contestá A ESO. Si te piden algo que no podés o no querés
+  dar, decilo y ya — no lo prometas para después. Si te dicen una pavada,
+  reaccionás como reaccionaría alguien ocupado al que le dicen una pavada.`
 
 const SCHEMA = {
   type: 'object',
@@ -53,7 +56,9 @@ export type Dialogo = {
   opciones: { verbo: string; texto: string; posible: boolean; porque?: string }[]
 }
 
-export async function hablarCon(playerId: string, playerName: string, npcName: string): Promise<Dialogo> {
+export async function hablarCon(
+  playerId: string, playerName: string, npcName: string, dice = '',
+): Promise<Dialogo> {
   const region = await getRegion()
 
   const { data: npc } = await db.from('people')
@@ -106,12 +111,21 @@ export async function hablarCon(playerId: string, playerName: string, npcName: s
       : `${playerName} no sabe ningún oficio todavía.`,
   ].join('\n')
 
+  // Lo que el jugador escribió, si escribió algo. El NPC responde a eso, pero
+  // sigue atado a los mismos hechos: puede negarse, puede no entender, puede
+  // mandarlo a pasear — lo que no puede es inventar que sabe algo que no sabe
+  // ni prometer nada que el mundo no vaya a cumplir.
+  const dicho_por_el_jugador = dice.trim().slice(0, 300)
+  const contenido = dicho_por_el_jugador
+    ? `${ctx}\n\n${playerName} te dice: "${dicho_por_el_jugador}"\nContestale a eso, en personaje.`
+    : ctx
+
   const res = await anthropic.messages.create({
     model: process.env.DIALOGO_MODEL ?? 'claude-haiku-4-5',
     max_tokens: 600,
     output_config: { format: { type: 'json_schema', schema: SCHEMA } },
     system: SYSTEM,
-    messages: [{ role: 'user', content: ctx }],
+    messages: [{ role: 'user', content: contenido }],
   })
 
   const raw = res.content.find((b) => b.type === 'text')
