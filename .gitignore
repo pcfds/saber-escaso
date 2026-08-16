@@ -1,0 +1,5 @@
+.env.local
+.db-password
+node_modules
+.vercel
+supabase/.temp/

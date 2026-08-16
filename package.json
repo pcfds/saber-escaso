@@ -1,0 +1,35 @@
+{
+  "name": "saber-escaso",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fase 0 — probar si el director de IA es divertido",
+  "scripts": {
+    "check": "tsx lib/check.ts",
+    "seed": "tsx lib/world/seed.ts",
+    "tick": "tsx lib/world/tick.ts",
+    "world": "tsx lib/world/run.ts",
+    "look": "tsx lib/world/director.ts",
+    "act": "tsx lib/world/actions.ts",
+    "typecheck": "tsc --noEmit",
+    "web": "tsx lib/web.ts",
+    "compare": "tsx lib/compare.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

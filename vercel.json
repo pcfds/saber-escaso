@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/api/tick", "destination": "/api/tick" },
+    { "source": "/(.*)", "destination": "/api/index" }
+  ],
+  "crons": [
+    { "path": "/api/tick", "schedule": "0 * * * *" }
+  ],
+  "functions": {
+    "api/index.ts": { "maxDuration": 60 },
+    "api/tick.ts": { "maxDuration": 60 }
+  }
+}
