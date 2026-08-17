@@ -312,15 +312,15 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
   return page(`${player.name} — Saber Escaso`, `
     <h1>${esc(player.name)}</h1>
     <p class="sub">Estás en ${esc(lugar?.name ?? 'algún lado')}. ${
-      saberes.length ? 'Sabés ' + saberes.map(esc).join(', ') + '.' : 'Todavía no sabés ningún oficio.'
+      saberes.length ? 'Sabes ' + saberes.map(esc).join(', ') + '.' : 'Todavía no sabes ningún oficio.'
     }</p>
 
     ${recienCreado ? `<div class="link"><b>⚠ Este link es tu personaje. Guardalo.</b>
-      Cualquiera que lo tenga entra como vos, y sin él no podés volver a entrar.</div>` : ''}
+      Cualquiera que lo tenga entra como tú, y sin él no puedes volver a entrar.</div>` : ''}
 
     <div class="intro">
-      <b>Qué es esto.</b> Un valle donde la gente vive su vida sin vos: trabajan,
-      aprenden oficios, se deben plata, se mueren. Entrás cuando querés y alguien
+      <b>Qué es esto.</b> Un valle donde la gente vive su vida sin ti: trabajan,
+      aprenden oficios, se deben plata, se mueren. Entras cuando quieres y alguien
       te cuenta qué pasó mientras no estabas.
       <br><br>
       <b>Lo único que importa acá es el saber.</b> Cada oficio y cada runa vive en
@@ -328,7 +328,7 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
       persona se muere sin habérselo enseñado a nadie, <b>se pierde del valle para
       siempre</b>.
       <br><br>
-      Empezá hablando con la gente. Nadie te enseña nada hasta que confíe en vos.
+      Empieza hablando con la gente. Nadie te enseña nada hasta que confíe en ti.
     </div>
 
     ${aviso ? `<div class="warn">${esc(aviso)}</div>` : ''}
@@ -930,7 +930,7 @@ export async function handler(
           <p class="sub">Esta vista era una prueba y quedó vieja. El juego ahora se
           baja: es un programa que corre en tu máquina y se conecta a este mismo
           valle, con tu mismo link.</p>
-          <p class="sub"><a href="/">Bajá la demo desde la portada</a> — y si querés
+          <p class="sub"><a href="/">Baja la demo desde la portada</a> — y si quieres
           ver qué pasó sin abrir el juego, <a href="/j/${esc(token)}">volvé a tu página</a>.</p>
         `), 410)
       }
@@ -1018,7 +1018,7 @@ function pasos(m: {
   for (const r of recetas.slice(0, 1)) {
     const lugar = m.places.find((p) => p.kind === r.makes_at)
     out.push({
-      texto: `Sabés ${r.name}. Andá a ${lugar?.name ?? 'donde se hace'} y ponete a trabajar: te sale ${r.makes}, y cuanto más lo hacés, mejor.`,
+      texto: `Sabes ${r.name}. Ve a ${lugar?.name ?? 'donde se hace'} y ponte a trabajar: te sale ${r.makes}, y cuanto más lo haces, mejor.`,
       donde: lugar?.slug ?? '',
     })
   }
@@ -1029,7 +1029,7 @@ function pasos(m: {
   if (bicho) {
     out.push({
       texto: llevo
-        ? `Llevás ${llevo.kind}. ${bicho.nombre ?? bicho.kind} anda por ${nombre(bicho.place_id)}.`
+        ? `Llevas ${llevo.kind}. ${bicho.nombre ?? bicho.kind} anda por ${nombre(bicho.place_id)}.`
         : `${bicho.nombre ?? bicho.kind} anda por ${nombre(bicho.place_id)}. Sin nada en las manos vas a pegar poco.`,
       donde: slug(bicho.place_id),
     })
@@ -1038,7 +1038,7 @@ function pasos(m: {
   // 4. Que el saber circula es el juego entero. Se dice al final y una vez.
   if (recetas.length > 0) {
     out.push({
-      texto: 'Lo que sabés se lo podés enseñar a alguien. Es lo que más confianza te gana — y lo único que hace que no se pierda cuando te mueras.',
+      texto: 'Lo que sabes se lo puedes enseñar a alguien. Es lo que más confianza te gana — y lo único que hace que no se pierda cuando te mueras.',
       donde: '',
     })
   }
@@ -1135,7 +1135,7 @@ function actitud(
   }
   return {
     saludo: de([
-      `${q.name} te mira sin saber bien quién sos.`,
+      `${q.name} te mira sin saber bien quién eres.`,
       `${q.name} levanta la vista un segundo.`,
       saberesDelJugador === 0
         ? `${q.name} te mira las manos antes que la cara.`
@@ -1154,9 +1154,9 @@ function actitud(
  * arriba cada punto cuesta.
  */
 function mano(destreza: number): string {
-  if (destreza < 12) return 'recién empezás'
+  if (destreza < 12) return 'recién empiezas'
   if (destreza < 30) return 'te sale, con esfuerzo'
-  if (destreza < 55) return 'le tenés la mano'
+  if (destreza < 55) return 'le tienes la mano'
   if (destreza < 78) return 'te sale bien'
-  return 'sos de los que saben'
+  return 'eres de los que saben'
 }

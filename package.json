@@ -14,7 +14,8 @@
     "act": "tsx lib/world/actions.ts",
     "typecheck": "tsc --noEmit",
     "web": "tsx lib/web.ts",
-    "compare": "tsx lib/compare.ts"
+    "compare": "tsx lib/compare.ts",
+    "registro": "tsx lib/registro.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

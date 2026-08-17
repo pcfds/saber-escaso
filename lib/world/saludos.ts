@@ -221,7 +221,7 @@ function huella(metas: string[], voz: string | null, procedencia: string | null)
  * "á" y `\bmirá\b` casa dentro de "mirándote". También se probó, y también se
  * comió una línea buena.
  */
-const RIOPLATENSE = new RegExp(
+export const RIOPLATENSE = new RegExp(
   '(?<!\\p{L})(' + [
     'vos', 'sos', 'acá', 'allá', 'che', 'boludo', 'o sea', 'mi amor',
     // Presentes de voseo. Todos llevan tilde y ninguno existe en tuteo.

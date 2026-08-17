@@ -305,6 +305,42 @@ const VACIAS = new Set([
   'mucho', 'poco', 'bien', 'tener', 'hacer', 'poder', 'decir', 'haber', 'sean',
 ])
 
+/** Palabras que aparecen en el pasado y en cualquier otra frase: las de
+ *  preguntar y las de rellenar. No dicen de qué se está hablando.
+ *
+ *  Es `VACIAS` para el pasado, y hace falta aparte por un motivo que se midió:
+ *  estas palabras están en la pregunta del jugador **y también en la prosa de
+ *  las piezas**, que están escritas para ser contadas. "¿Qué se cuenta del
+ *  incendio de la Casa Quemada?" enganchaba con «lo que pasó no lo cuenta
+ *  nadie» —una pieza que se calla, sobre otra cosa, en el mismo sitio— y le
+ *  ganaba a la pieza del incendio, que era la que le habían pedido. Resultado:
+ *  la herrera esquivaba una pregunta que podía contestar.
+ *
+ *  No van en `VACIAS` porque ahí romperían lo otro: "contar" y "saber" sí
+ *  distinguen una meta de otra ("aprender a contar los inviernos").
+ *
+ *  El segundo grupo —"vacía", "cosa", "queda", "después"— entró por el otro
+ *  extremo del mismo problema y también medido: el guardia de "esto ya lo
+ *  conté" daba por contada la pieza del incendio porque una respuesta suelta
+ *  de la vieja Ren decía "vacío" y "después". Con seis piezas en total, casi
+ *  cualquier palabra es rara; lo que hace falta no es que sea rara, es que
+ *  hable de algo. */
+const PREGUNTONAS = new Set([
+  'cuenta', 'cuentan', 'cuentas', 'cuento', 'contar', 'cuentame', 'cuentas',
+  'dice', 'dicen', 'dices', 'decir', 'dijo', 'dijeron', 'digo', 'dijiste',
+  'paso', 'pasa', 'pasan', 'pasar', 'pasaron', 'pasado', 'pasaba',
+  'sabe', 'sabes', 'saben', 'saber', 'sabia', 'sabias', 'sabido',
+  'conoce', 'conoces', 'conocer', 'recuerda', 'recuerdas', 'recordar',
+  'acuerda', 'acuerdas', 'oido', 'escuchado', 'oyeron', 'oiste',
+  'historia', 'historias', 'verdad', 'cierto', 'quiero', 'queria', 'puedes',
+  'podrias', 'nadie', 'gente', 'sitio', 'lugar', 'lugares', 'hace', 'tiempo',
+  'antes', 'despues', 'luego', 'vengo', 'viene', 'vine', 'aqui', 'alli',
+  'vacia', 'vacias', 'vacio', 'vacios', 'cosa', 'cosas', 'tiene', 'tienen',
+  'tenia', 'otras', 'otros', 'misma', 'mismo', 'mismos', 'sigue', 'siguen',
+  'queda', 'quedan', 'quedo', 'quedara', 'vuelve', 'volvio', 'entonces',
+  'mucho', 'mucha', 'muchos', 'muchas', 'nunca', 'siempre', 'nadie', 'suyos',
+])
+
 /** Las palabras con carga de una frase. Cuatro letras o más: abajo de eso son
  *  artículos y preposiciones que hacen ruido. */
 const claves = (frase: string): string[] =>
@@ -335,7 +371,21 @@ const unPueblo = (fila: unknown) =>
 export type Dialogo = {
   saludo: string
   animo: string
-  opciones: { verbo: string; texto: string; posible: boolean; porque?: string }[]
+  opciones: {
+    verbo: string; texto: string; posible: boolean; porque?: string
+    /**
+     * Cuando la opción admite más de una cosa, cuáles. Hoy sólo la usa
+     * `ensenar`, y tiene que venir del servidor porque **el cliente no sabe
+     * qué sabe ya el NPC**: la lista es la resta entre lo tuyo y lo suyo, y
+     * ese segundo conjunto no viaja.
+     *
+     * Con dos o más, el cliente despliega la lista y manda
+     * `target="<saber> a <persona>"`. Con una o ninguna manda el nombre pelado
+     * y el servidor elige como siempre, así que un cliente viejo sigue
+     * andando exactamente igual.
+     */
+    elegir?: string[]
+  }[]
 }
 
 export async function hablarCon(
@@ -359,14 +409,18 @@ export async function hablarCon(
     // Una sola línea y sin concatenar: supabase-js parsea el select en el tipo,
     // y si se lo arma con `+` deja de ser un literal y la fila vuelve sin
     // forma. Es feo de leer y es el precio.
-    .select('id, name, trade, disposition, teaches, place_id, voice, historia, procedencia, place:place_id (name, description), pueblo:people_id (name, lengua)')
+    // `home_place_id` entra por el pasado y no por el habla: es de dónde ES esta
+    // persona y no dónde está parada hoy. La diferencia importa — `place_id` lo
+    // mueve el tick, y con él un aldeano que pasa por la ruina heredaría por un
+    // día la versión que se cuenta ahí adentro. Ver `voces` más abajo.
+    .select('id, name, trade, disposition, teaches, place_id, home_place_id, voice, historia, procedencia, place:place_id (name, description), pueblo:people_id (name, lengua)')
     .eq('region_id', region.id).eq('alive', true).ilike('name', npcName)
     .limit(1).maybeSingle()
   if (!npc) throw new Error(`No hay nadie llamado ${npcName} por aquí.`)
 
   const [
     agendas, sabeNpc, sabeJug, vinculo, memorias, charlas, sucesos, saberes, llevaJug, cuantas,
-    vinculosOtros, gente,
+    vinculosOtros, gente, pasado, pueblos,
   ] = await Promise.all([
     // `select('*')` y no la lista de columnas: `agendas.needs_object` entra con
     // una migración que todavía no está en producción, y pedirle a supabase-js
@@ -421,6 +475,22 @@ export async function hablarCon(
     // `bonds.toward_id` es polimórfico y no tiene FK, así que no hay embed
     // posible y el join se hace acá.
     db.from('people').select('id, name').eq('region_id', region.id).eq('alive', true),
+    // El pasado del valle. Son siete filas de `events` con tick negativo —el
+    // mismo sitio donde vive todo lo demás que pasó— así que citarlo no rompe
+    // el invariante: está en la base, no lo inventa nadie.
+    //
+    // Se traen las siete y se manda a lo sumo UNA. Es a propósito: el prompt de
+    // una charla ya ronda los 4.500 tokens para dos frases, y el pasado entero
+    // son ~1.100 más que la mayoría de los turnos no usaría. Filtrar acá cuesta
+    // una consulta a una tabla chica; filtrar en el prompt cuesta plata en cada
+    // charla del juego.
+    db.from('events').select('id, summary, place_id, detail')
+      .eq('region_id', region.id).eq('kind', 'pasado').lt('tick', 0)
+      .order('tick', { ascending: true }),
+    // Los pueblos, con su territorio. No es decoración: es lo que decide de qué
+    // LADO está cada quien, y sin eso las dos versiones del incendio no se
+    // pueden repartir. Ver `voces`.
+    db.from('peoples').select('name, place_id').eq('region_id', region.id),
   ])
 
   const nombres = (r: { data: unknown[] | null }) =>
@@ -597,6 +667,167 @@ export async function hablarCon(
     })
     .filter(Boolean) as string[]
 
+  // ── El pasado del valle, y de qué lado lo cuenta ésta ──────────────────
+  //
+  // El valle tiene siete piezas de pasado escritas por el autor y sembradas en
+  // `events` con tick negativo. Están en la base desde hace días y **no las
+  // consultaba nadie**: ni los NPCs ni la crónica. Esto las enchufa del lado de
+  // las charlas.
+  //
+  // El invariante no se mueve y conviene decir por qué no se mueve: el pasado
+  // ESTÁ en `events`, que es exactamente donde vive todo lo demás que pasó. Un
+  // NPC que lo menciona no está inventando — está citando una fila. Lo que
+  // sigue prohibido es lo de siempre: agregarle un detalle que la fila no
+  // tiene, y —esto es nuevo y es lo más fácil de romper— cerrar una
+  // contradicción que el mundo dejó abierta.
+  //
+  // Tres cosas se deciden acá, en código, y ninguna se le delega al modelo:
+  //
+  //   1. **DE QUÉ LADO ESTÁ.** Cada pieza trae `quien_lo_cuenta`: "la aldea",
+  //      "Los de la Ceniza", "nadie". Una persona sólo puede contar lo de su
+  //      lado. Los pueblos que no son humanos tienen territorio
+  //      (`peoples.place_id`), así que el lado sale de dos datos y de ninguna
+  //      lista escrita a mano: o pertenecés al pueblo (`people.people_id`), o
+  //      tenés la casa en su territorio (`home_place_id`). La vieja Ren vive
+  //      dentro de la Casa Quemada, que es de Los de la Ceniza, y por eso el
+  //      incendio lo cuenta como se cuenta ahí adentro; Odila vive en Vado Bajo
+  //      y lo cuenta como se cuenta en el vado. **Ninguna de las dos recibe la
+  //      versión de la otra**, así que no hay forma de que la resuelvan ni de
+  //      que digan "pero otros dicen que…": la contradicción la descubre el
+  //      jugador hablando con las dos, o no la descubre nadie.
+  //
+  //      Va con `home_place_id` y no con `place_id` a propósito: el tick mueve
+  //      a la gente, y con el lugar de hoy un aldeano que pasa por la ruina
+  //      heredaría por un día la versión de los que viven ahí.
+  //
+  //   2. **CUÁNDO VIENE AL CASO.** Como mucho UNA pieza por charla, y la
+  //      mayoría de las charlas ninguna. Dos puertas: que el jugador pregunte
+  //      por eso (palabras de la pieza en lo que escribió, pesando más las
+  //      raras), o que la pieza sea del sitio donde esta persona está o vive —y
+  //      ahí entra por la misma rotación que el resto de los temas, o sea una
+  //      de cada diez veces. Meter las siete en cada charla habría sumado ~1.100
+  //      tokens a un prompt que ya paga 4.500 por dos frases.
+  //
+  //   3. **QUÉ NO SE CUENTA.** `se_calla` no entra nunca como texto. Ni
+  //      siquiera cuando el jugador pregunta de frente: ahí lo que entra es la
+  //      orden de esquivar, y el resumen de la pieza **no se manda**. Es la
+  //      lección de `director.ts` aplicada acá — lo que no está en el prompt no
+  //      se puede decir— y además es la mejor parte: el silencio contesta más
+  //      que cualquier frase.
+  type Pieza = {
+    id: string; summary: string; place_id: string | null
+    detail: {
+      epoca?: string; hace_inviernos?: number
+      certeza?: 'sabido' | 'se_dice' | 'se_calla'
+      quien_lo_cuenta?: string; lugar?: string | null
+    } | null
+  }
+  const piezas = (pasado.data ?? []) as Pieza[]
+  const territorios = new Map<string, string>()
+  const nombresDePueblo: string[] = []
+  for (const p of (pueblos.data ?? []) as { name: string; place_id: string | null }[]) {
+    nombresDePueblo.push(p.name)
+    if (p.place_id) territorios.set(p.place_id, p.name)
+  }
+  // El pueblo del que es, o el pueblo en cuyo territorio tiene la casa. Si no
+  // hay ninguno, es de la parte humana del valle y le tocan las versiones de la
+  // aldea.
+  // La capa compartida del habla, que acá se usa además como pertenencia. Si la
+  // persona es de un pueblo, ese pueblo es su lado.
+  const pueblo = unPueblo(npc)
+  const miLado = pueblo?.name
+    ?? (npc.home_place_id ? territorios.get(npc.home_place_id) ?? null : null)
+
+  const certezaDe = (p: Pieza) => p.detail?.certeza ?? 'se_dice'
+  /** ¿Es de su lado? El que es de un pueblo cuenta lo de su pueblo y nada más;
+   *  el que no lo es cuenta todo lo que no sea de un pueblo. "nadie" no es de
+   *  nadie por definición: ésas no las cuenta ni el que las sabe. */
+  const suya = (p: Pieza): boolean => {
+    const quien = pelar(p.detail?.quien_lo_cuenta ?? '')
+    if (!quien || quien === 'nadie') return false
+    const dePueblo = nombresDePueblo.find((n) => quien.includes(pelar(n)))
+    return miLado ? dePueblo !== undefined && pelar(dePueblo) === pelar(miLado) : dePueblo === undefined
+  }
+
+  const mias = piezas.filter((p) => suya(p) && certezaDe(p) !== 'se_calla')
+  // Las calladas no son de nadie y por eso van aparte: no se cuentan, se
+  // esquivan. Y se esquivan las pregunte quien las pregunte.
+  const calladas = piezas.filter((p) => certezaDe(p) === 'se_calla')
+  const enJuego = [...mias, ...calladas]
+
+  // Las mismas palabras vacías se sacan de los dos lados. Del lado de la pieza
+  // hace falta porque su texto está escrito para ser contado —"la casa quedó
+  // vacía", "lo que pasó después"— y esas palabras enganchan con cualquier cosa
+  // que el NPC haya dicho antes.
+  const clavesDePieza = (p: Pieza) => new Set(claves(
+    `${p.summary} ${p.detail?.epoca ?? ''} ${p.detail?.lugar ?? ''} ${p.detail?.quien_lo_cuenta ?? ''}`)
+    .filter((w) => !PREGUNTONAS.has(w)))
+  // En cuántas piezas del valle aparece cada palabra. "recodo" está en cuatro
+  // de las seis y no dice de qué se habla; "prendió" está en una y sí.
+  //
+  // **Se cuenta sobre las SIETE piezas y no sobre las de esta persona**, y la
+  // diferencia no es cosmética: La vieja Ren sólo tiene dos piezas en juego, así
+  // que contando sobre las suyas *toda* palabra le salía rara —incluidas "casa"
+  // y "quemada", que están en cinco de las seis— y con eso el guardia de
+  // repetición de abajo la daba por contada apenas nombraba su propia casa. La
+  // rareza es una propiedad del corpus, no de quién habla.
+  const enCuantas = new Map<string, number>()
+  for (const p of piezas) for (const w of clavesDePieza(p)) enCuantas.set(w, (enCuantas.get(w) ?? 0) + 1)
+
+  const dichasTodas = hilo.map((t) => pelar(String(t.replied ?? '')))
+  /** Si dos de las palabras EXCLUSIVAS de la pieza ya aparecieron juntas en algo
+   *  que dijo, la pieza ya salió. Contar el pasado dos veces al mismo es de
+   *  máquina.
+   *
+   *  Exclusivas quiere decir de esa pieza y de ninguna otra (`=== 1`), y no
+   *  simplemente poco frecuentes. Con el umbral en dos piezas, la vieja Ren
+   *  —que vive en la ruina de la que habla su pieza— se auto-silenciaba: le
+   *  alcanzaba con quejarse del humo y nombrar la ceniza en dos turnos
+   *  distintos para que el sistema diera por contado el incendio. Las palabras
+   *  del sitio donde alguien vive no son prueba de que haya contado su
+   *  historia; "prendió" y "a propósito" sí. */
+  const yaSalio = (p: Pieza) => {
+    const suyas = [...clavesDePieza(p)].filter((w) => enCuantas.get(w) === 1)
+    return dichasTodas.some((d) => suyas.filter((w) => d.includes(w)).length >= 2)
+  }
+
+  const dichoClaves = new Set(claves(dicho_por_el_jugador).filter((w) => !PREGUNTONAS.has(w)))
+  const puntaje = (p: Pieza): number => {
+    let n = 0
+    const ks = clavesDePieza(p)
+    // **Sólo puntúan las palabras raras**, y esto se aprendió rompiéndolo. Con
+    // las comunes sumando de a uno, "¿qué pasó con la Casa Quemada?" le daba a
+    // una pieza callada un punto de más por "pasó" —que está en media base de
+    // datos— y la persona esquivaba una pregunta que podía contestar. Una
+    // palabra que aparece en tres de las cuatro piezas no dice de cuál se
+    // habla; sumarla es ruido con signo.
+    for (const w of dichoClaves) if (ks.has(w) && (enCuantas.get(w) ?? 9) <= 2) n += 2
+    // Nombrar el sitio entero —"la casa quemada"— es preguntar por el sitio,
+    // aunque ninguna palabra suelta sea rara.
+    const lugar = pelar(p.detail?.lugar ?? '')
+    if (lugar.length >= 4 && pelado.includes(lugar)) n += 2
+    return n
+  }
+  // Dos puntos de umbral: una palabra rara de la pieza, o el nombre del sitio.
+  // A igual puntaje gana la que se puede contar: el silencio es la respuesta
+  // correcta sólo cuando le preguntaron por eso y no por lo de al lado.
+  const preguntada = dicho_por_el_jugador && !solo_saludo
+    ? (enJuego.map((p) => ({ p, n: puntaje(p), calla: certezaDe(p) === 'se_calla' ? 1 : 0 }))
+        .filter((x) => x.n >= 2)
+        .sort((a, b) => b.n - a.n || a.calla - b.calla)[0]?.p ?? null)
+    : null
+
+  // La rotación de siempre, subida acá porque ahora también la usa el pasado.
+  const rota = cuantas.count ?? 0
+  // Lo viejo del sitio donde está o donde vive. Es lo que puede salir sin que
+  // nadie lo pida, y sólo cuando la rotación de temas lo elige.
+  const deAqui = mias.filter((p) =>
+    !!p.place_id && (p.place_id === npc.place_id || p.place_id === npc.home_place_id) && !yaSalio(p))
+  const ambiente = deAqui.length ? deAqui[rota % deAqui.length]! : null
+  const temaPasado = ambiente
+    ? `Lo viejo de ${ambiente.detail?.lugar ?? 'este sitio'}: lo que se cuenta de antes. Está abajo, en EL PASADO.`
+    : null
+
   const temas: string[] = []
   temas.push(`Lo que tienes entre manos ahora mismo: eres ${npc.trade}` +
     (donde ? ` y estás en ${donde.name}. ${donde.description}` : '.'))
@@ -631,6 +862,11 @@ export async function hablarCon(
   if (npc.teaches && v < 10) {
     temas.push(`Que todavía no sabes si ${playerName} vale la pena. Puedes decírselo a la cara.`)
   }
+  // El pasado entra como un tema más y no como una sección privilegiada. Es
+  // deliberado por dos motivos: uno de tono —lo viejo del sitio es exactamente
+  // del mismo rango que el frío o el oficio, no una revelación— y uno de plata:
+  // así sale una de cada diez charlas ociosas en vez de todas.
+  if (temaPasado) temas.push(temaPasado)
 
   // ── Cuándo sale el problema y cuándo no ────────────────────────────────
   //
@@ -662,7 +898,9 @@ export async function hablarCon(
   // ("curtir lo de esta semana" no deja ninguna palabra reconocible en "que se
   // vaya el humo"), y la puerta sola no ve las veces que lo sacó ella.
   const clavesArr = [...clavesMeta]
-  const dichas = hilo.map((t) => pelar(String(t.replied ?? '')))
+  // Es la misma lista que usa el pasado para saber si ya la contó; se calcula
+  // una vez arriba.
+  const dichas = dichasTodas
   const pedidos_previos = hilo.map((t, i) =>
     clavesArr.some((k) => dichas[i]!.includes(k)) ||
     (Boolean(t.said) && (OFRECE.test(pelar(String(t.said))) ||
@@ -687,9 +925,68 @@ export async function hablarCon(
   const sucesosFiltrados = modo === 'pedir' ? sucesosPropios
     : sucesosPropios.filter((s) => !clavesArr.some((k) => pelar(s).includes(k)))
 
-  const rota = cuantas.count ?? 0
   const pedido = (pedidos.find((p) => p.leSirveEste) ?? pedidos[rota % Math.max(pedidos.length, 1)])?.texto
   const tema = temas[rota % temas.length]!
+
+  // ── La pieza del pasado que sale hoy, si sale alguna ───────────────────
+  //
+  // Preguntar por algo gana sobre la rotación: si el jugador nombró la ruina,
+  // el tema es la ruina, le tocara o no. Si no preguntó nada, sólo sale cuando
+  // la rotación de temas eligió justo el del pasado.
+  const pieza = preguntada ?? (temaPasado && tema === temaPasado ? ambiente : null)
+  const dp = pieza?.detail ?? null
+  // "hace nueve inviernos, hace 9 inviernos" es lo que sale de pegar los dos
+  // campos sin mirar: el autor escribe `epoca` en palabras y `hace_inviernos`
+  // en número, y a veces dicen lo mismo. Si la época ya cuenta inviernos, el
+  // número sobra.
+  const cuando = [
+    dp?.epoca,
+    dp?.hace_inviernos && !pelar(dp.epoca ?? '').includes('invierno')
+      ? `hace ${dp.hace_inviernos} inviernos` : null,
+  ].filter(Boolean).join(', ')
+
+  // Cómo se dice cambia con `certeza`, y ésa es la mitad del rasgo. Un rumor
+  // dicho como hecho es tan falso como un hecho inventado: el mundo no afirma
+  // que la casa ardió por un rescoldo, afirma que en Vado Bajo eso es lo que se
+  // cuenta. Perder esa diferencia sería perder el pasado entero.
+  const comoSeCuenta = {
+    sabido:
+      'ESTO ES SABIDO. Aquí lo da por cierto todo el mundo, tú incluido, y así lo\n' +
+      '  dices: como un hecho, sin "dicen que" y sin ponerlo en duda.',
+    se_dice:
+      'ESTO ES LO QUE SE DICE, y no lo viste nadie que quede. Lo cuentas con esa\n' +
+      '  distancia —"dicen que", "así se cuenta", "eso contaba mi madre"— y nunca\n' +
+      '  como algo que sepas de primera mano.\n' +
+      '  Y es la ÚNICA versión que conoces. No sabes que haya otra: no digas que\n' +
+      '  algunos lo cuentan distinto, no la compares con nada y no la defiendas de\n' +
+      '  nada. Para ti eso es lo que pasó, y punto.',
+    se_calla: '',
+  }
+
+  const bloquePasado = !pieza ? null
+    // El resumen de una pieza callada NO entra al prompt. Es la lección cara de
+    // `director.ts`: todo lo que entra sale, por más que el sistema diga que
+    // no. Lo único que se manda es de qué le preguntaron y la orden de
+    // esquivarlo — y con eso alcanza, porque la pregunta del jugador ya está
+    // arriba y el modelo sabe perfectamente qué está esquivando.
+    : certezaDe(pieza) === 'se_calla'
+      ? `TE HAN PREGUNTADO POR ALGO QUE AQUÍ NO SE CUENTA${cuando ? `: ${cuando}` : ''}` +
+        `${dp?.lugar ? `, en ${dp.lugar}` : ''}.\n` +
+        '  De eso no hablas. Ni entero, ni a medias, ni "sólo esto y ya", ni dejando\n' +
+        '  entender el resto. Cambias de tema, contestas otra cosa, vuelves a lo tuyo, o\n' +
+        '  dices que de eso no hablas — y no explicas por qué no hablas.\n' +
+        '  Tampoco lo niegas con detalle ni aclaras qué parte te callas: negar con\n' +
+        '  detalle es contarlo.\n' +
+        '  Callarte es la respuesta correcta y es una respuesta entera. Esquívalo como lo\n' +
+        '  esquivarías tú, con tu manera de hablar, no como lo esquivaría cualquiera.'
+      : 'EL PASADO, LA PARTE QUE TE TOCA A TI (es viejo, es de antes, y es lo único\n' +
+        'viejo que puedes contar):\n' +
+        `  ${cuando}${dp?.lugar ? `, en ${dp.lugar}` : ''}. Lo cuentan ${dp?.quien_lo_cuenta ?? 'los de aquí'}.\n` +
+        `  ${pieza.summary.replace(/\s+/g, ' ').trim()}\n` +
+        `  ${comoSeCuenta[certezaDe(pieza)]}\n` +
+        '  Una o dos frases tuyas, lo que venga al caso, y nada más: no lo recites\n' +
+        '  entero ni lo cuentes como una historia. No le agregues ni un nombre, ni una\n' +
+        '  fecha, ni un motivo que no esté ahí escrito. Si no viene a cuento, no lo saques.'
 
   // Lo último que dijo, entero. Va acá arriba porque las tres ramas de abajo lo
   // usan para lo mismo: contestar dos veces seguidas la misma cosa es de
@@ -748,7 +1045,8 @@ export async function hablarCon(
   // humano, la que manda es la lengua del pueblo y no una procedencia
   // individual: un pueblo entero suena igual, y ésa es la gracia. Hoy ningún
   // NPC tiene `people_id`, así que en la práctica sale siempre `procedencia`.
-  const pueblo = unPueblo(npc)
+  // (`pueblo` se resuelve más arriba: el pasado lo necesita antes, porque es lo
+  // que decide de qué lado se cuenta cada cosa.)
   const deDonde = pueblo
     ? `Eres de ${pueblo.name}, y no hablas la lengua de este valle como los de aquí. Tu lengua: ${pueblo.lengua}`
     : npc.procedencia
@@ -821,6 +1119,11 @@ export async function hablarCon(
           ? `  ${playerName}: "${t.said}"\n  Tú: "${t.replied}"`
           : `  (${playerName} se acercó sin decir nada)\n  Tú: "${t.replied}"`)).join('\n')
       : `Es la primera vez que hablan.`,
+    // El pasado va pegado a `hoy` y no arriba entre el estado, por lo mismo que
+    // la procedencia va pegada a la voz: acá abajo es donde una instrucción se
+    // lee, y arriba es donde se diluye. La mayoría de los turnos esta línea es
+    // `null` y no cuesta nada.
+    bloquePasado,
     // `hoy` va último a propósito. Es la instrucción que decide el turno y la
     // que más se diluye si queda enterrada entre diez renglones de estado: acá
     // abajo es lo último que lee antes de la línea del jugador.
@@ -945,12 +1248,22 @@ export async function hablarCon(
       texto: (() => {
         const puede = saberesJug.filter((k) => !saberesNpc.includes(k))
         return puede.length === 1 ? `Enseñarle ${puede[0]}`
-          : puede.length > 1 ? `Enseñarle ${puede[0]} (sabés ${puede.length} que no sabe)`
+          // "sabés" era voseo en un texto que ve el jugador, y el mundo habla
+          // castellano llano. Se midió en las crónicas: la instrucción del
+          // prompt bajó el voseo de 7 de 11 a 1 de 9, y no tiene sentido
+          // pelearlo en el modelo mientras la interfaz lo escribe a mano.
+          : puede.length > 1 ? `Enseñarle ${puede[0]} (sabes ${puede.length} que no sabe)`
           : 'Enseñarle algo tuyo'
       })(),
       posible: saberesJug.some((s) => !saberesNpc.includes(s)),
       porque: !saberesJug.length ? 'todavía no sabes nada que enseñar'
         : 'ya sabe todo lo que sabes',
+      // La misma resta que arriba, pero entera: el texto nombra uno para que
+      // el botón diga algo, y esto le da al cliente los otros para que puedas
+      // elegir. Que el servidor elija por vos cuando NO elegiste está bien
+      // —prefiere el que le cierra la meta al otro, que es el mejor default—;
+      // que elija habiendo elegido vos, no.
+      elegir: saberesJug.filter((k) => !saberesNpc.includes(k)),
     },
     {
       verbo: 'encargarse',
