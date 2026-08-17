@@ -46,17 +46,27 @@ export function landing(): string {
 
     /* Los colores de las ilustraciones. Van acá y no adentro del SVG para que
        cambien con el tema como cualquier otra cosa de la página. */
-    --cielo-alto:    #6d7f8c;
-    --cielo-bajo:    #b39274;
-    --horizonte:     #d6a678;
-    --sombra1:       #55636a;
-    --sombra2:       #3b474d;
-    --sombra3:       #232c31;
-    --luna:          #f2efe6;
-    --noche-alto:    #10161f;
-    --noche-bajo:    #1c2530;
-    --planeta:       #8a7052;
-    --planeta-banda: #c4a97e;
+    /* Los cinco planos van de claro y azulado a oscuro y cálido: eso es la
+       perspectiva atmosférica, y es lo que hace que el paisaje tenga fondo. */
+    --cielo-alto:    #4a5f74;
+    --cielo-medio:   #8a8a91;
+    --cielo-bajo:    #c99a72;
+    --horizonte:     #e8bc8a;
+    --sol:           #ffd9a8;
+    --bruma:         #cbb49c;
+    --lejos1:        #7d8c9a;
+    --lejos2:        #63727f;
+    --lejos3:        #4a5762;
+    --lejos4:        #343f48;
+    --suelo:         #262f36;
+    --cerca:         #141a1f;
+    --luna:          #f4f1e8;
+    --noche-alto:    #0d1420;
+    --noche-bajo:    #17202c;
+    --noche-horiz:   #232d3a;
+    --noche-suelo:   #0a0f15;
+    --planeta:       #8d7354;
+    --planeta-banda: #c9ac7e;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -68,17 +78,25 @@ export function landing(): string {
       --linea:  #232c2e;
       --brasa:  #e8834a;
 
-      --cielo-alto:    #23303c;
-      --cielo-bajo:    #5c4636;
-      --horizonte:     #8a5c34;
-      --sombra1:       #1c262b;
-      --sombra2:       #141c21;
-      --sombra3:       #0b1114;
-      --luna:          #e9e6dc;
-      --noche-alto:    #070b11;
-      --noche-bajo:    #0e141c;
-      --planeta:       #7a6247;
-      --planeta-banda: #b0997a;
+      --cielo-alto:    #182534;
+      --cielo-medio:   #3d4550;
+      --cielo-bajo:    #7a5540;
+      --horizonte:     #a56a3c;
+      --sol:           #ffcb8f;
+      --bruma:         #5a5449;
+      --lejos1:        #33414f;
+      --lejos2:        #283440;
+      --lejos3:        #1e2831;
+      --lejos4:        #161e25;
+      --suelo:         #101820;
+      --cerca:         #070c11;
+      --luna:          #ece9df;
+      --noche-alto:    #05080e;
+      --noche-bajo:    #0b1119;
+      --noche-horiz:   #121a24;
+      --noche-suelo:   #04070a;
+      --planeta:       #7d6549;
+      --planeta-banda: #b39a74;
     }
   }
   * { box-sizing: border-box; }
