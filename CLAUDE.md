@@ -72,8 +72,19 @@ lib/web.ts                servidor: handler exportado, sirve local y en Vercel
 api/index.ts, api/tick.ts entradas de Vercel
 ```
 
-**Nueve verbos:** `ir`, `hablar`, `trabajar`, `aprender`, `ensenar`, `pelear`,
-`encargarse`, `buscar`, `dar`.
+**Quince verbos.** Este renglón decía "nueve" y llevaba días desactualizado —
+faltaban los de la magia y el de la cuajada, que ya estaban en producción:
+
+- **Del mundo, encolables por `/act`:** `ir`, `hablar`, `trabajar`, `aprender`,
+  `ensenar`, `pelear`, `encargarse`, `buscar`, `dar`, `soltar`, `levantar`,
+  `pedir`.
+- **Inmediatos, con ruta propia** (`preparar`, `lanzar`, `tomar`): no esperan al
+  tick porque un hechizo o una cuajada que tardan seis horas no son un hechizo
+  ni una cuajada. Están igual en el CHECK.
+
+**La lista viva es el CHECK de `actions.verb`**, y la última migración que lo
+tocó es la que manda. Un verbo que no está ahí falla en silencio (ver más
+abajo).
 
 Arrancó con cinco a propósito —si el bucle no funciona con cinco, no lo salva el
 sexto— y cada uno que entró después tuvo que ganarse el lugar:
@@ -84,6 +95,16 @@ sexto— y cada uno que entró después tuvo que ganarse el lugar:
   aprendías a forjar y después no podías hacer nada con eso. Cierran el bucle
   chico — **aprendés → fabricás o buscás → das → te ganás a la gente → te
   enseñan más.**
+- `soltar` y `levantar` porque **una cosa no podía estar en el suelo**:
+  `holder_kind` aceptaba `'place'` desde el primer día y nadie lo había escrito
+  nunca. Ahora una hoja tirada en la Casa Quemada sigue diciendo que la forjó
+  Ilde veinte días después de que Ilde no está, y **lo que llevaba encima un
+  muerto queda donde se murió** (`seMuere`, paso 5).
+- `pedir` porque **nadie te podía dar nada**: las únicas escrituras a
+  `holder_kind = 'player'` eran `trabajar` y `buscar`, o sea que un objeto sólo
+  llegaba a tu mano si lo hacías o lo juntabas vos. Cierra el bucle en la
+  dirección que faltaba, y **cuesta**: pedir baja el aprecio, así que no es un
+  botón de "dame" (medido: tres frascos seguidos y al cuarto te dicen que no).
 
 **La línea que no se cruza, y está en los datos y no en un comentario:**
 `objects.made_by = null` significa que nadie lo hizo, y lo único en todo el
@@ -91,6 +112,10 @@ código que puede escribir ese null es `case 'buscar'`. La raíz crece sola y la
 junta cualquiera; el frasco lo hace sólo quien sabe destilar. Si algún día un
 objeto fabricado aparece con `made_by` en null, se rompió la regla que sostiene
 el juego entero.
+
+**Y su corolario, que entró con el suelo:** cambiar de mano NO cambia de autor.
+`soltar`, `levantar`, `dar` y `pedir` no tocan `made_by` jamás. Quién lo dejó
+tirado es otro hecho y tiene su propia columna (`objects.left_by`).
 
 **Un verbo nuevo necesita una migración que toque el `CHECK` de `actions.verb`.**
 Ya nos mordió: el insert falla en silencio y la acción nunca existe.

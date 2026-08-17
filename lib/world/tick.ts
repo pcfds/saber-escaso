@@ -677,6 +677,21 @@ function loQueSale(kindDeLugar: string): string | null {
 export const UMBRAL_ENCARGO = 5
 export const UMBRAL_ENSENAR = 35
 
+/** A partir de acá te tienen miedo, y el miedo hace cosas.
+ *
+ * El vínculo es de **dos ejes y no una barra** (DISENO §9.3) justamente para
+ * poder expresar "no te valoran y te temen": *te sonríen de frente y conspiran
+ * atrás*. Este número es dónde empieza ese cuadrante.
+ *
+ * Hoy lo miran dos cosas: la ficha del jugador —`vos.gente[].teme`, que es cómo
+ * el juego te dice que alguien te tiene miedo sin mostrarte un número— y
+ * `case 'pedir'`, donde alguien que te teme te entrega lo que tiene en la mano
+ * aunque no te aprecie. Estaba escrito como un 25 pelado en `web.ts`; un umbral
+ * que abre comportamiento vive donde viven los otros dos o se despega el día
+ * que alguien mueva uno.
+ */
+export const UMBRAL_MIEDO = 25
+
 /** Cómo te ve alguien, dicho como se dice en el valle.
  *
  * **Nunca un número, nunca un porcentaje.** Un jugador tiene que poder saber
@@ -1404,7 +1419,7 @@ export async function step() {
       // línea que ya mató a una NPC viva una vez. La meta va en `detail`, que
       // es dato y no prosa.
       await seMuere({
-        tick: nextTick, muerto: m, people, players, ev,
+        tick: nextTick, muerto: m, donde: donde.id, people, players, ev,
         evento: {
           kind: 'no_volvio', place_id: donde.id,
           summary: `${m.name} fue a ${donde.name} a buscar ${falta} y no volvió.`
@@ -2211,7 +2226,7 @@ export async function step() {
       // es lo único que cambia**: si `perdida_de_saber` se escribiera dos
       // veces, el evento del que cuelga la tesis del juego tendría dos dueños.
       await seMuere({
-        tick: nextTick, muerto, people, players, ev,
+        tick: nextTick, muerto, donde: muerto.place_id, people, players, ev,
         evento: {
           kind: 'muerte', place_id: muerto.place_id,
           summary: `Murió ${muerto.name}, ${muerto.trade}, en ${placeName(muerto.place_id)}.`,
@@ -3022,6 +3037,10 @@ async function elQueSeVa(
 async function seMuere(args: {
   tick: number
   muerto: { id: string; name: string }
+  /** Dónde se murió. Es lo que decide adónde cae lo que llevaba encima: ver el
+   *  paso 5. Sin esto, las cosas de un muerto se quedan colgadas de una fila
+   *  con `alive = false` y no las puede levantar nadie nunca. */
+  donde: string | null
   /** La lista viva del tick. **Se modifica**: ver el paso 1. */
   people: { id: string }[]
   players: { id: string }[]
@@ -3059,6 +3078,32 @@ async function seMuere(args: {
   await db.from('agendas')
     .update({ state: 'abandonada', ended_tick: tick })
     .eq('person_id', muerto.id).eq('state', 'activa')
+
+  // 5. **Lo que llevaba encima queda donde se murió.**
+  //
+  //    Hasta hoy no había adónde: `objects` sólo sabía de manos, así que las
+  //    cosas de un muerto quedaban colgadas de una fila con `alive = false`,
+  //    invisibles y sin poder cambiar de dueño nunca más. Ahora hay suelo.
+  //
+  //    Y es el caso que le da sentido a todo esto: **la hoja que forjó Ilde,
+  //    tirada en la Casa Quemada, sigue diciendo Ilde el día que Ilde no está.**
+  //    Eso es la tesis del juego convertida en un objeto que se puede levantar,
+  //    y `DISENO.md` §10.4 ya lo tenía escrito sin saberlo: *"las mazmorras acá
+  //    son donde quedó el saber de un muerto"*. El saber se pierde; las cosas,
+  //    no — y son lo único que queda.
+  //
+  //    ⚠ `made_by` no se toca. `left_by` lleva el nombre del muerto, que es
+  //      otro hecho: de quién eran cuando se murió.
+  //
+  //    Sin evento propio. La muerte ya se contó arriba y `perdida_de_saber`
+  //    también; un tercer renglón por cada cosa que llevaba en los bolsillos
+  //    sería el director cobrando por leer un inventario.
+  if (args.donde) {
+    await db.from('objects').update({
+      holder_kind: 'place', holder_id: args.donde,
+      left_by: muerto.name, left_tick: tick,
+    }).eq('holder_kind', 'person').eq('holder_id', muerto.id)
+  }
 }
 
 /**
@@ -4521,6 +4566,374 @@ async function resolveAction(
         `${player.name} le trajo ${regalo.kind} a ${quien.name} cuando lo necesitaba`, tick)
       await tocarVinculo(quien, player, { valued: 25 + bonus }, ev)
       return `le cumplió a ${quien.name}: ${cumple.goal}`
+    }
+
+    // ── soltar ────────────────────────────────────────────────
+    //
+    // Una cosa puede estar en el suelo de un lugar, y hasta hoy no podía: la
+    // tabla aceptaba `holder_kind = 'place'` desde el primer día y **nadie lo
+    // había escrito nunca**. O sea que un objeto estaba en la mano de alguien o
+    // no existía en ninguna parte.
+    //
+    // **No emite evento, y es a propósito.** Todo lo que entra a `events` lo
+    // lee el director y cuesta plata; que alguien se sacara algo de encima no
+    // es noticia para nadie más que para él. La noticia es la otra punta —que
+    // otro lo encuentre— y esa sí se cuenta (ver `case 'levantar'`). Lo que
+    // pasa igual es el ESTADO: la cosa queda en la base, en el suelo de ese
+    // lugar, y la ve todo el mundo. Un objeto tirado que sólo viviera en el
+    // cliente sería dos jugadores mirando dos suelos distintos.
+    //
+    // ⚠ `made_by` NO SE TOCA. Una cosa que cambia de mano sigue diciendo quién
+    //   la hizo, y eso es exactamente lo que la vuelve interesante: la hoja que
+    //   forjó Ilde sigue diciendo Ilde tirada en la Casa Quemada el día que
+    //   Ilde no esté. Lo único que se escribe acá es `left_by`, que es otro
+    //   hecho — quién la abandonó, no quién la hizo.
+    case 'soltar': {
+      const lugar = places.find((p) => p.id === player.place_id)
+      if (!lugar) return 'no está en ningún lado'
+
+      const mios = (await db
+        .from('objects').select('id, kind, quality, made_by')
+        .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
+      if (mios.length === 0) return 'no lleva nada encima'
+
+      const queStr = action.target?.trim().toLowerCase()
+      const cands = queStr ? mios.filter((o) => norm(o.kind).includes(queStr)) : mios
+      if (cands.length === 0) return `no lleva ningún "${action.target}" encima`
+
+      // **El PEOR de los que tenga**, al revés que `dar`. Es la misma regla
+      // leída del otro lado: allá se explica que dar por descarte lo mejor que
+      // llevás encima es la clase de ayuda que te deja sin la espada, y acá
+      // vale igual — soltar por descarte lo mejor te deja sin la espada sin que
+      // nadie salga ganando. El cliente igual manda siempre cuál.
+      const cosa = cands.sort((a, b) => a.quality - b.quality)[0]!
+
+      await db.from('objects').update({
+        holder_kind: 'place', holder_id: lugar.id,
+        left_by: player.name, left_tick: tick,
+      }).eq('id', cosa.id)
+
+      return `dejó ${cosa.kind} en ${lugar.name}`
+    }
+
+    // ── levantar ──────────────────────────────────────────────
+    //
+    // La otra punta, y la que sí es noticia. `levantar` y no `tomar` porque
+    // `tomar` ya existe y es tomarse un cuenco de cuajada: dos verbos con el
+    // mismo nombre es cómo se llega a que el jugador se coma lo que quería
+    // levantar.
+    //
+    // **Acá no se pide saber nada**, igual que `buscar`: agacharse lo hace
+    // cualquiera. La diferencia con `buscar` es de dónde sale la cosa —`buscar`
+    // la saca del lugar y es la ÚNICA puerta por la que entra al mundo algo sin
+    // autor; `levantar` no crea nada, sólo cambia de mano algo que ya existía.
+    //
+    // El evento sale **sólo cuando la dejó otro**. Levantar lo que vos mismo
+    // dejaste hace dos minutos no le pasó a nadie, y contarlo sería una fábrica
+    // de ruido con la firma del jugador: soltar-levantar-soltar es un botón que
+    // el director cobraría por leer. Cuando la dejó otro —o cuando se le cayó a
+    // un muerto— es exactamente la historia que este juego quiere contar.
+    case 'levantar': {
+      const lugar = places.find((p) => p.id === player.place_id)
+      if (!lugar) return 'no está en ningún lado'
+
+      const suelo = (await db
+        .from('objects').select('id, kind, quality, made_by, left_by, left_tick')
+        .eq('region_id', regionId)
+        .eq('holder_kind', 'place').eq('holder_id', lugar.id)).data ?? []
+      if (suelo.length === 0) return `no hay nada tirado en ${lugar.name}`
+
+      const queStr = action.target?.trim().toLowerCase()
+      const cands = queStr ? suelo.filter((o) => norm(o.kind).includes(queStr)) : suelo
+      if (cands.length === 0) return `no hay ningún "${action.target}" tirado en ${lugar.name}`
+
+      // El mejor de los que haya, igual que `dar` y que `tomar`.
+      const cosa = cands.sort((a, b) => b.quality - a.quality)[0]!
+      const quienLaDejo = cosa.left_by
+
+      // ⚠ `made_by` intacto. `left_by` y `left_tick` se limpian porque
+      //   describen el estar tirado: dejarlos puestos haría que la bolsa dijera
+      //   "la dejó Bruno" de algo que tenés en la mano.
+      await db.from('objects').update({
+        holder_kind: 'player', holder_id: player.id,
+        left_by: null, left_tick: null,
+      }).eq('id', cosa.id)
+
+      if (!quienLaDejo || quienLaDejo === player.name) {
+        return `levantó ${cosa.kind} en ${lugar.name}`
+      }
+
+      // El MISMO `kind` que `buscar`, y a propósito: para el mundo el hecho es
+      // que salió de ahí con algo. Lo que cambia es de dónde salió, y eso va en
+      // `detail`, que es la verdad canónica.
+      // La autoría sólo cuando AGREGA algo. Si el que la hizo es el mismo que
+      // la dejó tirada, la frase ya lo dijo, y «que había dejado ahí Prueba3D.
+      // La había hecho Prueba3D» es el mismo nombre dos veces en un renglón que
+      // el director paga por leer. Cuando son distintos es la mitad de la
+      // noticia: la hoja la forjó Ilde y la abandonó Bruno.
+      const autoria = cosa.made_by
+        && cosa.made_by !== player.name && cosa.made_by !== quienLaDejo
+        ? ` La había hecho ${cosa.made_by}.` : ''
+      const dias = cosa.left_tick != null ? tick - cosa.left_tick : null
+      ev({ kind: 'hallazgo', place_id: lugar.id,
+        summary: `${player.name} levantó del suelo de ${lugar.name} ${cosa.kind}`
+          + ` que había dejado ahí ${quienLaDejo}`
+          + (dias != null && dias >= 2 ? `, hace ${dias} días` : '')
+          + `.${autoria}`,
+        detail: {
+          player: player.name, place: lugar.name, object: cosa.kind,
+          quality: cosa.quality, made_by: cosa.made_by ?? null,
+          dejado_por: quienLaDejo, dias,
+        } })
+      return `levantó ${cosa.kind} en ${lugar.name}`
+        + (cosa.made_by ? ` — la hizo ${cosa.made_by}` : '')
+    }
+
+    // ── pedir ─────────────────────────────────────────────────
+    //
+    // **El agujero más grande que le quedaba a la economía: nadie te podía dar
+    // nada.** Las únicas dos escrituras a `holder_kind = 'player'` en todo el
+    // código eran `case 'trabajar'` y `case 'buscar'` — o lo hiciste vos o lo
+    // juntaste vos. `dar` iba en una sola dirección.
+    //
+    // Y eso rompía una promesa explícita de `DISENO.md` §10.2: *"el frasco es
+    // la única forma de exceder tu capacidad, y lo fabrica otro — eso le da al
+    // que destila poder real sobre el que pelea sin que nadie farmee nada"*. No
+    // era cierto en ninguna dirección: el frasco de raíz es lo único que te
+    // cuelga una cuarta runa y no había forma de conseguir uno si no sabías
+    // destilar.
+    //
+    // ── Por qué es un verbo y no un botón colgado de los encargos ─────
+    //
+    // Se consideró colgarlo de `encargarse`, que ya existe, y está mal: un
+    // encargo es *vos te hacés cargo de lo que persigue el otro*, o sea la
+    // dirección contraria. Meter "y de paso dame algo" ahí adentro convertiría
+    // el verbo más generoso del juego en una máquina expendedora con dos pasos.
+    //
+    // ── Lo que cuesta, que es la parte que importa ────────────────────
+    //
+    // **El favor se gasta.** Pedir baja el aprecio, y el que baja es el mismo
+    // número que abre los verbos: pedís, te lo dan, y volvés a estar donde
+    // estabas antes de ganártelo. No es que te quiera menos — es que el favor
+    // que te tenía guardado ya te lo dio. Sin eso esto sería un botón de "dame"
+    // y la escasez del valle se compraría tecleando.
+    //
+    // Y tiene **dos escalones, no uno**, porque son dos favores de tamaños muy
+    // distintos:
+    //
+    //   · `UMBRAL_ENCARGO` — darte algo que YA TIENE en la mano. Es el favor
+    //     barato, el mismo que se piden entre ellos en la pasada 2.
+    //   · `UMBRAL_ENSENAR` — que te lo HAGA con sus manos. Le cuesta el día y
+    //     la mano, que es exactamente lo que cuesta enseñar, y por eso está en
+    //     el mismo escalón. Ahí aparece la simetría que hace bueno al sistema:
+    //     cuando alguien te tiene esa confianza podés pedirle **el oficio o la
+    //     cosa**, y son dos caminos distintos con el mismo precio social. El que
+    //     quiere el frasco lo pide; el que quiere no depender de nadie aprende
+    //     a destilar.
+    //
+    // **Y el miedo también sirve, que es para lo que están los dos ejes.**
+    // DISENO §9.3: *"no te valoran, te temen → te sonríen de frente y conspiran
+    // atrás"*. Alguien que te teme te entrega lo que tiene en la mano aunque no
+    // te aprecie — pero no se pone a trabajar el día entero para vos, y le
+    // cuesta más aprecio del que ya te tenía. Eso queda escrito en su memoria
+    // con esas palabras, y la memoria viaja: el valle se entera.
+    //
+    // ⚠ La regla de la escasez, intacta en las dos ramas. Lo que te dan de la
+    //   mano **no cambia de autor**; lo que te hacen sale con el nombre de quien
+    //   lo hizo, porque lo hizo. Nada aparece de la nada y nada sale con
+    //   `made_by` en null: eso lo escribe `case 'buscar'` y nadie más.
+    //
+    // ── Dónde entra la plata, cuando entre ────────────────────────────
+    //
+    // Va a haber moneda (`DISENO.md` §9.3b), y este caso es el molde: **son dos
+    // economías en paralelo que nunca se cruzan.** Un `comprar` es este mismo
+    // verbo con otra moneda — se paga para que alguien te HAGA algo, jamás para
+    // que te lo ENSEÑE.
+    //
+    // La costura está lista y hay tres cosas escritas para que se note:
+    //
+    //   1. **Este caso no escribe una sola fila nueva en `knows`, y no puede.**
+    //      Lo único que toca de `knows` es el `destreza`/`veces` de una fila que
+    //      ya era del NPC: practicó él, con sus manos. Ésa es literalmente la
+    //      regla dura del mercado —ninguna transacción termina en un `knows`
+    //      nuevo— y ya vale acá. Si alguien agrega un `insert` a `knows` en este
+    //      case, rompió el juego.
+    //   2. **El costo ya está separado del efecto.** Lo que cambia de mano es un
+    //      `update` de `objects`; lo que se paga es otra línea (hoy `valued`).
+    //      Poner un precio es cambiar esa segunda línea, no reescribir el verbo.
+    //      Y el favor no se reemplaza por la plata: *un favor y un pago no son
+    //      lo mismo, y quién te pide cuál dice quién sos para esa persona*.
+    //   3. **Ya hay dónde poner el mostrador.** `holder_kind = 'place'` es el
+    //      suelo de un lugar, y el stock de un puesto es exactamente eso: cosas
+    //      que están en un sitio y no en la mano de nadie.
+    //
+    // Lo que NO está y hace falta: la moneda misma (tabla de bolsas, con TIPO —
+    // lo que acepta la aldea no tiene por qué valer del otro lado del valle), un
+    // precio, y los verbos `comprar`/`vender`. Eso es una pasada propia.
+    case 'pedir': {
+      // "<cosa> a <alguien>", o sólo "<alguien>". Se parte por el ÚLTIMO " a "
+      // igual que `dar` y `ensenar`, y por lo mismo: el nombre de una cosa
+      // puede tener uno adentro y el de una persona no.
+      const bruto = action.target ?? ''
+      const corte = bruto.toLowerCase().lastIndexOf(' a ')
+      const queStr = corte > 0 ? bruto.slice(0, corte).trim() : null
+      const quienStr = norm((corte > 0 ? bruto.slice(corte + 3) : bruto).trim())
+      if (!quienStr) return 'uso: pedir <cosa> a <persona>'
+
+      const quien = people.find((p) => norm(p.name).includes(quienStr) && aca(p))
+      if (!quien) return `no hay ningún ${quienStr} acá`
+
+      const { data: vinculo } = await db
+        .from('bonds').select('valued, feared')
+        .eq('person_id', quien.id).eq('toward_id', player.id).limit(1).maybeSingle()
+      const v = vinculo?.valued ?? 0
+      const miedo = vinculo?.feared ?? 0
+
+      // Nadie regala lo que él mismo anda buscando. Es la misma regla que la
+      // pasada 2 aplica entre NPCs, y sin ella Odila te entrega el frasco que
+      // necesita para pagar su propia deuda.
+      const suyas = (await db
+        .from('agendas').select('needs_kind, needs_object')
+        .eq('person_id', quien.id).in('state', ['activa', 'bloqueada'])).data ?? []
+      const loNecesita = (kind: string) => suyas.some(
+        (a) => a.needs_kind === 'object' && a.needs_object === kind)
+
+      const enSuMano = (await db
+        .from('objects').select('id, kind, quality, made_by')
+        .eq('region_id', regionId)
+        .eq('holder_kind', 'person').eq('holder_id', quien.id)).data ?? []
+      const puedeDar = enSuMano
+        .filter((o) => !loNecesita(o.kind))
+        .filter((o) => !queStr || norm(o.kind).includes(norm(queStr)))
+      // El mejor que tenga: un favor es un favor. Y de paso la calidad pesa en
+      // lo que cuesta pedirlo, más abajo.
+      const deLaMano = puedeDar.sort((a, b) => b.quality - a.quality)[0]
+
+      if (deLaMano) {
+        const bonus = Math.floor(deLaMano.quality / 25)   // 0..4
+        const porMiedo = v < UMBRAL_ENCARGO && miedo >= UMBRAL_MIEDO
+        if (v < UMBRAL_ENCARGO && !porMiedo) {
+          // Sin evento. La negativa de `aprender` sí lo emite porque ahí el
+          // "no" es raro —vas a pedir el oficio cuando creés que estás listo—
+          // y acá sería el caso común de todos los que llegan: una planilla con
+          // la firma del rechazo, y la lee el director y se paga.
+          return `${quien.name} ${comoTeVe(v)}: no le va a dar nada suyo a ${player.name} todavía`
+        }
+
+        // ⚠ Cambia de mano, no de autor.
+        await db.from('objects').update({
+          holder_kind: 'player', holder_id: player.id,
+          left_by: null, left_tick: null,
+        }).eq('id', deLaMano.id)
+
+        const autoria = deLaMano.made_by && deLaMano.made_by !== quien.name
+          ? ` La había hecho ${deLaMano.made_by}.` : ''
+        ev({ kind: 'entrega', place_id: quien.place_id,
+          summary: porMiedo
+            ? `${player.name} le pidió ${deLaMano.kind} a ${quien.name}, y ${quien.name} se lo dio sin discutir.${autoria}`
+            : `${quien.name} le dio ${deLaMano.kind} a ${player.name} porque se lo pidió.${autoria}`,
+          detail: {
+            person: quien.name, player: player.name, object: deLaMano.kind,
+            quality: deLaMano.quality, made_by: deLaMano.made_by ?? null,
+            hecho_ahora: false, por_miedo: porMiedo,
+          } })
+        await recordar(quien.id, player, porMiedo
+          ? `${player.name} le sacó ${deLaMano.kind} a ${quien.name} sin que pudiera negarse`
+          : `${player.name} le pidió ${deLaMano.kind} a ${quien.name} y se lo llevó`, tick)
+        // El favor se gasta. Con miedo se gasta más y encima no compra nada:
+        // el que te teme te da la cosa y te quiere peor que antes.
+        await tocarVinculo(quien, player,
+          porMiedo ? { valued: -6 - bonus } : { valued: -(4 + bonus) }, ev)
+        // «sin discutir» es lo único que el jugador ve de la rama del miedo, y
+        // alcanza: nadie le agradece a alguien que le tiene terror.
+        return porMiedo
+          ? `${quien.name} le dio ${deLaMano.kind} sin discutir`
+          : `${quien.name} le dio ${deLaMano.kind}`
+      }
+
+      // ── Que te lo haga ─────────────────────────────────────
+      //
+      // El favor caro. Requiere las tres cosas que exige fabricar cualquier
+      // cosa en este juego, y ninguna se saltea: que lo SEPA, que esté en el
+      // LUGAR donde eso se hace, y que esté DESPIERTO. **`makes_at` no se
+      // saltea nunca** — una hoja se forja en la fragua y en ningún otro lado,
+      // la pida quien la pida, igual que en `case 'trabajar'`.
+      const lugar = places.find((p) => p.id === player.place_id)
+      const saberes = (await db
+        .from('knows')
+        .select('id, destreza, veces, knowledge:knowledge_id (name, makes, makes_at)')
+        .eq('holder_kind', 'person').eq('holder_id', quien.id)).data ?? []
+      const recetas = saberes.filter((k) => {
+        const c = (k as unknown as { knowledge: Receta | null }).knowledge
+        if (!c?.makes) return false
+        // ⚠ Acá NO vale «nadie regala lo que anda buscando», y es la misma
+        //   excepción que ya hace la pasada 2 entre NPCs: **el que sabe
+        //   destilar puede destilar dos.** Sin esto, Odila —que casi siempre
+        //   tiene una meta abierta con frascos— sería justamente la única
+        //   persona del valle a la que no se le puede pedir un frasco, que es
+        //   al revés de lo que dice la ficción. La regla sí vale para lo que
+        //   tiene en la mano, arriba: eso es uno solo y es suyo.
+        if (!queStr) return true
+        return c.makes.toLowerCase().includes(queStr.toLowerCase())
+          || c.name.toLowerCase().includes(queStr.toLowerCase())
+      })
+      if (recetas.length === 0) {
+        return queStr
+          ? `${quien.name} no tiene ningún "${queStr}" ni sabe hacerlo`
+          : `${quien.name} no tiene nada que darle`
+      }
+      // El que se puede hacer ACÁ. Si sabe hacerlo pero estamos en otro lado,
+      // se lo decimos con el nombre del lugar: un "no" que no dice por qué es
+      // lo mismo que un botón roto.
+      const aquí = recetas.filter((k) => {
+        const c = (k as unknown as { knowledge: Receta }).knowledge
+        return c.makes_at === lugar?.kind
+      })
+      if (aquí.length === 0) {
+        const c = (recetas[0] as unknown as { knowledge: Receta }).knowledge
+        const donde = places.find((p) => p.kind === c.makes_at)
+        return `${quien.name} sabe hacer ${c.makes}, pero eso se hace en ${donde?.name ?? c.makes_at}`
+      }
+      if (duerme(quien)) return `${quien.name} está durmiendo`
+      if (v < UMBRAL_ENSENAR) {
+        // Acá sí se dice en qué escalón está, por el mismo motivo que en
+        // `aprender`: es el mismo escalón, y saber que falta es lo que hace que
+        // ganárselo no sea superstición. Sin evento igual.
+        return `${quien.name} ${comoTeVe(v)}, pero no lo suficiente como para ponerse a trabajar para ${player.name}`
+      }
+
+      const elegido = aquí[0]!
+      const receta = (elegido as unknown as { knowledge: Receta }).knowledge
+
+      // Le costó el día y le queda la mano: practicó, así que mejora. Es la
+      // misma curva de siempre y la misma calidad — la destreza es de quien la
+      // practicó y no se presta.
+      const antes: number = elegido.destreza
+      const ahora = Math.min(100, antes + mejora(antes))
+      await db.from('knows')
+        .update({ destreza: ahora, veces: elegido.veces + 1 }).eq('id', elegido.id)
+
+      const q = calidad(antes)
+      // ⚠ `made_by` con SU nombre, porque lo hizo con sus manos. Nunca null:
+      //   lo único que escribe un null es `case 'buscar'`.
+      await db.from('objects').insert({
+        region_id: regionId, kind: receta.makes, quality: q,
+        made_by: quien.name, made_tick: tick,
+        holder_kind: 'player', holder_id: player.id,
+      })
+
+      ev({ kind: 'entrega', place_id: quien.place_id,
+        summary: `${player.name} le pidió ${receta.makes} a ${quien.name}, y ${quien.name} se puso a hacerlo`
+          + ` en ${lugar?.name ?? 'el valle'} para dárselo.`,
+        detail: {
+          person: quien.name, player: player.name, object: receta.makes,
+          quality: q, made_by: quien.name, hecho_ahora: true, por_miedo: false,
+        } })
+      await recordar(quien.id, player,
+        `${quien.name} le hizo ${receta.makes} a ${player.name} porque se lo pidió`, tick)
+      const bonusHecho = Math.floor(q / 25)
+      await tocarVinculo(quien, player, { valued: -(10 + bonusHecho) }, ev)
+      return `${quien.name} le hizo ${receta.makes}`
     }
 
     // ── tomar ─────────────────────────────────────────────────

@@ -970,18 +970,56 @@ una celda, "políticas" arrastra facciones. **Si se importan esos sistemas, este
 juego se convierte en un MMO genérico con un motor raro adentro.** Lo que sigue
 es lo que encaja.
 
-**1. La economía existe y no tiene plata, a propósito.** Este valle no tiene
-monedas ni precios, y por eso mismo la rama de arte se negó a poner puestos de
-mercado: *"un puesto miente sobre lo que el mundo tiene"*. Lo que hay en su
-lugar ya está construido y es más interesante: **deuda y obligación**. Te
-encargás de algo y no volvés, y te lo cobran. Alguien se mete a defenderte y
-ahora tiene algo tuyo que cobrar. Le regalás algo a quien lo necesitaba y te
-gana la voluntad. **La moneda de este valle es que la gente se acuerda.**
+**1. Hay DOS economías y no se tocan. Ésa es la idea entera.**
 
-Lo que le falta a esa economía no es dinero: es **que pueda ir en las dos
-direcciones**. Hoy `dar` es sólo jugador → NPC, así que nadie te puede dar
-nada. Un economía donde sólo se puede regalar y nunca recibir es media
-economía.
+Este documento decía que el valle no tenía plata a propósito. **Era una lectura
+mía y la dirección la corrigió:**
+
+> *"No, debe haber economía: vender, poder tener plata de distintos tipos,
+> intercambios. El saber es algo más valioso pero nada que ver."*
+
+Y tiene razón, además de que su versión es mejor. Una economía de plata no
+diluye la tesis del saber escaso: **la afila**, porque pone al lado una cosa
+que sí se puede comprar. Sin mercado, "el saber es lo único que importa" es una
+afirmación sin nada contra qué contrastarse. Con mercado, es una experiencia:
+
+> Podés comprar una hoja templada. **No podés comprar saber hacerla.**
+
+Ese renglón es el juego. El día que se te muera Ilde, vas a tener plata en la
+mano y no va a haber una sola hoja nueva en el valle para comprar, ni al doble,
+ni al triple. **El mercado es lo que hace que la escasez se sienta**, porque un
+mercado sabe decir "no hay" de una manera que un menú no.
+
+Entonces son dos ejes que corren en paralelo y nunca se cruzan:
+
+| | se compra | se hereda | se pierde |
+|---|---|---|---|
+| **las cosas** | sí | sí, cambian de mano | se rompen, se gastan |
+| **el saber** | **nunca** | sólo enseñándolo, cara a cara | con el que se muere |
+
+**La regla dura que sale de acá: no existe ninguna transacción que termine con
+una fila nueva en `knows`.** Ni comprar, ni vender, ni pagar por una lección.
+Se puede pagar para que alguien te haga algo; no se puede pagar para que te lo
+enseñe. Si alguna vez hay un precio para aprender, este juego dejó de ser el
+que es.
+
+**Plata de distintos tipos**, que fue el pedido y no es un detalle: en el valle
+hay dos pueblos que no son humanos, con lengua propia y un agravio concreto. Lo
+que acepta la aldea no tiene por qué ser lo que acepta la Ceniza. Una moneda
+que no sirve del otro lado del valle es geografía, es política y es una razón
+para viajar — las tres cosas de una.
+
+**Y lo que ya está construido no se tira, se suma.** La otra economía que este
+valle siempre tuvo es la de **deuda y obligación**: te encargás de algo y no
+volvés y te lo cobran; alguien se mete a defenderte y ahora tiene algo tuyo que
+cobrar. **La gente se acuerda**, y eso sigue valiendo al lado de la plata. Un
+favor y un pago no son lo mismo, y quién te pide cuál dice quién sos para esa
+persona.
+
+Lo que le falta a todo esto para existir es lo mismo que le falta a lo demás:
+hoy `dar` es sólo jugador → NPC, así que **nadie te puede dar ni vender nada**.
+Una economía donde sólo se puede entregar y nunca recibir es media economía, y
+es lo primero que hay que cerrar.
 
 **2. Los oficios existen y son la mitad del juego.** `people.trade` decide qué
 sabe cada uno, qué persigue, a qué hora trabaja, cómo va vestido y qué hay

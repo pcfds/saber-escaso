@@ -20,7 +20,10 @@ import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta, loQueLleva, RUNAS }
 // decía "ya confía en vos, pedile que te enseñe" con 10 de aprecio, cuando el
 // umbral real había pasado a 35. O sea, el juego mandaba a hacer algo que iba
 // a fallar. Un tutorial que miente es peor que ninguno.
-import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe, rutinaDe, tomar, CUAJADA } from './world/tick.js'
+import {
+  UMBRAL_ENCARGO, UMBRAL_ENSENAR, UMBRAL_MIEDO,
+  comoTeVe, rutinaDe, tomar, CUAJADA,
+} from './world/tick.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -469,7 +472,7 @@ export async function handler(
           .then(() => undefined)
 
         const [places, people, amenazas, objetos, saberes, vinculos, otros,
-               marcas, colgadas, hechosMios] = await Promise.all([
+               marcas, colgadas, hechosMios, suelo] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -503,6 +506,26 @@ export async function handler(
           db.from('events').select('kind, detail')
             .eq('region_id', region.id).gte('tick', 0)
             .in('kind', ['ensenanza', 'amenaza_muerta', 'regalo', 'caida', 'fabricacion']),
+          // **Lo que hay tirado en el suelo del valle.** Es estado del mundo y
+          // por eso viaja acá y no en la máquina de nadie: si viviera en el
+          // cliente, dos jugadores verían dos suelos distintos y lo que uno
+          // dejó no existiría para el otro.
+          //
+          // Va ADENTRO de esta tanda, como dice el comentario de arriba: es la
+          // ruta que el cliente pega cada pocos segundos y un round-trip suelto
+          // se paga en cada uno de esos pedidos.
+          //
+          // El corte de 150 no es prolijidad: **PostgREST corta toda respuesta
+          // en 1.000 filas y no lo dice**, así que el límite lo ponemos
+          // nosotros con un orden que sabemos —lo más reciente primero— en vez
+          // de comernos un corte arbitrario el día que el valle sea un
+          // basurero. Un lugar con más de 150 cosas tiradas no es un problema
+          // de esta consulta.
+          db.from('objects')
+            .select('id, kind, quality, made_by, left_by, left_tick, holder_id')
+            .eq('region_id', region.id).eq('holder_kind', 'place')
+            .order('left_tick', { ascending: false, nullsFirst: false })
+            .limit(150),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -590,7 +613,10 @@ export async function handler(
             gente: (people.data ?? []).map((q) => ({
               nombre: q.name, trade: q.trade,
               comoTeVe: comoTeVe(vinculos.data?.find((v) => v.person_id === q.id)?.valued ?? 0),
-              teme: (vinculos.data?.find((v) => v.person_id === q.id)?.feared ?? 0) >= 25,
+              // El umbral se importa, no se copia: es el mismo que decide, en
+              // `case 'pedir'`, si alguien te entrega lo suyo porque te tiene
+              // miedo. Estaba escrito acá como un 25 pelado.
+              teme: (vinculos.data?.find((v) => v.person_id === q.id)?.feared ?? 0) >= UMBRAL_MIEDO,
             })),
           },
           // Las cicatrices que dejó la magia. Duran días, las ve todo el
@@ -626,6 +652,12 @@ export async function handler(
             // que ya hace `/grimorio`: dos filas por `holder_id`, sin join
             // pesado. Si algún día pesa, se cachea con el tick.
             colgadas,
+            // Lo tirado por el valle, ya resuelto a slug. Sale de la misma
+            // consulta que se le manda al cliente: una sola lectura, dos usos.
+            suelo: (suelo.data ?? []).map((o) => ({
+              kind: o.kind, made_by: o.made_by ?? null,
+              dejado_por: o.left_by ?? null, place_slug: slugDe(o.holder_id),
+            })),
           }),
           // `nombre` no es adorno: los que no son humanos no son mobs, son
           // pueblos, y matar a alguien con nombre pesa distinto que matar a
@@ -664,6 +696,27 @@ export async function handler(
           // `made_by` es el nombre y no el id a propósito: el que lo forjó se
           // muere y el objeto tiene que seguir diciendo quién fue.
           objetos: objetos.data ?? [],
+          // Lo que hay en el suelo, por lugar.
+          //
+          // **`id` viaja y es lo que hace que esto no necesite coordenadas.**
+          // El cliente 3D deriva el punto exacto donde dibuja cada cosa del
+          // uuid del objeto, que es estado compartido: misma semilla, mismo
+          // punto, en todas las pantallas. Es lo mismo que ya hace el valle
+          // con las siete casas de Vado Bajo. Guardar un `x, z` habría metido
+          // en el mundo el único dato que el resto de la simulación no sabe
+          // leer — todo lo demás se decide por `place_id`.
+          //
+          // `place_slug` y no `place_id` por lo mismo que las amenazas: el
+          // cliente ubica por slug y los uuid no le dicen nada.
+          suelo: (suelo.data ?? []).map((o) => ({
+            id: o.id, kind: o.kind, quality: o.quality,
+            made_by: o.made_by ?? null,
+            dejado_por: o.left_by ?? null,
+            // Cuántos días del valle lleva ahí tirado. Es la mitad de lo que
+            // hace que un objeto en el suelo sea una historia y no un ítem.
+            dias: o.left_tick != null ? Math.max(0, region.tick + 1 - o.left_tick) : null,
+            place_slug: slugDe(o.holder_id),
+          })),
         })
       }
 
@@ -1046,6 +1099,11 @@ function pasos(m: {
   player: { name: string; place_id: string | null }
   /** Lo que lleva colgado HOY. Ver el bloque 1b. */
   colgadas: { nombre: string; slug: string }[]
+  /** Lo que hay tirado en el suelo del valle. Ver el bloque 1d. */
+  suelo: {
+    kind: string; made_by: string | null
+    dejado_por: string | null; place_slug: string
+  }[]
 }): Paso[] {
   const out: Paso[] = []
   const slug = (id: string | null) => m.places.find((p) => p.id === id)?.slug ?? ''
@@ -1140,6 +1198,53 @@ function pasos(m: {
       texto: `Llevas un ${CUAJADA}. Es lo único que te pone en pie donde caíste,`
         + ' en vez de amanecer en la aldea; y de pie te cierra la herida sin volver al pueblo.',
       donde: '',
+    })
+  }
+
+  // 1d. Lo que alguien dejó tirado por ahí.
+  //
+  // Es lo primero que hay que decirle a alguien que no sabe que el suelo del
+  // valle guarda cosas, y **el renglón se escribe alrededor del nombre**, no
+  // alrededor del objeto: *"en la Casa Quemada hay una hoja templada que hizo
+  // Ilde"* es el juego; *"hay un objeto disponible"* es un inventario.
+  //
+  // Se elige lo que MÁS historia tenga —primero lo que hizo alguien, después lo
+  // que dejó alguien— y no lo más cercano: un renglón que dice "hay una piedra
+  // de afilar tirada" no le enseña a nadie que esto existe.
+  const conHistoria = [...m.suelo].sort((a, b) =>
+    (b.made_by ? 2 : 0) + (b.dejado_por ? 1 : 0)
+    - ((a.made_by ? 2 : 0) + (a.dejado_por ? 1 : 0)))
+  const tirado = conHistoria[0]
+  if (tirado) {
+    const donde = m.places.find((p) => p.slug === tirado.place_slug)
+    out.push({
+      texto: tirado.made_by
+        ? `En ${donde?.name ?? 'el valle'} quedó ${tirado.kind} que hizo ${tirado.made_by}.`
+          + ' Nadie la ha vuelto a buscar; puedes levantarla.'
+        : `En ${donde?.name ?? 'el valle'} hay ${tirado.kind} que dejó alguien tirado ahí.`,
+      donde: tirado.place_slug,
+    })
+  }
+
+  // 1e. La otra puerta que abre la confianza, y la que faltaba.
+  //
+  // Al llegar a `UMBRAL_ENSENAR` el paso 1 te manda a que te enseñen el oficio,
+  // y eso es media verdad desde hoy: con esa misma confianza **también puedes
+  // pedirle que te lo haga**. Son dos caminos con el mismo precio social y
+  // resuelven cosas distintas — el que quiere el frasco lo pide, el que no
+  // quiere depender de nadie aprende a destilar.
+  //
+  // Y es lo único que le da al que pelea una razón para tratar bien al que
+  // destila, que es literalmente lo que dice `DISENO.md` §10.2.
+  const generoso = m.people
+    .filter((q) => aprecio(q.id) >= UMBRAL_ENSENAR)
+    .sort((a, b) => aprecio(b.id) - aprecio(a.id))[0]
+  if (generoso) {
+    out.push({
+      texto: `${generoso.name} ${comoTeVe(aprecio(generoso.id))}: además de enseñarte,`
+        + ' puedes pedirle algo de lo suyo, y hasta que te lo haga con sus manos.'
+        + ' Pedir gasta el favor, así que no es gratis.',
+      donde: slug(generoso.place_id),
     })
   }
 
