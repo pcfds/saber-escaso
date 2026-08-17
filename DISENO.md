@@ -287,6 +287,79 @@ Y el criterio para sumar assets nuevos, que sale de lo mismo: **del mismo autor,
 CC0, y con la procedencia archivada** (`assets/PROCEDENCIA.md`, con URL y md5 de
 cada zip). Un pack de otro artista no es un atajo, es empezar de nuevo.
 
+### La ficha de identidad. Cinco reglas, y alcanzan.
+
+**Escrita el 18 de agosto de 2026**, porque hasta acá el criterio existía pero
+estaba disperso en ocho archivos y cada agente nuevo lo reconstruía a mano —o
+no—. Esto es lo que hay que saber para poner un color, una malla o una luz en
+este juego **sin preguntarle a nadie**. Todo lo de abajo está medido sobre
+capturas del juego real; los números viven en `paleta.gd` y `ambiente.gd`.
+
+La coordenada que faltaba la puso la dirección del proyecto comparando juegos:
+**Hytale, Light No Fire y Enshrouded**, y la frase que los resume es
+***"más caricaturesco pero tipo real"***. Eso **no reabre** la decisión de
+"estilizado y comprometido" de más arriba: la **afina**. Lo que esos tres tienen
+en común no es que sean complejos, es que son **estilizados con materia**.
+
+> **El valle es un prado de fin de verano en un cuenco de montaña, visto desde
+> arriba y de lejos, a la luz de una hora concreta que manda el servidor.**
+> Formas simples y pocas. Materiales creíbles y gastados. Paleta corta, apagada
+> y sucia, con todo el color guardado para el fuego. Y aire entre las cosas.
+
+**1. LA ESCALERA DE VALOR MANDA, Y ES UNA SOLA.** Nueve peldaños, de `V0` tinta
+a `V8` cal, en `paleta.gd`. Antes de elegir un matiz se elige el peldaño, y el
+peldaño se elige por el TRABAJO que la cosa hace en el cuadro, no por a qué se
+parece en la vida. El lienzo es el suelo (**V4–V5**); lo construido va arriba
+(aldea V6); lo vegetal y las tapas van abajo (copas y techos V2). *Un pueblo se
+ve porque es una mancha clara; una casa se ve porque es una caja clara con una
+tapa oscura.* Si el color "correcto" no separa, el correcto está mal.
+
+**2. NADA ES LISO. TODO ESTÁ USADO.** Es la regla nueva y es la que faltaba. Una
+superficie grande sin variación por debajo de los 32 píxeles no es un material,
+es vinilo — medido: el suelo del valle tenía **0,03 de desviación de luma por
+bloque de 4 píxeles** y era el 45% de la pantalla. Toda superficie grande lleva
+grano (`Paleta.grano()`, ruido triplanar en coordenadas de mundo, que multiplica
+el albedo). Todo objeto repetido lleva variación **por instancia**, y esa
+variación es un multiplicador de VALOR y nunca de matiz. Y lo que tiene historia
+la muestra: la Casa Quemada se quema de verdad, la piedra tiene musgo, la madera
+está gris. **Un mundo nuevo se lee como maqueta.**
+
+**3. LA SATURACIÓN ES UN PRESUPUESTO Y SE GASTA EN EL FUEGO.** Techo duro:
+**S ≤ 0,35 en cualquier superficie que se mida en metros cuadrados** y S ≤ 0,50
+en los tintes de gente. Hay exactamente **tres excepciones y tienen nombre**: el
+fuego (brasas, ventanas encendidas, luciérnagas, faroles), el jade —que le
+pertenece al jugador y a nadie más— y la herrumbre, que es el peligro. Si
+aparece una cuarta es un error, no una decisión. *Un valle apagado con seis
+puntos naranjas es melancólico; un valle saturado con seis puntos naranjas es
+una juguetería.*
+
+**4. LA SILUETA Y LA LUZ HACEN EL TRABAJO; LA GEOMETRÍA NO.** A la distancia a
+la que se juega (27–68 m) un ojo humano mide dos píxeles y una hoja no existe.
+Lo que se lee es el contorno contra el fondo y de qué valor es cada mancha. Por
+eso **menos geometría, no más**, y por eso el presupuesto entero va a silueta,
+valor y color. Un detalle que no se distingue a veinte metros no existe: no se
+modela, se sugiere con una mancha.
+
+**5. HAY AIRE ENTRE LAS COSAS, Y EL AIRE TIENE HORA.** La perspectiva aérea es
+cómo el ojo mide que algo está lejos, o sea que es grande, y es la mitad de la
+identidad de las referencias. Lo lejano pierde contraste y se va al color del
+cielo: 3% de bruma a 100 m, 27% a 250, 53% en la cordillera. **Y el color del
+aire y de la luz los manda el reloj del valle, que es del servidor.** Al mediodía
+el valle es apagado y verde oliva; al ocaso es una silueta contra un cielo
+naranja; de noche es negro con seis ventanas encendidas. **Es el mismo lugar y
+son tres cuadros distintos, y eso es a propósito** — una sesión de una hora
+atraviesa medio día del valle.
+
+#### Y las tres cosas que NO se hacen
+
+- **No se sube el detalle para que se vea menos rústico.** Es el camino
+  equivocado y ya se recorrió.
+- **No se mezcla realismo con estilización en la misma pieza.** La indecisión es
+  lo que se lee como Playmobil, no la simpleza.
+- **No se inventa un color afuera de `paleta.gd`.** Ni en GDScript, ni en un
+  `uniform` de shader, ni "sólo esta vez". Un color suelto es deuda, y el
+  archivo tiene fábricas de material justamente para que nadie tenga excusa.
+
 ### Control
 - La habilidad es del jugador con teclado y mouse. **No** veinte mil hechizos
   en barras tipo Diablo 2.
