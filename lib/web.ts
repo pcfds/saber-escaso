@@ -312,7 +312,8 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
   return page(`${player.name} — Saber Escaso`, `
     <h1>${esc(player.name)}</h1>
     <p class="sub">Estás en ${esc(lugar?.name ?? 'algún lado')}. ${
-      saberes.length ? 'Sabes ' + saberes.map(esc).join(', ') + '.' : 'Todavía no sabes ningún oficio.'
+      saberes.length ? 'Tu oficio: ' + saberes.map(esc).join(', ') + '.'
+        : 'Todavía no tienes oficio. Alguien te lo tiene que enseñar.'
     }</p>
 
     ${recienCreado ? `<div class="link"><b>⚠ Este link es tu personaje. Guardalo.</b>
@@ -1070,7 +1071,11 @@ function pasos(m: {
       ? {
         // El "cada mañana" no es adorno: explica por qué el panel de ayer no
         // sirve hoy, que es la parte del ritual que no se deduce sola.
-        texto: `Sabes trazar. Cada mañana eliges tres runas para llevar encima: pulsa P.`,
+        // «Cada mañana eliges…» y no «Sabes trazar»: `DISENO.md` §8.2b — la
+        // interfaz nombra la COSA y no el mecanismo. Lo mismo abajo con el
+        // oficio. Contá cuántas veces decía "sabes" esta pantalla y vas a ver
+        // por qué quien lo jugó dijo *"parece un juego de lo que sé"*.
+        texto: `Cada mañana eliges tres runas para llevar encima: pulsa P.`,
         donde: '',
       }
       : {
@@ -1093,7 +1098,8 @@ function pasos(m: {
   for (const r of recetas.slice(0, 1)) {
     const lugar = m.places.find((p) => p.kind === r.makes_at)
     out.push({
-      texto: `Sabes ${r.name}. Ve a ${lugar?.name ?? 'donde se hace'} y ponte a trabajar: te sale ${r.makes}, y cuanto más lo haces, mejor.`,
+      texto: `De ${r.name} sale ${r.makes}. Ve a ${lugar?.name ?? 'donde se hace'}`
+        + ` y ponte a trabajar: cuanto más lo haces, mejor te sale.`,
       donde: lugar?.slug ?? '',
     })
   }
@@ -1113,7 +1119,8 @@ function pasos(m: {
   // 4. Que el saber circula es el juego entero. Se dice al final y una vez.
   if (recetas.length > 0) {
     out.push({
-      texto: 'Lo que sabes se lo puedes enseñar a alguien. Es lo que más confianza te gana — y lo único que hace que no se pierda cuando te mueras.',
+      texto: 'Tu oficio se lo puedes enseñar a alguien. Es lo que más confianza'
+        + ' te gana — y lo único que hace que no se pierda cuando te mueras.',
       donde: '',
     })
   }

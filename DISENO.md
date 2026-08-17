@@ -497,6 +497,49 @@ construir y hacer casas, cocinar, viajar, entrar a mazmorras y enfrentar algo
 grande al fondo, y pelear con magia. **Nada de eso sale del saber solo: el
 saber es lo que te deja empezar.**
 
+#### El motor no se muestra
+
+La dirección del proyecto volvió sobre esto después de jugarlo, y la segunda
+vez fue más precisa que la primera:
+
+> *"El saber es la base del juego pero no puede decir en todo lado 'lo que
+> sabes', 'lo que sé'. Parece un juego de 'lo que sé'. Eso es experiencia y es
+> base, pero para que vaya de fondo. Tienen que haber quest. Entrás, y ¿quién
+> sos? ¿Qué es el mundo? Deberías ir aprendiendo, que haya eventos, temas."*
+
+Tiene razón y el error es de la interfaz, no del diseño. Contá las veces que la
+palabra aparece en pantalla: *"LO QUE SABES HACER"*, *"Sabes Destilado de
+raíz"*, *"Lo que sabes se lo puedes enseñar"*, *"No perdiste lo que sabes"*.
+**La pantalla está narrando el mecanismo en vez del mundo.**
+
+Es el mismo error que sería poner "PUNTOS DE EXPERIENCIA: 340" en el medio de
+una escena. Un motor bien hecho se siente y no se nombra:
+
+> **Regla: la interfaz nombra la COSA, no el mecanismo que la sostiene.**
+> No *"sabes Destilado de raíz"* sino *"Destilado de raíz — de la raíz sale un
+> frasco, y el frasco cura"*. No *"lo que sabes hacer"* sino *"tu oficio"*. El
+> jugador tiene que poder jugar meses sin aprender nunca la palabra con la que
+> nosotros lo llamamos por dentro.
+
+Y las tres cosas que el reclamo pide poner **en primer plano**, en el lugar que
+hoy ocupa el vocabulario del motor:
+
+1. **Quién sos.** Hoy entrás y sos un nombre sin nada. Llegaste por El Camino
+   del Norte y no sabés hacer nada — eso es un comienzo, pero hay que contarlo
+   como comienzo y no como carencia.
+2. **Qué es este mundo.** El valle ya TIENE pasado escrito en la base —un
+   incendio con dos versiones irreconciliables, dos pueblos que no son humanos
+   y un agravio concreto— y hoy sólo se llega a eso por casualidad, hablando.
+3. **Algo que perseguir, que se pueda nombrar.** Los encargos existen y
+   funcionan; lo que falta es que se lean como un hilo y no como un botón que
+   apareció. Y que pasen cosas: eventos con nombre, que empiecen y terminen.
+
+**Cuidado con la lectura fácil de esto.** No pide un diario de misiones con
+marcadores ni una barra de experiencia: pide que lo que el jugador ve sea el
+mundo, y que el motor quede abajo haciendo su trabajo. El día que la ficha diga
+*"Odila te enseñó a destilar el invierno pasado"* en vez de *"sabes Destilado
+de raíz — te lo enseñó Odila"*, esta sección está cumplida.
+
 ### 8.3 La progresión, en tres reglas
 
 Esta parte estuvo mal explicada mucho tiempo, con vocabulario de RPG que no
