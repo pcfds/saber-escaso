@@ -105,6 +105,19 @@ Ya nos mordió: el insert falla en silencio y la acción nunca existe.
   número es del que cuelgan TODAS las probabilidades del tick — y cambió: era
   cada hora hasta el 17 de agosto, y el mundo pasaba demasiado rápido — este renglón
   decía 10 minutos y era falso.
+- **`"regions": ["gru1"]` en `vercel.json`, y no se saca.** Supabase está en
+  São Paulo y **la función se ejecutaba en Washington**: cada consulta cruzaba
+  el continente y volvía. Lo delataba la cabecera de cualquier respuesta —
+  `x-vercel-id: gru1::iad1::…`, donde el primero es el borde y **el segundo es
+  dónde corre la función**. Con la región puesta, `/mundo` —que el cliente pega
+  cada pocos segundos— pasó de 1,1–1,7 s a **0,25–0,41 s**, y el golpe a 0,24 s.
+
+  El método, que es lo que hay que repetir: **separar las partes antes de
+  tocar nada.** La portada sin base tardaba 0,4 s, `/mundo` con base 1,1 s, y
+  una consulta suelta desde esta máquina 0,06 s. Esos tres números dicen dónde
+  está el problema; ninguno solo lo dice. Antes de medirlos yo había
+  paralelizado dos consultas mías dentro de la función y no movió la aguja:
+  **el problema no estaba adentro de la función sino en dónde estaba parada.**
 - **Regiones:** producción apunta a **`valle-primero`**. `valle-pruebas` es
   donde se rompe y se arregla (`REGION_SLUG=valle-pruebas`). Verificalo antes
   de asumirlo: este renglón ya estuvo mal una vez y mandó a un agente a
