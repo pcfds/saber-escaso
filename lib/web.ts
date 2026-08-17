@@ -455,7 +455,8 @@ export async function handler(
           .update({ last_seen_at: new Date().toISOString() }).eq('id', player.id)
           .then(() => undefined)
 
-        const [places, people, amenazas, objetos, saberes, vinculos, otros] = await Promise.all([
+        const [places, people, amenazas, objetos, saberes, vinculos, otros,
+               marcas, colgadas] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -474,6 +475,15 @@ export async function handler(
           // round-trip suelto se paga en cada uno de esos pedidos.
           db.from('players').select('id, name, place_id, health, last_seen_at')
             .eq('region_id', region.id).neq('id', player.id),
+          // Estas dos estaban abajo, esperadas de a una dentro del objeto de
+          // respuesta, y por lo tanto en serie DESPUÉS de esta tanda. El
+          // comentario de acá arriba ya decía por qué eso está mal —"un
+          // round-trip suelto se paga en cada uno de esos pedidos"— y yo mismo
+          // acababa de agregar dos, en la ruta más caliente del juego, el
+          // mismo día en que quien lo juega se quejó del lag. Medido: /mundo
+          // tarda de 1,1 a 1,7 s contra producción.
+          marcasDe(region.id, region.tick + 1),
+          loQueLleva({ kind: 'player', id: player.id }),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -565,7 +575,7 @@ export async function handler(
           // mundo, y llevan el nombre del que las dejó: hay que poder pasar
           // por un claro que sigue ardiendo y saber quién lo prendió, aunque
           // esa persona ya no esté.
-          marcas: await marcasDe(region.id, region.tick + 1),
+          marcas,
           primeros_pasos: pasos({
             places: places.data ?? [],
           // Cada persona viene con cómo te trata. Es lo que contesta el
@@ -593,7 +603,7 @@ export async function handler(
             // cliente pega cada pocos segundos, y se banca porque es la MISMA
             // que ya hace `/grimorio`: dos filas por `holder_id`, sin join
             // pesado. Si algún día pesa, se cachea con el tick.
-            colgadas: await loQueLleva({ kind: 'player', id: player.id }),
+            colgadas,
           }),
           // `nombre` no es adorno: los que no son humanos no son mobs, son
           // pueblos, y matar a alguien con nombre pesa distinto que matar a
