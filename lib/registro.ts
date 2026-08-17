@@ -21,14 +21,18 @@
  * La medición que lo justifica, con el corte puesto en cuando entró la
  * contra-instrucción al prompt:
  *
- *   antes     9 de 13 con voseo · 1 mezclaba los dos registros
- *   después   2 de 7  con voseo · 2 mezclan
+ *   antes     9 de 13 con voseo
+ *   después   1 de 7
  *
- * O sea que **la instrucción funcionó y no alcanzó**: bajó el voseo a menos de
- * la mitad, pero lo que queda ya no son crónicas escritas enteras en
- * rioplatense sino **crónicas partidas por la mitad**, que se leen como
- * escritas por dos personas. Las dos que quedan mezclan. Ése es el residuo que
- * hay que atacar, y no es el mismo problema que había antes.
+ * La instrucción funcionó y no alcanzó, y lo que quedaba cambió de forma: ya
+ * no eran crónicas escritas enteras en rioplatense sino crónicas partidas por
+ * la mitad —«no cayó, pero vos sí» en el mismo párrafo que «si tienes prisa»—,
+ * que se leen como escritas por dos personas.
+ *
+ * Ese residuo lo cierra el colador de `director.ts`, que usa la misma vara que
+ * este script: si se midiera con una y se rechazara con otra, el número
+ * dejaría de describir lo que el código hace. Medido después: 6 crónicas, el
+ * colador salta 1, ninguna queda sucia.
  */
 import { db } from './db.js'
 import { RIOPLATENSE } from './world/saludos.js'
@@ -62,6 +66,40 @@ const TUTEO = new RegExp(
   'giu',
 )
 
+/**
+ * Lo que la lista de `saludos.ts` marca y acá NO cuenta.
+ *
+ * **Salió de una medición que se me fue en contra y por eso está escrita.** El
+ * colador del director saltó en 5 de 6 crónicas, y al mirar QUÉ había cazado
+ * eran "acá" y "allá" — nunca un "vos" ni un "querés". El último rechazo fue
+ * *«aprender a pelear con lo que hay allá abajo»*, que es castellano llano
+ * impecable y se usa igual en España. O sea que estaba pagando una generación
+ * entera de más, cinco de cada seis veces, por una palabra que está bien.
+ *
+ * "acá" NO entra en esta lista y se sigue rechazando, porque el SYSTEM del
+ * director lo prohíbe con nombre y apellido —«ni voseo ni "acá": es "tú",
+ * "mira", "aquí"»— así que ahí sí desobedeció.
+ *
+ * Por qué la exclusión vive acá y no en `saludos.ts`: la lista de allá está
+ * afinada para saludos, que son una o dos frases donde cualquier color
+ * regional pesa el doble, y **la tiene otro agente ahora mismo**. Igual dejo
+ * dicho que allá "allá" probablemente también sea un falso positivo.
+ *
+ * Es la misma trampa que ese archivo ya documentó con las variantes sin
+ * tilde —"meter palabras por las dudas convierte el colador en una máquina de
+ * falsos positivos"—, en otra forma: la lista no estaba mal, estaba prestada
+ * de un uso a otro sin revisarla.
+ */
+const PERMITIDAS = new Set(['allá'])
+
+/** Las marcas de voseo de un texto, ya descontadas las permitidas. Una sola
+ *  definición para el script de medición y para el colador del director: si
+ *  midiéramos con una vara y rechazáramos con otra, el número dejaría de
+ *  describir lo que el código hace. */
+export function marcasDeVoseo(texto: string): string[] {
+  return (texto.match(VOSEO) ?? []).filter((m) => !PERMITIDAS.has(m.toLowerCase()))
+}
+
 export type Registro = {
   total: number
   conVoseo: number
@@ -72,11 +110,11 @@ export type Registro = {
 }
 
 export function medirTexto(texto: string) {
-  const v = texto.match(VOSEO) ?? []
+  const v = marcasDeVoseo(texto)
   const t = texto.match(TUTEO) ?? []
   const frase = v.length === 0 ? '' : (texto
     .split(/(?<=[.!?])\s+/)
-    .find((f) => new RegExp(VOSEO.source, 'iu').test(f)) ?? '').trim()
+    .find((f) => marcasDeVoseo(f).length > 0) ?? '').trim()
   return { voseo: v.length, tuteo: t.length, marcas: [...new Set(v.map((s) => s.toLowerCase()))], frase }
 }
 

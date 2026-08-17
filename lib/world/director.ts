@@ -75,6 +75,12 @@
  */
 import { db, getRegion } from '../db.js'
 import { pedirJson } from '../modelo.js'
+// El colador del registro se IMPORTA y no se copia. Una sola definición para
+// el que mide (`pnpm registro`) y el que rechaza: con dos varas distintas, el
+// número dejaría de describir lo que el código hace. Y ya pasó lo contrario:
+// una lista escrita a mano acá al lado usaba `\b`, que en JavaScript es ASCII,
+// así que no encontraba "acá" nunca y contaba de menos sin avisar.
+import { marcasDeVoseo } from '../registro.js'
 
 /**
  * Lo que se le contesta al jugador cuando la ventana viene vacía. Es texto
@@ -398,7 +404,10 @@ lea tiene que ser cómo están las cosas ahora.
 Escribe en segunda persona, tuteando, de uno a tres párrafos cortos.
 
 EL IDIOMA DEL MUNDO. Castellano llano con peso. Ni voseo ni "acá": es "tú",
-"mira", "aquí". Los hechos vienen escritos con "acá"; tú escribes "aquí". Nada de arcaísmo de disfraz —ni "vos sois", ni "he menester",
+"mira", "aquí". El error que más se te escapa no es escribir la crónica entera
+en voseo: es escribirla bien y meter un "vos" o un "querés" suelto en la mitad,
+y entonces se lee como escrita por dos personas. Antes de terminar, releela
+buscando ese único deslizamiento. Nada de arcaísmo de disfraz —ni "vos sois", ni "he menester",
 ni juramentos de teatro— y nada de palabras de hoy. Concreto antes que
 grandilocuente: "el fuego está bajo" vale más que "las brasas agonizan en el
 hogar". La crónica es la voz del mundo y tiene que sonar como la gente que
@@ -435,6 +444,10 @@ export type Cronica = {
    * crónica tras crónica, no.
    */
   sinRespaldo: string[]
+  /** Si hubo que rehacerla porque salió con voseo. Es la señal de cuánto se
+   *  le escapa el registro al modelo, y sube el costo de esa crónica al
+   *  doble: cuando este número crezca, el que hay que tocar es el SYSTEM. */
+  rehechaPorRegistro: boolean
   /**
    * Cuántos días del valle atrás quedó el hecho más nuevo que entró al prompt.
    * Es la medida de si la crónica aterriza en el presente: con el corte viejo
@@ -536,6 +549,9 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
     return {
       text: NADA_QUE_CONTAR,
       leidos: 0, usados: 0, inventados: [], sinRespaldo: [], atrasoDias: 0,
+      // Es una constante escrita a mano en castellano llano: no pasó por el
+      // modelo, así que no hay registro que colar.
+      rehechaPorRegistro: false,
       // Sin hechos no hay crónica, y el pasado no cambia eso: siete piezas de
       // hace ciento ochenta inviernos no son "algo que pasó mientras no
       // estabas". Si esto alguna vez alcanzara para llamar al modelo, habríamos
@@ -948,7 +964,7 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
   // Sin `respaldo` a propósito: una crónica que no salió es un fallo y tiene
   // que reventar acá. Inventarle un texto vacío al jugador sería peor, y
   // taparía justo el modo de falla que el experimento busca medir.
-  const { datos: chronicle, inTokens, outTokens, costUsd } = await pedirJson<{
+  const pedir = (extra: string) => pedirJson<{
     text: string; used_event_ids: string[]
   }>({
     modelo: model,
@@ -956,8 +972,68 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
     maxTokens: 4000,
     schema: SCHEMA,
     system: SYSTEM,
-    prompt,
+    prompt: prompt + extra,
   })
+
+  let { datos: chronicle, inTokens, outTokens, costUsd } = await pedir('')
+
+  // ── El colador del registro ───────────────────────────────
+  //
+  // El mundo se narra en castellano llano y eso está en el SYSTEM con todas
+  // las letras. El modelo lo desobedece igual, y **medirlo fue lo que lo
+  // convirtió en un problema tratable**: `pnpm registro` cuenta el voseo sobre
+  // todo el histórico, y con el corte en el día que entró la instrucción da
+  //
+  //     antes    9 de 13 crónicas
+  //     después  1 de 7
+  //
+  // O sea que la instrucción funcionó y no alcanzó, y **lo que quedó cambió de
+  // forma**: ya no son crónicas escritas enteras en rioplatense, son crónicas
+  // partidas por la mitad — «no cayó, pero vos sí» en el mismo párrafo que «si
+  // tienes prisa»—, que se leen como escritas por dos personas.
+  //
+  // Antes de escribir esto se descartó lo obvio, midiendo: **el emisor está
+  // limpio.** 349 hechos de producción con 0 voseos, y `people.voice`,
+  // `people.historia` y `places.description` con 0 de 12. No hay de dónde
+  // copiarlo; lo pone el modelo solo.
+  //
+  // Por qué un reintento y no un reemplazo de texto: cambiar "vos" por "tú" a
+  // mano deja la frase mal conjugada («tú podés») y encima taparía la señal.
+  // Y por qué UNO solo: si a la segunda no salió, el problema no es el azar, y
+  // dejar al jugador esperando llamadas encadenadas es peor que una arruga.
+  // El precedente es de la casa — `saludos.ts` rechaza y rehace saludos con
+  // esta misma lista, que se importa y no se copia.
+  //
+  // Y una advertencia que costó plata averiguar: **la primera versión saltaba
+  // en 5 de 6 crónicas y casi siempre por nada.** Lo que cazaba era "allá",
+  // que es castellano llano impecable —«lo que hay allá abajo» se dice igual
+  // en España—, así que se pagaba una generación entera de más cinco de cada
+  // seis veces. Con "allá" fuera de la lista (ver `PERMITIDAS` en
+  // `registro.ts`) el colador salta 1 de 6, ninguna queda sucia, y la crónica
+  // bajó de USD 0,0213 a 0,0135. **Un colador demasiado ancho no es prudencia:
+  // es un impuesto.**
+  const marcas = marcasDeVoseo(chronicle.text)
+  let rehecha = false
+  if (marcas.length > 0) {
+    const cuales = [...new Set(marcas.map((s) => s.toLowerCase()))].join('", "')
+    console.log(`[director] registro roto ("${cuales}") — rehaciendo una vez`)
+    const otra = await pedir(
+      `\n\nRECHAZADA. La versión anterior tenía voseo: "${cuales}". `
+      + 'El mundo habla castellano llano: "tú", "mira", "aquí". '
+      + 'Escríbela de nuevo entera, sin esas palabras y sin ninguna otra forma '
+      + 'de voseo, y sin cambiar ningún hecho.',
+    )
+    // Se queda la nueva aunque tampoco salga limpia: es la que al menos lo
+    // intentó dos veces, y el número de las que fallan dos veces es
+    // justamente lo que hay que mirar cuando se toque el SYSTEM.
+    inTokens += otra.inTokens
+    outTokens += otra.outTokens
+    costUsd += otra.costUsd
+    chronicle = otra.datos
+    rehecha = true
+    const quedan = marcasDeVoseo(chronicle.text)
+    if (quedan.length > 0) console.log(`[director] siguió con voseo: ${quedan.join(' ')}`)
+  }
 
   // ── Auditoría 1: ¿citó hechos que no existen? ─────────────
   const usados = chronicle.used_event_ids.map((s) => s.trim())
@@ -1000,6 +1076,7 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
     usados: usados.length,
     inventados,
     sinRespaldo,
+    rehechaPorRegistro: rehecha,
     atrasoDias: region.tick - events[events.length - 1]!.tick,
     pasadoEnPrompt: pasado.length,
     pasadoUsado: usados.filter((id) => /^p\d+$/.test(id) && etiqueta.has(id)).length,
