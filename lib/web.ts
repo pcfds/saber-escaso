@@ -14,7 +14,7 @@ import { narrate, type Cronica } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear, recibirGolpe, levantarse } from './world/combate.js'
 import { escalonDe, elegirSaludo } from './world/saludos.js'
-import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta, loQueLleva } from './world/magia.js'
+import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta, loQueLleva, RUNAS } from './world/magia.js'
 // Los umbrales y cómo se dicen en palabras viven en tick.ts, que es quien los
 // aplica. Importarlos y no copiarlos no es prolijidad: la copia que había acá
 // decía "ya confía en vos, pedile que te enseñe" con 10 de aprecio, cuando el
@@ -1057,8 +1057,15 @@ function pasos(m: {
       : {
         // Se nombra lo que lleva HOY, no "tus runas": el jugador tiene que
         // reconocer en la frase lo que acaba de elegir.
-        texto: `Llevas ${yLista(m.colgadas.map((c) => c.nombre))} encima.`
-          + ' Manten pulsada R, elige el trazo y suelta sobre lo que quieras alcanzar.',
+        // Se nombra por la MATERIA —«el calor», «la quietud»— y no por el
+        // nombre de catálogo. "Llevas Runa de vena y Runa de aliento encima"
+        // repite "Runa de" dos veces y suena a inventario; "llevas la vena y
+        // el aliento encima" suena a que tenés algo puesto en el cuerpo, que
+        // es literalmente lo que el ritual dice que pasa. El dato ya existía:
+        // `RUNAS[slug].materia` es lo que usa el propio `preparar()` para
+        // contar que saliste con eso encima.
+        texto: `Llevas ${yLista(m.colgadas.map((c) => RUNAS[c.slug]?.materia ?? c.nombre))} encima.`
+          + ' Mantén pulsada R, elige el trazo y suelta sobre lo que quieras alcanzar.',
         donde: '',
       })
   }
