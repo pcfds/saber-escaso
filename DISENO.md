@@ -1052,6 +1052,59 @@ tiene un incendio con dos versiones irreconciliables y algo de lo que no se
 habla. Eso ya es política: **es gente que no está de acuerdo sobre qué pasó.**
 Lo que falta es que tomar partido cueste algo.
 
+### 9.3c Pegarle a una persona
+
+Pedido de la dirección del proyecto, textual:
+
+> *"Ni pegarle hasta un NPC y que entienda qué pasa."*
+
+Hoy no se puede: `pelear` sólo apunta a `threats`, y **`people` no tiene vida**
+— tiene `alive` y `died_tick`, o sea que una persona puede morirse pero no
+tiene puntos que bajar. Es un hueco real. Y es, con diferencia, **la acción más
+grave que puede existir en este juego**, así que hacerlo como un combate más
+sería el peor error posible.
+
+**Por qué es distinto acá.** En cualquier otro juego matar a un NPC es perder
+un vendedor y un poco de reputación. Acá el saber vive en gente mortal: **si
+matás a Ilde, nadie en este valle vuelve a forjar nunca.** No es un castigo
+para vos — es empobrecer el mundo, permanentemente, **para todos los que
+juegan**, incluidos los que no estaban conectados. Es la única acción del juego
+cuyo daño no se puede deshacer ni compensar con tiempo.
+
+De ahí salen cuatro reglas:
+
+**1. Casi nadie se defiende, y ésa es la respuesta.** La reacción por defecto a
+un golpe no es pelear: es **huir y contarlo**. Un valle donde cada aldeano es
+un enemigo con barra de vida es un juego de acción; uno donde el que golpeás
+sale corriendo y a la tarde no te habla nadie es este juego. La maquinaria ya
+está entera: `bonds` tiene `feared` además de `valued`, la memoria se guarda por
+persona, y **el chusmerío hace que la memoria viaje** — el que no te vio se
+entera igual.
+
+**2. La pena no es una celda: es que el valle se cierre.** Ya está escrito en
+§9.3b y acá es donde más se nota. El que te teme **no te enseña**, y perder
+maestros es lo más caro que hay en este mundo. Y hay un matiz que ya existe y
+conviene no perder: **el que te teme sí te entrega lo que tiene** — o sea que
+la violencia funciona a corto plazo y te arruina a largo, que es exactamente lo
+que tiene que sentirse.
+
+**3. Matar tiene que ser posible, difícil y nunca accidental.** Un mundo donde
+no podés hacer lo peor es un mundo sin apuestas. Pero **no puede pasar por
+apretar clic tres veces distraído**: si el jugador no entendió lo que estaba
+haciendo hasta que fue irreversible, el juego le mintió. Que cueste, que avise,
+y que el aviso sea del mundo y no de un cartel — el que le pegás grita, el que
+mira se mete, la persona pide que pares.
+
+**4. Y el que sabe algo que nadie más sabe vale distinto.** El código ya cuenta
+cuántos lo saben (`cuantosLoSaben`) y ya marca al último portador — el sorteo
+de la muerte le da peso ×3. Golpear al último que sabe forjar tiene que sentirse
+distinto que golpear a quien no sabe nada, y el mundo tiene el dato para
+decirlo.
+
+**Lo que NO se hace:** barras de vida sobre las cabezas, guardias que aparecen,
+un contador de crímenes. La consecuencia es social y ya está construida; lo que
+falta es conectarla.
+
 ### 9.4 El diálogo — lo que NO se hace
 
 **Nada de NPCs charlatanes de libre conversación.** Se hablan una vez, se
