@@ -624,9 +624,49 @@ runas, un destilado que no es un caldo. Esto sí lleva fila en `knows`, sí
 necesita que alguien te lo enseñe, y sí desaparece del mundo con el último que
 lo sabía.
 
+**Y hay un escalón en el medio, que es el que faltaba. DECIDIDO:**
+
+> *"Y aprendés cosas también haciéndolas: agarro un hacha y corto un árbol,
+> aprendés. Armo una pared, armo muebles, etc. **Las cosas más complejas, o
+> cómo hacerlas mejor, se transmite.**"*
+
+Entonces son tres niveles y no dos, y el del medio es el que abre el mundo:
+
+| | cómo lo conseguís | se pierde con el que se muere |
+|---|---|---|
+| **corriente** | ya lo sabés | nunca |
+| **aprendido haciendo** | agarrás la herramienta y lo hacés | no |
+| **transmitido** | alguien te lo enseña | **sí** |
+
+**Lo aprendido haciendo** es cortar un árbol con un hacha, levantar una pared,
+armar un mueble. Nadie te lo enseña: lo hacés mal la primera vez y algo queda.
+**Esto sí lleva fila en `knows`** —a diferencia de lo corriente— porque es un
+saber de verdad y tiene destreza; lo que no tiene es maestro.
+
+**Y lo que se transmite son dos cosas distintas**, y la segunda es la que casi
+se nos escapa:
+
+1. **Lo que no vas a descubrir solo**: las cuatro runas, templar en agua
+   corriente. Podés martillar diez años y no te sale.
+2. **Cómo hacer MEJOR lo que ya sabés hacer.** Ésta es la que la dirección puso
+   al final de la frase y es la más interesante: no te enseñan a cortar leña
+   —eso lo aprendiste solo—, te enseñan a cortarla bien.
+
+> **INFERIDO, y hay que probarlo antes de darlo por bueno:** que eso se
+> mecanice con un **techo de destreza**. Lo que aprendés solo llega hasta cierto
+> punto y se estanca; lo que te enseñan levanta el techo. Encaja con lo que ya
+> existe —`knows.destreza`, `knows.veces` y los rendimientos decrecientes de
+> `mejora()`— y con la tesis: **el autodidacta entra al oficio y nunca es
+> bueno.** Necesitás a alguien igual, sólo que más tarde y para otra cosa.
+>
+> El riesgo de esta lectura es convertir la enseñanza en una mejora de
+> estadística, que es justo lo que §8.2b prohíbe. Si al implementarlo lo único
+> que cambia es un número, está mal hecho.
+
 **La prueba para saber de qué lado va algo:** *¿lo sabría hacer cualquiera que
-haya vivido acá un año?* Si la respuesta es sí, no entra al sistema. Si hace
-falta que alguien te lo muestre —y que quiera mostrártelo—, entra.
+haya vivido acá un año?* → corriente. *¿Lo aprendería solo el que agarra la
+herramienta y prueba?* → aprendido haciendo. *¿Hace falta que alguien te lo
+muestre, y que quiera?* → transmitido.
 
 > **Y hay algo que revisar con esto puesto: `Cuajado de leche` está del lado
 > equivocado.** Entró como un saber que enseña Sarn, y ordeñar una vaca es
