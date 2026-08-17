@@ -12,7 +12,7 @@ import { db, getRegion } from './db.js'
 import { step } from './world/tick.js'
 import { narrate } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
-import { pelear } from './world/combate.js'
+import { pelear, recibirGolpe, levantarse } from './world/combate.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -51,12 +51,16 @@ const page = (title: string, body: string) => `<!doctype html>
 <title>${esc(title)}</title><style>${CSS}</style></head>
 <body><div class="wrap">${body}</div></body></html>`
 
-type Player = { id: string; name: string; place_id: string | null; last_seen_tick: number; token: string }
+type Player = {
+  id: string; name: string; place_id: string | null
+  last_seen_tick: number; token: string
+  health: number; downed_at_tick: number | null
+}
 
 async function ensurePlayer(name: string): Promise<{ region: Awaited<ReturnType<typeof getRegion>>; player: Player }> {
   const region = await getRegion()
   const { data: found } = await db.from('players')
-    .select('id, name, place_id, last_seen_tick, token')
+    .select('id, name, place_id, last_seen_tick, token, health, downed_at_tick')
     .eq('region_id', region.id).ilike('name', name).maybeSingle()
   if (found) return { region, player: found as Player }
 
@@ -64,7 +68,7 @@ async function ensurePlayer(name: string): Promise<{ region: Awaited<ReturnType<
     .select('id').eq('region_id', region.id).eq('slug', 'aldea').single()
   const { data: nuevo, error } = await db.from('players')
     .insert({ region_id: region.id, name, place_id: aldea?.id, last_seen_tick: region.tick })
-    .select('id, name, place_id, last_seen_tick, token').single()
+    .select('id, name, place_id, last_seen_tick, token, health, downed_at_tick').single()
   if (error || !nuevo) throw error
   await db.from('events').insert({
     region_id: region.id, tick: region.tick, kind: 'llegada', place_id: aldea?.id,
@@ -76,7 +80,7 @@ async function ensurePlayer(name: string): Promise<{ region: Awaited<ReturnType<
 async function byToken(token: string) {
   const region = await getRegion()
   const { data } = await db.from('players')
-    .select('id, name, place_id, last_seen_tick, token')
+    .select('id, name, place_id, last_seen_tick, token, health, downed_at_tick')
     .eq('region_id', region.id).eq('token', token).maybeSingle()
   return data ? { region, player: data as Player } : null
 }
@@ -277,7 +281,16 @@ export async function handler(
             // tiempo tienen que ver el mismo atardecer.
             momento_del_dia: (Date.now() % 3_600_000) / 1000,
           },
-          player: { name: player.name, place_id: player.place_id },
+          // La vida viaja. Antes el cliente llevaba su propia `vida_jugador`
+          // local que bajaba en tiempo real y se reseteaba sola: vos les
+          // pegabas en el mundo compartido y ellos te pegaban en tu máquina.
+          // Era el invariante 4 roto justo en el tramo que existe para
+          // arreglarlo.
+          player: {
+            name: player.name, place_id: player.place_id,
+            health: player.health ?? 100, max_health: 100,
+            caido: (player.health ?? 100) <= 0,
+          },
           places: places.data ?? [], people: people.data ?? [],
           // Qué hacer ahora. Es la diferencia entre un mundo y una demo
           // técnica: llegás, no conocés a nadie, no sabés qué hay, y sin esto
@@ -361,6 +374,20 @@ export async function handler(
         if (!destino) return json({ ok: false, porque: `no existe "${slug}"` })
         if (destino.id === found.player.place_id) return json({ ok: true, lugar: destino.name })
         await db.from('players').update({ place_id: destino.id }).eq('id', found.player.id)
+
+        // Segunda defensa contra la inundación. El cliente ya tiene histéresis,
+        // pero el que escribe en `events` es este endpoint y no puede confiar
+        // en que todos los clientes se porten bien: alcanza con uno parado en
+        // un borde para llenar la crónica de caminatas. Y la crónica es lo
+        // único que este proyecto está midiendo.
+        const { data: yaLlego } = await db.from('events').select('id')
+          .eq('region_id', found.region.id).eq('kind', 'llegada')
+          .eq('place_id', destino.id)
+          .gte('tick', found.region.tick)
+          .contains('detail', { player: found.player.name })
+          .limit(1).maybeSingle()
+        if (yaLlego) return json({ ok: true, lugar: destino.name })
+
         // Llegar a un lugar es un hecho del mundo: alguien te puede haber
         // visto. Va a `events` como cualquier otra cosa.
         await db.from('events').insert({
@@ -370,6 +397,27 @@ export async function handler(
           detail: { player: found.player.name, place: destino.name },
         })
         return json({ ok: true, lugar: destino.name })
+      }
+
+      // Te pegaron. El cliente avisa; el mundo decide cuánto duele.
+      if (req.method === 'POST' && parts[2] === 'danio') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        return json(await recibirGolpe({
+          regionId: found.region.id, tick: found.region.tick + 1,
+          player: found.player, threatId: f.get('de'),
+        }))
+      }
+
+      // Levantarse. No cuesta tiempo ni saber: cuesta la posición y la cara.
+      if (req.method === 'POST' && parts[2] === 'levantarse') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        return json(await levantarse({
+          regionId: found.region.id, tick: found.region.tick + 1,
+          player: found.player,
+        }))
       }
 
       if (req.method === 'POST' && parts[2] === 'hablar') {

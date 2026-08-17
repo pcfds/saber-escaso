@@ -12,7 +12,7 @@ este repo y las trampas ya pisadas.
 La Fase 0 preguntaba una cosa: **¿el director de IA es divertido?** Nunca se
 contestó — el test de cuatro personas y siete días sigue pendiente. Este
 archivo decía "no construir 3D, motor, cámara, combate ni arte hasta que esté
-contestada", y eso ya no rige: **Pedro decidió avanzar igual** ("el juego lo
+contestada", y eso ya no rige: **Se decidió avanzar igual** ("el juego lo
 quiero ver hoy ya el MVP", "no frenes"). Hay cliente Godot, `.exe`, combate,
 objetos, cielo y ciclo de día y noche.
 
@@ -23,7 +23,7 @@ respuesta sea que sí.
 
 ## Cómo se trabaja acá
 
-**Avanzá.** Pedro pidió explícitamente autonomía: "avanza con todo", "si no
+**Avanzá.** Se pidió explícitamente autonomía: "avanza con todo", "si no
 acepté algo, dalo como aceptado así no te frenás", "no frenes". No le devuelvas
 decisiones que podés tomar con las bases en la mano. Preguntá sólo cuando dos
 lecturas razonables llevan a trabajos distintos.
@@ -38,9 +38,10 @@ preferencia.
 
 Son **cuatro** y la lista completa está en `DISENO.md`. Los tres del servidor:
 
-**1. `lib/world/tick.ts` NUNCA importa el SDK de Anthropic.** La simulación es
-determinista y sin IA. Si algún día ese archivo importa `@anthropic-ai/sdk`, el
-experimento se rompió y no lo vamos a notar.
+**1. `lib/world/tick.ts` NUNCA importa el SDK de IA** (hoy `@anthropic-ai/sdk`;
+el proveedor es intercambiable, el invariante no). La simulación es
+determinista y sin IA. Si algún día ese archivo importa un SDK de
+modelo, el experimento se rompió y no lo vamos a notar.
 
 **2. `lib/world/director.ts` NUNCA escribe estado del mundo.** Lee eventos,
 devuelve texto, guarda la crónica. No mueve gente, no mata NPCs, no reparte
@@ -84,7 +85,10 @@ gente → te enseñan más).
 - **Supabase:** proyecto `saber-escaso`, ref `yctlmtewnbqyfbojwzhi`, São Paulo.
   El CLI ya está logueado — **no le pidas al usuario que entre al dashboard.**
 - **Vercel:** desplegado en https://saber-escaso.vercel.app, cuenta `pcfds`.
-  El CLI ya está logueado. Cron a `/api/tick` cada 10 minutos.
+  El CLI ya está logueado. **Cron a `/api/tick` una vez por hora**
+  (`0 * * * *` en `vercel.json`). Un tick es un día del valle, así que ese
+  número es del que cuelgan TODAS las probabilidades del tick — este renglón
+  decía 10 minutos y era falso.
 - **Regiones:** producción apunta a **`valle-primero`**. `valle-pruebas` es
   donde se rompe y se arregla (`REGION_SLUG=valle-pruebas`). Verificalo antes
   de asumirlo: este renglón ya estuvo mal una vez y mandó a un agente a

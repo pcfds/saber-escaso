@@ -196,7 +196,7 @@ en ningún lado. Depende de 01.4.
 
 Página con wishlist y devlog. Clips de historias emergentes: el activo de
 marketing y la validación son la misma cosa. No antes de que alguien que no sea
-Pedro vuelva tres días seguidos.
+la dirección del proyecto vuelva tres días seguidos.
 
 ---
 
@@ -219,7 +219,7 @@ Pedro vuelva tres días seguidos.
   ids válidos y sobre-leerlos.
 - **Un muerto puede tomar una agenda nueva** en el mismo tick en que muere.
 - **No puedo ver lo que hago en Godot.** Sin GPU bajo WSL, todo juicio visual
-  depende de una captura de Pedro.
+  depende de una captura de quien lo esté jugando.
 - **El costo de la IA escala con jugadores.** Hoy es bajo porque somos uno.
-- **Faltan agentes de ramas que Pedro pidió**: arte / dirección de arte,
+- **Faltan agentes de ramas que Se pidió**: arte / dirección de arte,
   sonido, historia. Hoy hay siete y ninguno cubre esas tres.

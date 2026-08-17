@@ -1,0 +1,133 @@
+<title>Saber Escaso</title>
+<style>
+  :root {
+    --fondo:  #e7eae8;
+    --alto:   #f2f4f2;
+    --tinta:  #141a1c;
+    --suave:  #4b5457;
+    --tenue:  #7b8587;
+    --linea:  #ced4d2;
+    --brasa:  #9d3a10;
+    --frio:   #2f6459;
+    --serif:  "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+    --mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fondo:  #0e1315;
+      --alto:   #151b1d;
+      --tinta:  #dfe5e1;
+      --suave:  #9aa4a1;
+      --tenue:  #6d7775;
+      --linea:  #232c2e;
+      --brasa:  #e8834a;
+      --frio:   #63ab9b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fondo:  #0e1315; --alto: #151b1d; --tinta: #dfe5e1; --suave: #9aa4a1;
+    --tenue:  #6d7775; --linea: #232c2e; --brasa: #e8834a; --frio: #63ab9b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fondo); color: var(--tinta);
+    font-family: var(--serif); font-size: 17px; line-height: 1.66;
+  }
+  .hoja { max-width: 46rem; margin: 0 auto; padding: 0 1.35rem 7rem; }
+
+  h1, h2, h3, h4 { text-wrap: balance; margin: 0; font-weight: 600; }
+  h1 { font-size: clamp(2.5rem, 8vw, 3.7rem); line-height: 1.02; letter-spacing: -0.03em; }
+  h2 {
+    font-size: clamp(1.35rem, 3.6vw, 1.7rem); letter-spacing: -0.012em;
+    margin: 3.4rem 0 0.4rem; padding-top: 1.9rem; border-top: 1px solid var(--linea);
+  }
+  h3 { font-size: 1.12rem; margin: 2rem 0 0.3rem; }
+  h4 { font-size: 0.98rem; margin: 1.5rem 0 0.2rem; color: var(--suave); }
+  p { margin: 0.85rem 0; }
+  a { color: var(--brasa); }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--suave); }
+  code {
+    font-family: var(--mono); font-size: 0.83em;
+    background: var(--alto); padding: 0.1em 0.34em; border-radius: 2px;
+  }
+  pre {
+    background: var(--alto); border: 1px solid var(--linea); border-radius: 3px;
+    padding: 1rem 1.1rem; overflow-x: auto; font-size: 0.84rem; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; font-size: 1em; }
+  hr { border: none; height: 0; margin: 0; }
+
+  ul, ol { margin: 0.85rem 0; padding-left: 1.35rem; }
+  li { margin: 0.42rem 0; }
+  li::marker { color: var(--brasa); }
+
+  blockquote {
+    margin: 1.3rem 0; padding: 0.15rem 0 0.15rem 1.15rem;
+    border-left: 2px solid var(--brasa); color: var(--suave);
+  }
+
+  .tabla { overflow-x: auto; margin: 1.3rem 0; }
+  table { border-collapse: collapse; width: 100%; min-width: 30rem; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.55rem 0.9rem 0.55rem 0; border-bottom: 1px solid var(--linea); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--tenue); font-weight: 500;
+  }
+
+  header { padding: clamp(3rem, 10vh, 5.5rem) 0 0; }
+  .rotulo {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--tenue); margin: 0 0 0.9rem;
+  }
+  .tesis {
+    font-size: clamp(1.15rem, 3.2vw, 1.45rem); line-height: 1.45;
+    color: var(--suave); margin: 1.3rem 0 0; max-width: 32ch;
+  }
+  .tesis b { color: var(--tinta); font-weight: 600; }
+  .enlaces {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem; margin-top: 1.8rem;
+    font-family: var(--mono); font-size: 0.76rem;
+  }
+  .enlaces a { color: var(--frio); text-decoration: none; border-bottom: 1px solid transparent; }
+  .enlaces a:hover { border-bottom-color: currentColor; }
+
+  nav {
+    margin: 3rem 0 0; padding: 1.3rem 0; border-top: 1px solid var(--linea);
+    border-bottom: 1px solid var(--linea);
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.3rem 1.5rem;
+  }
+  nav a {
+    color: var(--suave); text-decoration: none; font-size: 0.88rem;
+    display: block; padding: 0.12rem 0;
+  }
+  nav a:hover { color: var(--brasa); }
+
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--linea);
+    color: var(--tenue); font-size: 0.85rem; }
+</style>
+
+<div class="hoja">
+  <header>
+    <p class="rotulo">Documento de diseño · 17 de agosto de 2026</p>
+    <h1>Saber Escaso</h1>
+    <p class="tesis">Un juego sobre necesitar a alguien. <b>Todo lo que sabés hacer te lo enseñó alguien que eligió enseñártelo, y esa persona se puede morir.</b></p>
+    <div class="enlaces">
+      <a href="https://saber-escaso.vercel.app">jugarlo</a>
+      <a href="https://github.com/pcfds/saber-escaso">servidor</a>
+      <a href="https://github.com/pcfds/saber-escaso-godot">cliente 3D</a>
+      <a href="https://github.com/pcfds/saber-escaso-godot/releases">bajar la demo</a>
+    </div>
+  </header>
+
+  <nav>{{NAV}}</nav>
+
+  {{CUERPO}}
+
+  <footer>
+    Esto es lo que se decidió antes de escribir cada línea de código, y es de
+    dónde saca criterio cualquiera que trabaje acá. Si algo se contradice con el
+    código, es un bug del código o una decisión que alguien tomó sin anotarla.
+  </footer>
+</div>

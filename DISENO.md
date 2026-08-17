@@ -162,7 +162,7 @@ Reglas de tono que salen de ahí:
 - **La historia vieja pesa.** Ruinas que arruinaron a alguien, deudas
   heredadas, oficios que ya no están. Nunca decoración medieval genérica.
 
-### El mix, dicho por Pedro
+### El mix, dicho por la dirección del proyecto
 
 > *"Frieren, las aventuras de la elfa. Y tener en cuenta juegos que te dije
 > como Minecraft, Stardew Valley, misiones como las de Red Dead Redemption o
@@ -397,7 +397,7 @@ funciona.
 
 Esta parte estuvo mal explicada mucho tiempo, con vocabulario de RPG que no
 hacía falta —"presupuesto de habilidad", "casilleros", "techo fijo"— y confundió
-a todo el mundo, incluido a quien lo escribió. Pedro la dijo bien y en una
+a todo el mundo, incluido a quien lo escribió. la dirección del proyecto la dijo bien y en una
 frase:
 
 > *"Yo puedo aprender de todo, iré usando lo que me sirva, en magia usaré lo
@@ -958,7 +958,7 @@ terminado por adelantado**, que es exactamente el modo de falla de Ashes.
 | Early Access | Ingresos de una build real, y el roadmap lo tira la comunidad. |
 | Crowdfunding (opcional, al final) | Recién acá, como conversión de un público que ya existe. |
 
-Ninguna de las dos primeras antes de que **alguien que no sea Pedro vuelva tres
+Ninguna de las dos primeras antes de que **alguien que no seamos nosotros vuelva tres
 días seguidos.**
 
 ---
@@ -974,7 +974,7 @@ Reglas operativas, no de diseño. Son igual de firmes.
   Vercel y GitHub están logueados. Crear proyectos, correr migraciones y
   desplegar es trabajo nuestro. La única excepción legítima es un OAuth
   inicial.
-- **No frenar.** Cuando Pedro no está, se avanza: lo que no aceptó, se da por
+- **No frenar.** Cuando la dirección del proyecto no está, se avanza: lo que no aceptó, se da por
   aceptado. Volver con trabajo hecho, no con preguntas.
 - **Usar lo último y lo mejor que haya.** Vale para modelos, motor, skills,
   hooks y herramientas. Si hay algo mejor que lo que estamos usando, se busca y
@@ -994,7 +994,7 @@ Reglas operativas, no de diseño. Son igual de firmes.
 No se negocian. Existen porque sin ellos el proyecto se convierte en otra cosa
 sin que nadie lo note.
 
-**1. `lib/world/tick.ts` nunca importa el SDK de Anthropic.**
+**1. `lib/world/tick.ts` nunca importa el SDK de IA.**
 La simulación es determinista. Si el tick usa IA, dejamos de poder distinguir
 si el mundo es interesante o si el LLM lo está maquillando.
 
@@ -1038,7 +1038,7 @@ encuadra y las pone donde las veas.
 
 ## 16. Lo que falta decidir
 
-### Las tres que bloquean. **Las contesta Pedro.**
+### Las tres que bloquean. **Las contesta la dirección del proyecto.**
 
 Ninguna la resuelve un agente por su cuenta, y las tres bloquean trabajo que ya
 está empezado.
@@ -1047,7 +1047,7 @@ está empezado.
 |---|---|---|---|
 | 1 | **Piso de zoom** | Define el presupuesto de arte de todo el proyecto: resolución de texturas, LODs, y si hacen falta rigs faciales. Cada modelo que se haga antes de esto se puede tener que rehacer. | Hasta leer silueta y ropa, no la cara. Los primeros planos se autoran aparte, como modo. |
 | 2 | **Control o teclado** | Cambia el sistema de magia **desde la raíz**. Dibujar runas con un stick es horrible. No es una opción de accesibilidad que se agrega después. | Si va control, la magia son **secuencias o radiales, nunca trazos**. |
-| 3 | **Dirección de arte: quién** | Ningún agente sostiene una dirección de arte: no es una tarea, es un criterio. **La coherencia es lo que se lee como "muy lindo", no la novedad.** | Una persona con gusto decide y no se suelta. Pedro o alguien que contrate. |
+| 3 | **Dirección de arte: quién** | Ningún agente sostiene una dirección de arte: no es una tarea, es un criterio. **La coherencia es lo que se lee como "muy lindo", no la novedad.** | Una persona con gusto decide y no se suelta. la dirección del proyecto o alguien que contrate. |
 
 ### Lo que se decide con evidencia, no ahora
 
@@ -1081,20 +1081,20 @@ nadie las vuelva a proponer como si fueran nuevas.
 
 | Idea | Por qué murió | Última posición |
 |---|---|---|
-| **"Lo tuyo es inviolable"** | Se propuso para sacar la ansiedad del full-loot. Pedro la rechazó: *"No es inviolable lo mío, tendré amigos jugando, NPCs contratados que defiendan, si pierdo pierdo."* | **Nada es inviolable.** La defensa es social, no normativa (§2). |
-| **Archipiélago de islas sueltas** | Pedro lo cortó: *"no sólo archipiélagos, es un mundo que se va haciendo procedural y va creciendo."* | Mundo contiguo que se abre por presión de población (§7.4). |
-| **Tiempo 4× más rápido para el conectado** | Habría inventado el grindeo por la puerta de atrás: estar conectado valdría 4×, y los mundos populares dejarían congelados a los solitarios. Fue una mala lectura de lo que Pedro pidió. | Normal para todos si hay alguien, lento si no hay nadie (§7.3). |
+| **"Lo tuyo es inviolable"** | Se propuso para sacar la ansiedad del full-loot. la dirección del proyecto la rechazó: *"No es inviolable lo mío, tendré amigos jugando, NPCs contratados que defiendan, si pierdo pierdo."* | **Nada es inviolable.** La defensa es social, no normativa (§2). |
+| **Archipiélago de islas sueltas** | la dirección del proyecto lo cortó: *"no sólo archipiélagos, es un mundo que se va haciendo procedural y va creciendo."* | Mundo contiguo que se abre por presión de población (§7.4). |
+| **Tiempo 4× más rápido para el conectado** | Habría inventado el grindeo por la puerta de atrás: estar conectado valdría 4×, y los mundos populares dejarían congelados a los solitarios. Fue una mala lectura de lo que Se pidió. | Normal para todos si hay alguien, lento si no hay nadie (§7.3). |
 | **Costura sin cortes entre regiones** | Server meshing. Star Citizen. | Bordes con transición (§7.2). |
 | **Vender o transferir el personaje** | Rompe la escasez del saber, y las relaciones no se transfieren igual. | Se traspasa **la posición**, no la persona (§12.2). |
 | **Kickstarter como primer paso** | Es conversión, no descubrimiento, y obliga a prometer el universo terminado. | Steam + wishlists primero (§12.5). |
 | **El cliente web como el juego** | `lib/mapa.ts` — 600 líneas de Three.js con caminar, presencia y combate. Se estiró mensaje a mando y no convergía; el navegador no da personajes animados, ni assets, ni Steam. | **Muerto.** El cliente es Godot. `saber-escaso.vercel.app` pasa a ser landing + descarga. `lib/mapa.ts` y la ruta `/mapa` siguen vivos en el repo y hay que darlos de baja (ver backlog). |
-| **Presupuesto de habilidad con casilleros** (estilo Ultima Online) | Se propuso para evitar la progresión vertical, y es jerga de RPG que no hacía falta. Pedro: *"me pierdo acá."* El objetivo era bueno; la forma, no. | Tres reglas sin jerga: sin techo en lo que sabés, límite natural en lo que llevás, mejora en lo que usás (§8.3). |
+| **Presupuesto de habilidad con casilleros** (estilo Ultima Online) | Se propuso para evitar la progresión vertical, y es jerga de RPG que no hacía falta. la dirección del proyecto: *"me pierdo acá."* El objetivo era bueno; la forma, no. | Tres reglas sin jerga: sin techo en lo que sabés, límite natural en lo que llevás, mejora en lo que usás (§8.3). |
 | **NPCs de conversación libre** | Se hablan una vez, se descubre el chatbot, no se les vuelve a hablar. | Dos líneas del estado real y opciones que hacen algo (§9.4). |
-| **`eve` de Vercel para el director** | Se evaluó a pedido de Pedro. El director es una llamada sin estado, no un agente durable: no aporta y suma una dependencia. | **No se usa.** Si vuelve a proponerse, que sea con un caso nuevo. |
+| **`eve` de Vercel para el director** | Se evaluó a pedido de la dirección del proyecto. El director es una llamada sin estado, no un agente durable: no aporta y suma una dependencia. | **No se usa.** Si vuelve a proponerse, que sea con un caso nuevo. |
 | **"Los 100 agentes"** | El número no significaba nada. | **Una rama por responsabilidad real**, y son **internas de desarrollo, no NPCs**. |
 | **Unity** | La biblia lo recomendaba por asset store y networking. Se eligió Godot y ya hay un cliente andando. | **Godot 4.7.** Los dos exportan a mobile, así que la puerta sigue abierta. |
 
-**Una tensión que sigue abierta y no hay que fingir que se resolvió.** Pedro
+**Una tensión que sigue abierta y no hay que fingir que se resolvió.** la dirección del proyecto
 pidió *"un MVP pero debe tener todo lo que pedimos al origen"*. La respuesta
 fue: **MVP del bucle sí** (un vertical slice donde todos los sistemas estén en
 su versión más flaca), **MVP de la lista de features no** — "un poco de todo"
@@ -1142,7 +1142,7 @@ Se copian sueltas, por eje. Nunca en paquete.
 
 ### Vista y control
 - **Minecraft / Stardew Valley** — la vista, y **quedarse a construir como
-  forma legítima de jugar** (§5). Pedidas por Pedro desde el primer día.
+  forma legítima de jugar** (§5). Pedidas por la dirección del proyecto desde el primer día.
 - **Baldur's Gate 3** — los personajes y la cámara: órbita con zoom y primeros
   planos como **modo aparte**.
 - **Magicka** — ocho elementos, gramática en vez de lista de hechizos.

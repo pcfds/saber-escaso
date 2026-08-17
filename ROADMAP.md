@@ -77,7 +77,7 @@ al que pelea con amigos y al que se queda construyendo.
 
 **04 · Que el mundo se genere solo.**
 El generador de regiones. Es el tramo que convierte "un valle" en "un mundo", y
-Pedro lo pidió textual: *"falta todo y el motor procedural pero sin perder
+Se pidió textual: *"falta todo y el motor procedural pero sin perder
 nada"*. La regla que lo gobierna no es de terreno: **no se genera terreno, se
 genera historia** — una región sale del generador con gente adentro, con lo que
 saben y con lo que perdieron, y si sale sin nadie que sepa nada, salió mal y el
@@ -90,7 +90,7 @@ mostrarle a un desconocido.
 
 **06 · Steam.**
 Página con wishlist y devlog, clips de historias emergentes, demo en Next Fest.
-Ninguna de esas antes de que alguien que no sea Pedro vuelva tres días
+Ninguna de esas antes de que alguien que no seamos nosotros vuelva tres días
 seguidos. **Kickstarter no es el primer paso** y puede que no sea ninguno: ver
 `DISENO.md` §12.5.
 
@@ -147,8 +147,8 @@ la respuesta sea que sí, no se toca.
 - **El costo de la IA escala con la gente.** Hoy es bajo porque somos uno. Cada
   charla es una llamada y cada crónica otra.
 - **Nadie del equipo puede ver el juego.** Godot corre sin GPU bajo WSL: la
-  escena que se compila no se parece a la que ve Pedro. Todo juicio visual
-  depende de una captura suya.
+  escena que se compila no se parece a la que ve la dirección del proyecto. Todo juicio visual
+  depende de una captura de quien lo esté jugando.
 
 ---
 

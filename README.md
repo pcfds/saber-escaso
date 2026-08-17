@@ -34,7 +34,7 @@ lib/web.ts                el servidor: landing, API del cliente 3D, crónica
 No se negocian. Existen porque sin ellos el proyecto se convierte en otra cosa
 sin que nadie lo note.
 
-1. **`tick.ts` nunca importa el SDK de Anthropic.** La simulación es
+1. **`tick.ts` nunca importa el SDK de IA.** La simulación es
    determinista. Si el tick usa IA, dejamos de poder distinguir si el mundo es
    interesante o si el modelo lo está maquillando.
 2. **`director.ts` nunca escribe estado del mundo.** Lee eventos, devuelve
