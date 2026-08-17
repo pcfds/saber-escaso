@@ -675,7 +675,13 @@ async function sembrarElPasado(c: Corpus): Promise<{ siembras: Siembra[]; costo:
     '`hace_inviernos` es hace cuánto, en inviernos. Aquí nadie cuenta en años.',
     '`lugar_slug` es uno de: ' + c.lugares.map((l) => l.slug).join(', ') + ' — o "" si no es de un lugar.',
     '`personas_del_pasado` son los nombres propios de gente que YA NO EXISTE que hayas',
-    'nombrado en el texto. Máximo dos por pieza y no repitas nombres de la gente de hoy.',
+    'nombrado en el texto. Máximo dos por pieza.',
+    '',
+    '⚠ NADIE de las listas de arriba —ni los vivos ni los que ya no están— puede ir',
+    'ahí. Los que se murieron mientras el mundo corría tienen su muerte anotada con',
+    'fecha; si los ponés en una pieza de hace generaciones, el valle queda con dos',
+    'versiones de cuándo murió la misma persona. Podés NOMBRARLOS como testigos de',
+    'algo viejo que siguen recordando, pero no como protagonistas de aquello.',
     '`hechos` son las referencias entre corchetes de arriba que esa pieza explica.',
     '`por_que` es una línea tuya, fuera de ficción: qué de la lista te llevó a escribir esto.',
   ].join('\n')
@@ -702,14 +708,42 @@ async function sembrarElPasado(c: Corpus): Promise<{ siembras: Siembra[]; costo:
   })
 
   const slugs = new Set(c.lugares.map((l) => l.slug))
-  const vivos = new Set(c.gente.filter((p) => p.alive).map((p) => p.name))
+  /**
+   * Nadie de `people` puede ser "gente del pasado". Ni los vivos ni los
+   * muertos.
+   *
+   * **Éste era el guardián y tenía un agujero exacto: sólo miraba a los
+   * vivos.** Lo encontró jugando la secuencia entera de punta a punta. Odila
+   * contestó *"Ilde fue la última que supo templar un filo en agua corriente.
+   * Murió hace cuarenta inviernos"*, y el modelo no había inventado nada:
+   * repetía fielmente una pieza del pasado, marcada `sabido`, fechada en
+   * *"hace dos generaciones, 40 inviernos"*, que nombraba a Ilde.
+   *
+   * **Ilde murió el día 101 de un valle que va por el 292** — hace ciento
+   * noventa y un días, con su muerte anotada en `events` con fecha. O sea que
+   * el pasado se tragó un hecho del presente y le puso cuarenta inviernos
+   * encima, y a partir de ahí el valle tiene dos versiones de cuándo murió su
+   * herrera, las dos con autoridad.
+   *
+   * Un vivo en el pasado era el autor matando a alguien por la puerta de
+   * atrás; **un muerto reciente es peor**, porque no se nota: la pieza suena
+   * bien, es verdad que se murió y es verdad que se llevó el oficio. Lo único
+   * falso es cuándo, y eso no lo audita nadie.
+   *
+   * La regla es limpia: **si está en `people`, su historia es de la
+   * simulación, no de la leyenda.** El que se murió ya tiene su evento con
+   * fecha. Los que sí pueden aparecer son los que nunca existieron como fila
+   * —el padre de Ilde, la mujer que pasó un verano— y los VIVOS como testigos
+   * de algo viejo, que es distinto de ser sus protagonistas: la vieja Ren
+   * vivía dentro de la Casa Quemada cuando se incendió, y eso está bien y
+   * queda.
+   */
+  const deLaSimulacion = new Set(c.gente.map((p) => p.name))
   const buenas = r.datos.piezas.filter((p) => {
     p.hechos = p.hechos.map(limpiarRef).filter((h) => c.refs.has(h))
     const anclada = p.hechos.length > 0
     const largo = p.texto.trim().length >= 100 && p.texto.trim().length <= 1200
-    // Un nombre de alguien vivo hoy en `personas_del_pasado` sería el autor
-    // matando a un vivo por la puerta de atrás. No se corrige: se descarta.
-    const noPisaVivos = !p.personas_del_pasado.some((n) => vivos.has(n))
+    const noPisaVivos = !p.personas_del_pasado.some((n) => deLaSimulacion.has(n))
     return anclada && largo && noPisaVivos
   }).slice(0, 7)   // el techo lo aplica el código: el esquema no lo puede pedir
   if (buenas.length === 0) return null
