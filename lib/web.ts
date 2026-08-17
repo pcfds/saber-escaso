@@ -13,6 +13,7 @@ import { step } from './world/tick.js'
 import { narrate } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear } from './world/combate.js'
+import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
 const esc = (s: string) =>
@@ -196,17 +197,25 @@ export async function handler(
   }
 
   try {
+    // La home es la landing del juego (lib/landing.ts). El formulario para
+    // sacar un personaje vive ahora en /entrar, que es adonde apunta la
+    // landing: al que llega de afuera hay que contarle qué es esto antes de
+    // pedirle un nombre.
     if (url.pathname === '/') {
+      return send(landing())
+    }
+
+    if (url.pathname === '/entrar' && !url.searchParams.get('name')) {
       const region = await getRegion()
       const { count } = await db.from('players')
         .select('*', { count: 'exact', head: true }).eq('region_id', region.id)
-      return send(page('Saber Escaso', `
-        <h1>Saber Escaso</h1>
+      return send(page('Entrar al valle', `
+        <h1>Entrar al valle</h1>
         <p class="sub">${esc(region.name)} · día ${region.tick} · ${count ?? 0} personas andan por acá</p>
         <div class="intro">
-          Un valle donde el saber vive en gente que se muere. Entrás con un nombre
-          y te queda <b>un link privado</b>: ese link es tu personaje. Guardalo —
-          nadie más puede entrar con él, y sin él no volvés a entrar.
+          Elegí un nombre y te queda <b>un link privado</b>: ese link es tu
+          personaje. Guardalo — nadie más puede entrar con él, y sin él no
+          volvés a entrar. Va a servirte también para el juego que se baja.
         </div>
         <form method="get" action="/entrar"><div class="row">
           <input name="name" placeholder="tu nombre" required autofocus maxlength="24">
@@ -243,7 +252,7 @@ export async function handler(
           db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
           // ("mató a X"), pero el cliente no tiene que plantar el cadáver otra vez.
-          db.from('threats').select('id, kind, health, max_health, place_id')
+          db.from('threats').select('id, kind, nombre, people_id, health, max_health, place_id')
             .eq('region_id', region.id).eq('alive', true),
           db.from('objects').select('kind, quality, made_by')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
@@ -267,8 +276,12 @@ export async function handler(
           },
           player: { name: player.name, place_id: player.place_id },
           places: places.data ?? [], people: people.data ?? [],
+          // `nombre` no es adorno: los que no son humanos no son mobs, son
+          // pueblos, y matar a alguien con nombre pesa distinto que matar a
+          // "un merodeador".
           amenazas: (amenazas.data ?? []).map((a) => ({
-            id: a.id, kind: a.kind, health: a.health, max_health: a.max_health,
+            id: a.id, kind: a.kind, nombre: a.nombre ?? null,
+            health: a.health, max_health: a.max_health,
             place_slug: slugDe(a.place_id),
           })),
           // `made_by` es el nombre y no el id a propósito: el que lo forjó se
@@ -298,11 +311,52 @@ export async function handler(
         const found = await byToken(token)
         if (!found) return json({ error: 'no existe' })
         const f = await body(req)
+        // `region.tick` es el último día CERRADO. Un golpe que pasa ahora pasa
+        // durante el día en curso, que es el que va a cerrar el próximo tick.
+        // No es un detalle: el director narra con `.gt('tick', last_seen)` y
+        // después deja `last_seen = region.tick`, así que un evento escrito con
+        // el tick actual cae en un agujero y el que mató al bicho nunca se
+        // entera de que lo mató. Con +1 entra en la ventana siguiente, igual
+        // que cualquier otra cosa que pase ese día.
         const r = await pelear({
-          regionId: found.region.id, tick: found.region.tick,
+          regionId: found.region.id, tick: found.region.tick + 1,
           player: found.player, threatId: f.get('id'),
         })
         return json(r)
+      }
+
+      // Dónde está parado.
+      //
+      // En el 3D caminás libre por una escena que contiene todos los lugares,
+      // así que el servidor no se enteraba nunca: para el mundo seguías donde
+      // habías entrado. Eso rompía casi todo lo que depende de estar presente
+      // —aprender y enseñar exigen que el otro esté en tu lugar, los bichos
+      // muerden a quien está ahí, los testigos de lo que hacés son los que
+      // están ahí— y era la mitad de la sensación de que el cliente y el
+      // mundo son dos cosas distintas.
+      //
+      // El cliente reporta y el servidor le cree. Es cooperativo, no
+      // competitivo: no vale la pena pagar la complejidad de validar posición
+      // hasta que haya alguien con motivos para mentir.
+      if (req.method === 'POST' && parts[2] === 'estoy') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        const slug = f.get('lugar') ?? ''
+        const { data: destino } = await db.from('places').select('id, name')
+          .eq('region_id', found.region.id).eq('slug', slug).maybeSingle()
+        if (!destino) return json({ ok: false, porque: `no existe "${slug}"` })
+        if (destino.id === found.player.place_id) return json({ ok: true, lugar: destino.name })
+        await db.from('players').update({ place_id: destino.id }).eq('id', found.player.id)
+        // Llegar a un lugar es un hecho del mundo: alguien te puede haber
+        // visto. Va a `events` como cualquier otra cosa.
+        await db.from('events').insert({
+          region_id: found.region.id, tick: found.region.tick + 1, kind: 'llegada',
+          place_id: destino.id,
+          summary: `${found.player.name} llegó a ${destino.name}.`,
+          detail: { player: found.player.name, place: destino.name },
+        })
+        return json({ ok: true, lugar: destino.name })
       }
 
       if (req.method === 'POST' && parts[2] === 'hablar') {

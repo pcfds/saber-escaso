@@ -1,25 +1,22 @@
 /**
- * La landing pública. Es lo primero que ve alguien que no sabe nada del juego.
+ * La landing del juego.
  *
- * Reglas que se siguieron acá, y que conviene no romper al editarla:
- *  - **Todo lo que dice sale de DISENO.md y de ROADMAP.md.** Nada de features
- *    que no existan: la sección "Lo que es hoy" copia el estado real, incluida
- *    la parte fea. Un juego indie que miente en la landing se quema con su
- *    primera oleada de jugadores.
- *  - **Un archivo, cero dependencias.** CSS embebido, sin CDN, sin fuentes
- *    externas, sin JS. Se sirve igual desde Vercel que desde un `file://`.
- *  - **Paleta del valle:** frío al atardecer, y la brasa de la fragua como
- *    único acento cálido. Todos los colores se definen en `:root` y el modo
- *    oscuro sólo los reemplaza; ninguno vive únicamente adentro del
- *    `@media`, que es como se termina con texto de un tema sobre el fondo del
- *    otro.
- *  - **El botón de descarga entra en el primer scroll.** Si algún día el hero
- *    crece, lo que se recorta es el texto, no el botón.
+ * Dos cosas que se aprendieron a los golpes escribiéndola:
+ *
+ * 1. **La visión va adentro.** La primera versión sólo listaba lo que ya
+ *    funcionaba, por honestidad, y quedó un changelog. Una landing de juego
+ *    tiene que contar el juego que estás haciendo — mazmorras, construir,
+ *    aventuras con amigos, un mundo que sigue sin vos — y marcar con todas las
+ *    letras qué está hecho y qué no. Honesto no es callarse la ambición: es no
+ *    mentir sobre en qué punto está.
+ *
+ * 2. **Nada de grid ingenioso.** La versión anterior usaba un `<dl>` a dos
+ *    columnas que colapsó y dejó el texto cortado en una palabra por renglón.
+ *    Acá: una columna, ancho máximo, y punto. En una página que casi todo el
+ *    mundo va a ver una sola vez, aburrido y correcto le gana a vistoso y roto.
  */
 
 const DESCARGA = 'https://github.com/pcfds/saber-escaso-godot/releases/tag/v0.1.0-demo'
-const REPO_SERVIDOR = 'https://github.com/pcfds/saber-escaso'
-const REPO_CLIENTE = 'https://github.com/pcfds/saber-escaso-godot'
 
 export function landing(): string {
   return `<!doctype html>
@@ -28,364 +25,233 @@ export function landing(): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Saber Escaso</title>
-<meta name="description" content="Un mundo de fantasía donde el conocimiento vive en gente que se muere. Demo temprana para Windows.">
+<meta name="description" content="Un mundo de fantasía donde el conocimiento vive en gente que se muere.">
 <meta name="color-scheme" content="light dark">
 <meta property="og:title" content="Saber Escaso">
 <meta property="og:description" content="Un mundo de fantasía donde el conocimiento vive en gente que se muere.">
 <meta property="og:type" content="website">
 <style>
-  :root{
-    --fondo:#e4e8e7;
-    --fondo-hero:#d7dcdc;
-    --cielo:#c3ccce;
-    --panel:#eef1f0;
-    --linea:#c2c9c7;
-    --linea-suave:#d3d9d7;
-    --texto:#161d20;
-    --tenue:#525d60;
-    --brasa:#9d3a10;
-    --brasa-viva:#c2521c;
-    --brasa-boton:#a33d11;
-    --brasa-tinta:#fdf4ee;
-    --resplandor:rgba(157,58,16,.16);
-    --serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  :root {
+    --fondo:  #e6e9e7;
+    --alto:   #f2f4f2;
+    --tinta:  #14191b;
+    --suave:  #4d5658;
+    --tenue:  #7c8688;
+    --linea:  #cdd3d1;
+    --brasa:  #9d3a10;
+    --serif:  "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+    --mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --fondo:#0e1417;
-      --fondo-hero:#0a1013;
-      --cielo:#141d22;
-      --panel:#131a1d;
-      --linea:#25302f;
-      --linea-suave:#1b2326;
-      --texto:#dbe2de;
-      --tenue:#939d9a;
-      --brasa:#e8834a;
-      --brasa-viva:#f0955f;
-      --brasa-boton:#dd6c2e;
-      --brasa-tinta:#120e0b;
-      --resplandor:rgba(232,131,74,.14);
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fondo:  #0e1315;
+      --alto:   #141a1c;
+      --tinta:  #dfe5e1;
+      --suave:  #9aa4a1;
+      --tenue:  #6e7876;
+      --linea:  #232c2e;
+      --brasa:  #e8834a;
     }
   }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--fondo);
+    color: var(--tinta);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.65;
+  }
+  .hoja { max-width: 44rem; margin: 0 auto; padding: 0 1.35rem 6rem; }
 
-  *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%}
-  body{
-    margin:0;
-    background-color:var(--fondo);
-    color:var(--texto);
-    font:17px/1.6 var(--serif);
-    overflow-x:hidden;
-  }
-  a{color:var(--brasa);text-underline-offset:3px;text-decoration-thickness:1px}
-  a:hover{color:var(--brasa-viva)}
-  strong{font-weight:600}
+  h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; }
+  h1 { font-size: clamp(2.6rem, 9vw, 4rem); line-height: 1; letter-spacing: -0.03em; }
+  h2 { font-size: clamp(1.3rem, 4vw, 1.6rem); line-height: 1.2; letter-spacing: -0.01em; }
+  h3 { font-size: 1rem; }
+  p { margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+  a { color: var(--brasa); }
 
-  .col{width:100%;max-width:44rem;margin:0 auto;padding:0 clamp(20px,5vw,32px)}
-
-  /* ---- hero: el valle al atardecer, la brasa abajo a la izquierda ---- */
-  .hero{
-    background-color:var(--fondo-hero);
-    background-image:
-      radial-gradient(60rem 22rem at 8% 118%, var(--resplandor), transparent 70%),
-      linear-gradient(to bottom, var(--cielo) 0%, var(--fondo-hero) 62%);
-    border-bottom:1px solid var(--linea);
-    padding:clamp(40px,9vh,80px) 0 clamp(32px,6vh,56px);
-  }
-  .marca{
-    font:12px/1 var(--mono);
-    letter-spacing:.18em;
-    text-transform:uppercase;
-    color:var(--tenue);
-    margin:0 0 clamp(20px,5vh,36px);
-  }
-  h1{
-    font-size:clamp(38px,10vw,68px);
-    line-height:1.02;
-    letter-spacing:-.02em;
-    font-weight:600;
-    margin:0 0 18px;
-  }
-  .gancho{
-    font-size:clamp(20px,4.4vw,26px);
-    line-height:1.35;
-    margin:0 0 16px;
-    max-width:26ch;
-  }
-  .hero p.bajada{
-    color:var(--tenue);
-    margin:0 0 clamp(26px,5vh,34px);
-    max-width:54ch;
+  .rotulo {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--tenue);
+    margin: 0 0 0.9rem;
   }
 
-  .descarga{
-    display:flex;
-    flex-wrap:wrap;
-    align-items:center;
-    gap:14px 20px;
+  /* ── portada ───────────────────────────────────────── */
+  header {
+    padding: clamp(3rem, 11vh, 6rem) 0 clamp(2.5rem, 7vh, 4rem);
+    border-bottom: 1px solid var(--linea);
   }
-  .boton{
-    display:inline-block;
-    background:var(--brasa-boton);
-    color:var(--brasa-tinta);
-    font:600 18px/1 var(--serif);
-    letter-spacing:.01em;
-    padding:16px 26px;
-    border:1px solid var(--brasa-boton);
-    border-radius:2px;
-    text-decoration:none;
-    box-shadow:0 0 0 0 var(--resplandor);
-    transition:box-shadow .15s ease, transform .15s ease;
+  .tesis {
+    font-size: clamp(1.2rem, 3.6vw, 1.55rem);
+    line-height: 1.45;
+    color: var(--suave);
+    margin: 1.4rem 0 0;
+    max-width: 30ch;
   }
-  .boton:hover{
-    color:var(--brasa-tinta);
-    box-shadow:0 0 28px 2px var(--resplandor);
-    transform:translateY(-1px);
+  .tesis b { color: var(--tinta); font-weight: 600; }
+
+  .bajar { margin-top: 2.4rem; }
+  .boton {
+    display: inline-block;
+    background: var(--brasa);
+    color: #fdf5f0;
+    font-family: var(--mono);
+    font-size: 0.82rem; letter-spacing: 0.09em; text-transform: uppercase;
+    text-decoration: none;
+    padding: 0.95rem 1.7rem;
+    border-radius: 2px;
   }
-  .boton:focus-visible{outline:2px solid var(--texto);outline-offset:3px}
-  .ficha{
-    font:12px/1.7 var(--mono);
-    letter-spacing:.08em;
-    text-transform:uppercase;
-    color:var(--tenue);
+  .boton:hover, .boton:focus-visible { filter: brightness(1.12); }
+  .bajo-boton { font-size: 0.87rem; color: var(--tenue); margin: 0.85rem 0 0; max-width: 44ch; }
+
+  /* ── secciones ─────────────────────────────────────── */
+  section { padding: clamp(2.4rem, 6vh, 3.6rem) 0; border-bottom: 1px solid var(--linea); }
+  section p, section li { max-width: 60ch; }
+
+  .lista { list-style: none; margin: 1.3rem 0 0; padding: 0; }
+  .lista li { margin: 0 0 1.15rem; padding-left: 1.15rem; position: relative; }
+  .lista li:last-child { margin-bottom: 0; }
+  .lista li::before {
+    content: ""; position: absolute; left: 0; top: 0.72em;
+    width: 5px; height: 5px; background: var(--brasa); border-radius: 50%;
   }
-  .aviso{
-    margin:18px 0 0;
-    font-size:15px;
-    color:var(--tenue);
-    max-width:52ch;
-    border-left:2px solid var(--linea);
-    padding-left:14px;
+  .lista b { font-weight: 600; }
+  .lista .nota { color: var(--suave); }
+
+  .falta li::before { background: none; border: 1px solid var(--tenue); width: 4px; height: 4px; }
+  .falta li { color: var(--suave); margin-bottom: 0.7rem; }
+
+  .aviso {
+    background: var(--alto); border-left: 2px solid var(--brasa);
+    padding: 1rem 1.15rem; margin: 1.4rem 0 0;
+    font-size: 0.94rem; color: var(--suave);
   }
 
-  /* ---- secciones ---- */
-  section{padding:clamp(38px,7vh,64px) 0;border-bottom:1px solid var(--linea-suave)}
-  h2{
-    font:12px/1 var(--mono);
-    letter-spacing:.18em;
-    text-transform:uppercase;
-    color:var(--tenue);
-    font-weight:400;
-    margin:0 0 22px;
-  }
-  h2::after{
-    content:"";
-    display:block;
-    width:34px;
-    height:2px;
-    background:var(--brasa);
-    margin-top:10px;
-  }
-  section > .col > p{max-width:56ch}
-  p{margin:0 0 16px}
-  p:last-child{margin-bottom:0}
+  .pasos { margin: 1.3rem 0 0; padding-left: 1.4rem; }
+  .pasos li { margin-bottom: 0.7rem; }
 
-  dl{margin:0;display:grid;grid-template-columns:1fr;gap:0}
-  dt{
-    font-size:19px;
-    font-weight:600;
-    line-height:1.3;
-    margin:0;
-    padding-top:18px;
-    border-top:1px solid var(--linea-suave);
-  }
-  dl > dt:first-of-type{border-top:0;padding-top:0}
-  dd{margin:6px 0 18px;color:var(--tenue);max-width:56ch}
-  dl > dd:last-of-type{margin-bottom:0}
-  @media (min-width:44rem){
-    dl{grid-template-columns:15rem 1fr}
-    dt{padding-right:24px}
-    dd{margin:0;padding-top:18px;border-top:1px solid var(--linea-suave)}
-    dl > dd:first-of-type{border-top:0;padding-top:0}
-  }
-
-  ul.roto{list-style:none;margin:0 0 20px;padding:0;max-width:58ch}
-  ul.roto li{
-    position:relative;
-    padding:0 0 0 20px;
-    margin:0 0 10px;
-    color:var(--tenue);
-  }
-  ul.roto li::before{
-    content:"";
-    position:absolute;
-    left:0;
-    top:.72em;
-    width:9px;
-    height:1px;
-    background:var(--brasa);
-  }
-  ul.roto li strong{color:var(--texto)}
-
-  .noexiste{
-    background:var(--panel);
-    border-left:2px solid var(--linea);
-    padding:16px 18px;
-    color:var(--tenue);
-    font-size:16px;
-    max-width:58ch;
-  }
-  .noexiste b{color:var(--texto);font-weight:600}
-
-  ol.tramos{list-style:none;margin:0;padding:0;counter-reset:tramo}
-  ol.tramos li{
-    counter-increment:tramo;
-    display:grid;
-    grid-template-columns:2.6rem 1fr;
-    gap:0 14px;
-    padding:14px 0;
-    border-top:1px solid var(--linea-suave);
-    max-width:58ch;
-  }
-  ol.tramos li:first-child{border-top:0;padding-top:0}
-  ol.tramos li::before{
-    content:counter(tramo,decimal-leading-zero);
-    font:13px/1.7 var(--mono);
-    color:var(--brasa);
-    letter-spacing:.06em;
-  }
-  ol.tramos b{font-weight:600;display:block}
-  ol.tramos span{color:var(--tenue);display:block;margin-top:2px}
-
-  ol.pasos{margin:0;padding-left:1.3em;max-width:56ch}
-  ol.pasos li{margin:0 0 14px;padding-left:6px}
-  ol.pasos li:last-child{margin-bottom:0}
-  ol.pasos span{color:var(--tenue);display:block;font-size:16px}
-
-  .cierre{display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px;margin-top:26px}
-
-  footer{padding:clamp(32px,6vh,52px) 0 clamp(44px,8vh,72px);color:var(--tenue);font-size:15px}
-  footer p{max-width:56ch}
-  footer .repos{font:12px/2 var(--mono);letter-spacing:.06em;text-transform:uppercase}
-  footer .repos a{display:inline-block;margin-right:22px}
+  footer { padding: 2.4rem 0; color: var(--tenue); font-size: 0.87rem; }
+  footer a { color: var(--suave); }
 </style>
 </head>
 <body>
+<div class="hoja">
 
-<header class="hero">
-  <div class="col">
-    <p class="marca">Demo temprana · Windows</p>
-    <h1>Saber Escaso</h1>
-    <p class="gancho">Un mundo de fantasía donde el conocimiento vive en gente que se muere.</p>
-    <p class="bajada">Si el último que sabe forjar se va sin enseñarle a nadie, no vuelve a haber
-      una hoja nueva. Nunca. Todo lo demás —el combate, los oficios, la gente— existe para que eso
-      se sienta.</p>
-    <div class="descarga">
-      <a class="boton" href="${DESCARGA}">Descargar la demo</a>
-      <span class="ficha">Windows · 37 MB · v0.1.0</span>
-    </div>
-    <p class="aviso">Todavía no hay cuentas. Para entrar hace falta un link de jugador, y por
-      ahora se pide: cada uno se reparte a mano.</p>
+<header>
+  <p class="rotulo">Demo temprana · Windows · gratis</p>
+  <h1>Saber Escaso</h1>
+  <p class="tesis">Un mundo de fantasía donde el conocimiento vive en gente que se muere.
+  <b>Si el último que sabe forjar se va sin enseñarle a nadie, no vuelve a haber una hoja nueva. Nunca.</b></p>
+  <div class="bajar">
+    <a class="boton" href="${DESCARGA}">Bajar la demo</a>
+    <p class="bajo-boton">Windows, 37&nbsp;MB. Necesitás un link de jugador para entrar:
+    lo sacás en <a href="/entrar">esta página</a> y es tuyo, nadie más puede usarlo.</p>
   </div>
 </header>
 
-<main>
+<section>
+  <p class="rotulo">El juego</p>
+  <h2>Un valle que sigue su vida mientras no estás</h2>
+  <p>Entrás una hora, no ocho. Cuando volvés al otro día, la herrera consiguió el
+  carbón que buscaba, alguien le enseñó a alguien, y hay una casa donde antes no
+  había. Nada de eso lo escribió un guionista: el mundo corre en un servidor y
+  avanza igual con vos o sin vos. Si no hay nadie conectado va más lento, pero
+  no se detiene.</p>
+  <ul class="lista">
+    <li><b>Aprendés de personas, no de menús.</b> Nadie nace sabiendo y no hay
+    recetas tiradas en un cofre. Alguien tiene que enseñarte, y para eso tiene
+    que confiar en vos. <span class="nota">Después mejorás haciéndolo: la
+    primera hoja que forjás es un fierro torcido.</span></li>
+
+    <li><b>Los NPCs se acuerdan de vos.</b> De lo que hiciste y de lo que
+    hablaron. Cada uno tiene su historia, su forma de hablar y sus propias
+    metas, y te valora o te teme por separado — se puede respetar a alguien y
+    tenerle terror al mismo tiempo.</li>
+
+    <li><b>Las aventuras salen de la gente.</b> Las metas que los NPCs
+    persiguen solos son las quests: podés tomarlas, o dejar que se resuelvan
+    sin vos y perderte lo que había del otro lado.</li>
+
+    <li><b>Los que no son humanos tampoco son bichos.</b> Son pueblos, con
+    lengua propia y con motivos. Atacan por algo que les hicimos. Si aprendés
+    su lengua podés negociar en vez de matar — y saben cosas que ningún humano
+    del valle sabe.</li>
+
+    <li><b>Construís.</b> Una casa, después un pueblo, después lo que aguantes
+    sostener. Podés levantarlo vos o pagarle a alguien para que lo levante.</li>
+
+    <li><b>Con amigos, y en el mundo de otros.</b> Podés viajar a la parte del
+    mundo de otro jugador, quedarte, construir ahí. Nada es inviolable, tampoco
+    lo tuyo. El PvP es opcional.</li>
+
+    <li><b>Nada de grindeo.</b> Si la respuesta a "qué hago hoy" es "lo de ayer
+    pero más veces", está mal diseñado y lo cambiamos.</li>
+  </ul>
+</section>
 
 <section>
-  <div class="col">
-    <h2>Lo que ya anda</h2>
-    <dl>
-      <dt>El mundo avanza aunque no estés</dt>
-      <dd>Los NPCs siguen con lo suyo mientras no jugás. Sin nadie conectado el valle no se
-        pausa: va a un cuarto de velocidad. Cuando volvés, encontrás otra cosa.</dd>
-
-      <dt>La gente te recuerda</dt>
-      <dd>Cada NPC tiene sus propias metas: las persigue, avanza y se traba solo. Lo que hiciste
-        queda anotado y lo tiene en cuenta la próxima vez.</dd>
-
-      <dt>El saber se aprende de una persona</dt>
-      <dd>Y se pierde con la última que lo tenía. En una corrida de prueba se murió la vieja Ren
-        y se llevó las dos runas del valle. Nadie lo guionó.</dd>
-
-      <dt>Un objeto sólo existe si alguien sabe hacerlo</dt>
-      <dd>No hay tienda ni cosas que caen de la nada. La receta es parte de lo que alguien sabe,
-        y se muere con esa persona.</dd>
-
-      <dt>Reputación de dos ejes</dt>
-      <dd>Te valoran y te temen por separado. Una sola barra no puede expresar “lo respetan y le
-        tienen terror”.</dd>
-
-      <dt>Una hora real es un día del valle</dt>
-      <dd>El mundo corre contra el reloj del servidor, así que el sol es el mismo para todos los
-        que están conectados.</dd>
-    </dl>
+  <p class="rotulo">Estado real</p>
+  <h2>Qué podés hacer hoy, en esta demo</h2>
+  <p>Es una demo temprana de verdad, no un demo de prensa. Esto es lo que ya
+  funciona y se puede jugar:</p>
+  <ul class="lista">
+    <li>Caminar el valle en 3D, con día y noche: <b>una hora real es un día del
+    valle</b>, y el sol que ves es el mismo que ven todos los conectados.</li>
+    <li>Hablarles a los habitantes <b>escribiéndoles lo que se te cante</b>, y
+    que te contesten en personaje, acordándose de lo anterior.</li>
+    <li>Aprender un oficio de alguien que confíe en vos, y enseñárselo a otro.</li>
+    <li>Fabricar cosas — y sólo podés fabricar lo que alguien te enseñó.</li>
+    <li>Pelear con lo que ronda el bosque, con lo que hayas forjado.</li>
+    <li>Leer la crónica de lo que pasó en el valle mientras no estabas.</li>
+  </ul>
+  <div class="aviso">
+    Y ya pasó de verdad: el día 10, la vieja Ren se murió y se llevó las dos
+    únicas runas que había en el valle. Nadie lo guionó. Nadie las va a poder
+    aprender nunca más.
   </div>
 </section>
 
 <section>
-  <div class="col">
-    <h2>Lo que es hoy</h2>
-    <p>Es una demo temprana y se nota. Esto está roto o a medias, y va acá para que no lo
-      descubras adentro:</p>
-    <ul class="roto">
-      <li><strong>El combate está partido en dos.</strong> Existe en el servidor y existe en el
-        cliente, y no son el mismo combate.</li>
-      <li><strong>Los monstruos que ves son locales.</strong> Las amenazas reales del mundo
-        todavía no se dibujan.</li>
-      <li><strong>El inventario existe en la base y no se ve en pantalla.</strong></li>
-      <li><strong>Los NPCs hablan con una sola voz</strong> y no recuerdan lo conversado.</li>
-      <li><strong>No ves a los otros jugadores</strong> dentro del valle.</li>
-    </ul>
-    <p class="noexiste"><b>No existe todavía:</b> cuentas · un personaje con cara y stats ·
-      construir · quests que puedas tomar · mazmorras · robar · horarios de NPC · inglés.</p>
-  </div>
+  <p class="rotulo">Honestidad</p>
+  <h2>Qué todavía no está</h2>
+  <p>Todo lo de arriba está en camino, pero hoy no lo vas a encontrar en la demo:</p>
+  <ul class="lista falta">
+    <li>Mazmorras.</li>
+    <li>Construir.</li>
+    <li>Tomar las metas de los NPCs como quests tuyas.</li>
+    <li>Ver a los otros jugadores caminando por el valle.</li>
+    <li>Hablar la lengua de los pueblos que te atacan.</li>
+    <li>Cuentas: por ahora el link de jugador se saca a mano.</li>
+    <li>Inglés.</li>
+  </ul>
 </section>
 
 <section>
-  <div class="col">
-    <h2>Hacia dónde va — nada de esto está hecho</h2>
-    <p>Es el orden en el que se va a intentar, no una promesa de fecha. Cada tramo tiene que
-      dejar algo jugable la misma noche.</p>
-    <ol class="tramos">
-      <li><b>Que el cliente y el mundo sean la misma cosa</b>
-        <span>Hoy son dos mitades que se tocan sólo en el diálogo. Acá estamos.</span></li>
-      <li><b>Que los NPCs sean personas</b>
-        <span>Voz propia, memoria de lo conversado, cara y horarios.</span></li>
-      <li><b>Razones para volver mañana</b>
-        <span>Tomar agendas como quests, una mazmorra, construir, robar.</span></li>
-      <li><b>Que entre gente que no conocés</b>
-        <span>Cuentas, invitaciones, inglés.</span></li>
-      <li><b>Steam</b>
-        <span>Wishlist antes que campaña, y ninguna de las dos antes de que alguien vuelva tres
-          días seguidos.</span></li>
-    </ol>
-  </div>
+  <p class="rotulo">Empezar</p>
+  <h2>Cómo entrar</h2>
+  <ol class="pasos">
+    <li>Sacá tu link de jugador en <a href="/entrar">esta página</a>. Guardalo:
+    ese link <em>es</em> tu personaje y nadie más puede entrar con él.</li>
+    <li><a href="${DESCARGA}">Bajá la demo</a> y abrí <code>SaberEscaso.exe</code>.</li>
+    <li>Pegá el link la primera vez. Después entra solo.</li>
+  </ol>
+  <p class="bajo-boton" style="margin-top:1.3rem">WASD para caminar · espacio para
+  saltar · E para hablar · clic para pegar · botón derecho para girar la cámara ·
+  rueda para acercar.</p>
+  <div class="bajar"><a class="boton" href="${DESCARGA}">Bajar la demo</a></div>
 </section>
-
-<section>
-  <div class="col">
-    <h2>Cómo entrar</h2>
-    <ol class="pasos">
-      <li>Bajá la demo.
-        <span>Windows, 37 MB. Es un ejecutable que se abre con doble clic.</span></li>
-      <li>Pedí un link de jugador.
-        <span>No hay registro ni contraseña: cada persona entra con un link privado que se
-          reparte a mano.</span></li>
-      <li>Entrás al valle en el día que va.
-        <span>El mundo viene corriendo de antes. No arranca con vos.</span></li>
-    </ol>
-    <div class="cierre">
-      <a class="boton" href="${DESCARGA}">Descargar la demo</a>
-      <span class="ficha">Windows · 37 MB · v0.1.0</span>
-    </div>
-  </div>
-</section>
-
-</main>
 
 <footer>
-  <div class="col">
-    <p>Los dos repos son públicos: adentro está el mundo, el director de IA y el cliente, con la
-      deuda anotada donde la dejamos.</p>
-    <p class="repos">
-      <a href="${REPO_SERVIDOR}">Servidor</a>
-      <a href="${REPO_CLIENTE}">Cliente</a>
-    </p>
-  </div>
+  Hecho a la vista de todos: el
+  <a href="https://github.com/pcfds/saber-escaso">servidor</a> y el
+  <a href="https://github.com/pcfds/saber-escaso-godot">cliente</a> son
+  públicos.
 </footer>
 
+</div>
 </body>
-</html>
-`
+</html>`
 }

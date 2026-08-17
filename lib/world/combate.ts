@@ -50,7 +50,7 @@ export async function pelear(args: {
   if (!threatId && !player.place_id) return { ok: false, porque: 'no hay nada que pelear acá' }
 
   let q = db.from('threats')
-    .select('id, kind, health, max_health, place_id')
+    .select('id, kind, nombre, people_id, health, max_health, place_id')
     .eq('region_id', regionId).eq('alive', true)
   q = threatId ? q.eq('id', threatId) : q.eq('place_id', player.place_id!)
   // .limit(1) aunque el id sea único: sin él, dos bichos en el mismo lugar

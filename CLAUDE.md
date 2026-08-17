@@ -3,19 +3,40 @@
 Juego de fantasía con mundo persistente narrado por un director de IA.
 **Diseño completo:** https://claude.ai/code/artifact/525ba855-0f6f-4bf8-a661-0f802392ae2a
 
-## Estamos en Fase 0. Sólo importa una pregunta.
+## Dónde estamos, de verdad
 
-> ¿El director de IA es divertido?
+**Las bases del juego están en `DISENO.md`. El mapa, en `ROADMAP.md`. Las
+tareas con dueño, en `BACKLOG.md`.** Este archivo es sólo el estado técnico de
+este repo y las trampas ya pisadas.
 
-Todo lo que no ayude a contestarla es distracción. **No construir 3D, motor,
-cámara, combate ni arte hasta que esté contestada.** El test es cuatro
-personas, siete días, y dos preguntas: ¿vuelven al otro día sin que se lo
-pidas? ¿pueden contar una historia del mundo que nadie escribió?
+La Fase 0 preguntaba una cosa: **¿el director de IA es divertido?** Nunca se
+contestó — el test de cuatro personas y siete días sigue pendiente. Este
+archivo decía "no construir 3D, motor, cámara, combate ni arte hasta que esté
+contestada", y eso ya no rige: **Pedro decidió avanzar igual** ("el juego lo
+quiero ver hoy ya el MVP", "no frenes"). Hay cliente Godot, `.exe`, combate,
+objetos, cielo y ciclo de día y noche.
 
-Ya hay evidencia parcial: en el tick 10 murió la vieja Ren y se llevó las dos
-runas del valle. Nadie lo guionó. Falta saber si a otro le importa.
+Que quede claro qué se eligió: **estamos construyendo encima de una pregunta
+abierta, a sabiendas.** No es un descuido y no hay que "arreglarlo" frenando
+todo. Sí hay que tenerlo presente cuando algo grande se apoya en que la
+respuesta sea que sí.
 
-## Los tres invariantes. No se negocian.
+## Cómo se trabaja acá
+
+**Avanzá.** Pedro pidió explícitamente autonomía: "avanza con todo", "si no
+acepté algo, dalo como aceptado así no te frenás", "no frenes". No le devuelvas
+decisiones que podés tomar con las bases en la mano. Preguntá sólo cuando dos
+lecturas razonables llevan a trabajos distintos.
+
+**Usá lo último y lo mejor que haya.** Es un pedido explícito, no una
+preferencia.
+
+**Los agentes especialistas son de desarrollo, no NPCs del juego.** Están en
+`.claude/agents/`; el `orquestador` es el único que tiene el mapa completo.
+
+## Los invariantes. No se negocian.
+
+Son **cuatro** y la lista completa está en `DISENO.md`. Los tres del servidor:
 
 **1. `lib/world/tick.ts` NUNCA importa el SDK de Anthropic.** La simulación es
 determinista y sin IA. Si algún día ese archivo importa `@anthropic-ai/sdk`, el
@@ -50,8 +71,13 @@ lib/web.ts                servidor: handler exportado, sirve local y en Vercel
 api/index.ts, api/tick.ts entradas de Vercel
 ```
 
-**Cinco verbos y nada más:** `ir`, `hablar`, `trabajar`, `aprender`, `ensenar`.
-Si el bucle no funciona con cinco, no lo salva el sexto.
+**Seis verbos:** `ir`, `hablar`, `trabajar`, `aprender`, `ensenar`, `pelear`.
+Arrancó con cinco a propósito —si el bucle no funciona con cinco, no lo salva
+el sexto— y `pelear` entró porque el combate ya estaba pasando del lado del
+cliente, donde no lo veía nadie. Un verbo de más es mejor que una mentira.
+Falta `dar`, que está diseñado y no implementado: regalar mueve el vínculo, y
+es lo que cierra el bucle chico (aprendés → fabricás → regalás → te ganás a la
+gente → te enseñan más).
 
 ## Estado real (verificar antes de asumir)
 
@@ -59,9 +85,10 @@ Si el bucle no funciona con cinco, no lo salva el sexto.
   El CLI ya está logueado — **no le pidas al usuario que entre al dashboard.**
 - **Vercel:** desplegado en https://saber-escaso.vercel.app, cuenta `pcfds`.
   El CLI ya está logueado. Cron a `/api/tick` cada 10 minutos.
-- **Regiones:** `valle-pruebas` es donde se rompe y se arregla. Para el test de
-  siete días hay que sembrar `valle-primero` limpio (`REGION_SLUG=valle-primero
-  pnpm seed`). Hoy producción apunta a `valle-pruebas`.
+- **Regiones:** producción apunta a **`valle-primero`**. `valle-pruebas` es
+  donde se rompe y se arregla (`REGION_SLUG=valle-pruebas`). Verificalo antes
+  de asumirlo: este renglón ya estuvo mal una vez y mandó a un agente a
+  depurar un valle vacío.
 - **Node 20 sin WebSocket nativo.** `lib/db.ts` le pasa `ws` como transporte a
   supabase-js. Con Node 22 esa línea se borra.
 

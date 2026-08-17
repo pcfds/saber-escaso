@@ -82,6 +82,27 @@ jugable esa misma noche.**
 - **Sesión de una hora que valga la pena.** Sin grindeo. Si la respuesta a "qué
   hago hoy" es "repetir lo de ayer más veces", está mal diseñado.
 
+### Los que no son humanos
+No son mobs. **Son pueblos**, y eso cambia todo:
+
+- **Tienen conciencia, lengua propia y saberes.** Un pueblo del bosque sabe
+  cosas que ningún humano sabe. Si los matás a todos, ese saber se va del mundo
+  igual que se fue con Ren — sólo que además nunca vas a poder aprenderlo.
+- **Atacan por un motivo.** Odio a lo humano, sí, pero un odio con causa: algo
+  que les hicimos, un lugar que ocupamos, un pariente que matamos. El motivo
+  está en la base y se puede averiguar.
+- **Se les puede hablar**, si conseguís entender su lengua. Ahí conectan con los
+  idiomas propios: aprender la lengua de un pueblo es la diferencia entre
+  matarlos y negociar con ellos.
+- **Aliado o enemigo depende de cómo evolucione el mundo.** No hay bando fijo.
+  El mismo pueblo puede terminar defendiéndote o cazándote según lo que hayan
+  hecho los jugadores y los NPCs. La reputación de dos ejes ya funciona así con
+  la gente; con los pueblos funciona igual pero a escala de pueblo.
+
+Un jugador que aprendió a hablarles y les enseñó algo puede tener un aliado que
+nadie más tiene. Uno que los cazó por saqueo puede volver a su casa y
+encontrarla vacía.
+
 ### Lo grande
 - Puede haber dragones, razas nuevas, momentos globales buenos y malos.
 - El mal no es una barra de porcentaje ni un señor oscuro genérico: es **más
