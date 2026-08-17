@@ -28,7 +28,8 @@ import { db, getRegion } from '../db.js'
 // sin dedupe y sin costo social de la caída. Hoy los tres caminos —el tick, el
 // cliente y la web— llaman a las dos mismas funciones.
 import {
-  pelear, recibirGolpe, recordar, tocarVinculo as escribirVinculo, conA,
+  pelear, golpearPersona, recibirGolpe, recordar,
+  tocarVinculo as escribirVinculo, conA,
 } from './combate.js'
 // La plata, los precios y el mostrador. Está afuera por el mismo motivo que el
 // golpe: `lib/web.ts` necesita el MISMO precio para pintar la vidriera en
@@ -4335,6 +4336,69 @@ async function resolveAction(
       })
       if (!golpe.ok) return golpe.porque
       return golpe.muerta ? `mató a ${golpe.threat}` : `lastimó a ${golpe.threat}`
+    }
+
+    // ── GOLPEAR A ALGUIEN DEL VALLE ──────────────────────────────────────
+    //
+    // Pedido de la dirección: *«ni pegarle hasta un NPC y que entienda qué
+    // pasa»*. Las bases están en `DISENO.md` §9.3c y el porqué de que sea un
+    // verbo aparte y no `pelear` está arriba de `golpearPersona()`, en
+    // `combate.ts`: matar un bicho SUBE el aprecio de los que te ven, y meter
+    // los dos actos en el mismo verbo obligaría a ramificar la consecuencia
+    // social sobre a quién le pegaste.
+    //
+    // Acá se decide una sola cosa que `combate.ts` no puede decidir —dónde
+    // queda el valle— y se le presta la única función del servidor que mata
+    // gente.
+    case 'golpear': {
+      const quien = people.find((p) => norm(p.name).includes(target))
+      if (!quien) return `no encontró a "${action.target}"`
+      if (!aca(quien)) return `${quien.name} no está acá`
+
+      const golpe = await golpearPersona({
+        regionId, tick, player, personId: quien.id, ev,
+
+        // ADÓNDE SE VA. La regla 1 de §9.3c: la reacción por defecto a un golpe
+        // no es pelear, es huir y contarlo. A la casa si puede —que es donde
+        // iría cualquiera— y si ya está en su casa, a cualquier otro lado que
+        // no sea el camino: irse por el Camino del Norte es irse del valle, y
+        // eso no lo decide un golpe, lo decide la salida que no vuelve.
+        adondeHuir: async (p) => {
+          const otros = places.filter((l) =>
+            l.id !== p.place_id && l.slug !== 'camino')
+          const casa = otros.find((l) => l.id === p.home_place_id)
+          return casa ?? pick(otros) ?? null
+        },
+
+        // Y SI LLEGA A CERO. No mata `combate.ts`: mata `seMuere()`, que es la
+        // única que sabe las cinco cosas que van juntas. La más importante es
+        // la tercera —`perdida_de_saber` por cada cosa que se llevó puesta—, y
+        // es exactamente el punto de §9.3c: **si matás a Ilde, nadie en este
+        // valle vuelve a forjar nunca.** No es un castigo para el que pegó, es
+        // empobrecer el mundo para todos los que juegan, incluidos los que no
+        // estaban conectados.
+        //
+        // Los pueblos se leen acá y sólo acá: cuestan una consulta y hacen
+        // falta para no emitir un `perdida_de_saber` falso cuando la lengua que
+        // se «perdió» la sigue teniendo el Sotobosque.
+        alMorir: async (muerto, donde) => {
+          const { data: pueblos } = await db.from('peoples')
+            .select('id').eq('region_id', regionId)
+          await seMuere({
+            tick, muerto, donde, people, players, pueblos: pueblos ?? [], ev,
+            evento: {
+              kind: 'muerte', place_id: donde,
+              summary: `${player.name} mató a ${muerto.name} a golpes.`,
+              detail: { person: muerto.name, player: player.name, causa: 'golpes' },
+            },
+          })
+        },
+      })
+
+      if (!golpe.ok) return golpe.porque ?? `no pudo alcanzar a ${quien.name}`
+      if (golpe.muerta) return `mató a ${golpe.quien}`
+      if (golpe.huyo) return `le pegó a ${golpe.quien}, que se fue a ${golpe.huyo}`
+      return `le pegó a ${golpe.quien}`
     }
 
     case 'aprender': {

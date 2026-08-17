@@ -570,3 +570,237 @@ export async function tocarVinculo(
   }
   return { antes, ahora }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PEGARLE A UNA PERSONA
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Pedido de la dirección, textual: *«ni pegarle hasta un NPC y que entienda
+// qué pasa»*. Las bases están en `DISENO.md` §9.3c y hay que leerlas antes de
+// tocar un número de acá, porque **todos los números de abajo salen de las
+// cuatro reglas de esa ficha y ninguno de una sensación**.
+//
+// ── POR QUÉ NO ES `pelear()` ───────────────────────────────────────────────
+//
+// Lo primero que se intentó fue meter a la persona adentro de `pelear()`, que
+// es lo que este archivo entero predica: un solo golpe, no dos copias. Está
+// mal, y conviene dejar escrito por qué para que nadie lo unifique después.
+//
+// `pelear()` termina en `tocarVinculo(t, player, { valued: +8, feared: +5 })`:
+// **matar sube el aprecio**, porque matar un bicho es defender al valle. Si la
+// persona entrara por la misma puerta, la consecuencia social tendría que
+// ramificar sobre a quién le pegaste — y ésa es exactamente la clase de rama
+// que alguien se olvida de mantener de un lado. Son dos actos distintos con el
+// mismo gesto, y la diferencia no está en el daño: está en lo que significa.
+//
+// Lo que SÍ se comparte es lo que de verdad es el golpe: la lista de armas, la
+// cuenta del daño y `recordar`/`tocarVinculo`. Por eso esto vive acá al lado y
+// no en `tick.ts`.
+//
+// ── LAS TRES COSAS QUE HACE Y QUE UN COMBATE NORMAL NO HACE ────────────────
+//
+//  1. **El otro no pelea: se va.** Cuando la vida baja de `HUIR_BAJO_EL`, la
+//     persona **se muda de lugar** y hay que ir a buscarla. No es una huida
+//     cosmética: escribe `people.place_id`, o sea que el resto del valle la ve
+//     donde se fue, y el que la buscaba para que le enseñara tampoco la
+//     encuentra. La regla 1 de §9.3c dicha en una columna.
+//  2. **Avisa antes de ser irreversible, y el aviso es del mundo.** El evento
+//     que sale a media vida no dice «cuidado»: dice que la persona te pidió que
+//     pares. Un cartel sería el juego hablando; esto es el valle hablando.
+//  3. **Lo que se pierde se nombra al perderlo.** Matar a la última que sabe
+//     forjar emite `perdida_de_saber`, igual que si se hubiera muerto de vieja.
+//     Eso NO se escribe acá: se llama `alMorir`, que lo trae `tick.ts`, donde
+//     vive `seMuere()` — la única función del servidor que mata gente. Duplicar
+//     esa función para el caso «murió a golpes» sería el mismo bug que este
+//     archivo vino a cerrar, en la parte que más duele.
+
+/** Cuánta vida trae una persona si la fila es vieja y todavía tiene el default
+ *  de la migración sin correr. No se inventa un número nuevo: es el mismo 100
+ *  de `people.max_health`. */
+const VIDA_PERSONA = 100
+
+/** Debajo de esta fracción de su vida, la persona se va del lugar. La mitad:
+ *  alcanza para que huir sea lo que pasa siempre y para que perseguir sea una
+ *  decisión aparte, tomada después de ver que se iba. */
+const HUIR_BAJO_EL = 0.5
+
+/** Lo que le cuesta al que pega, en los dos ejes y con los dos sujetos.
+ *
+ *  El que recibe se acuerda mucho más que el que mira, y el aprecio cae más de
+ *  lo que sube el miedo — que es la asimetría que hace que la violencia
+ *  funcione a corto plazo y te arruine a largo (§9.3c, regla 2): el que te teme
+ *  te ENTREGA lo que tiene, y el que no te aprecia no te ENSEÑA. */
+const GOLPE_VICTIMA = { valued: -26, feared: 22 }
+const GOLPE_TESTIGO = { valued: -15, feared: 12 }
+/** Y el pueblo del que recibió. Menos que la persona y por el mismo motivo que
+ *  en `pelear()`: el pueblo entero se acuerda de lo que le hiciste a cualquiera
+ *  de los suyos, pero se acuerda más flojo que el que lo tiene en el cuerpo. */
+const GOLPE_PUEBLO = { aprecio: -11, temor: 8 }
+
+export type Golpeada = {
+  ok: boolean
+  porque?: string
+  /** A quién. */
+  quien?: string
+  danio?: number
+  health?: number
+  maxHealth?: number
+  muerta?: boolean
+  /** Si se fue, adónde. Null si se quedó. */
+  huyo?: string | null
+  arma?: string | null
+}
+
+export async function golpearPersona(args: {
+  regionId: string
+  tick: number
+  player: { id: string; name: string; place_id: string | null }
+  /** El uuid de la persona. Quien llama ya la resolvió por nombre: acá no se
+   *  busca por texto, porque el mismo nombre puede estar en dos lugares y
+   *  errarle a QUIÉN en la acción más grave del juego no es aceptable. */
+  personId: string
+  ev?: (e: EventoPelea) => void | Promise<void>
+  /**
+   * Qué hacer cuando la persona llega a cero. **No mata acá.** La única
+   * función que mata gente en este servidor es `seMuere()` en `tick.ts`, y es
+   * la que sabe las cinco cosas que van juntas o no van: bajar la bandera,
+   * sacarla de la lista viva del tick, emitir `perdida_de_saber` por cada cosa
+   * que se llevó puesta, cerrarle las metas y dejarle las cosas en el suelo.
+   *
+   * Si no viene, la persona queda en 1 de vida y no muere. Es a propósito:
+   * **un llamador que no sabe matar no mata a medias.**
+   */
+  alMorir?: (muerto: { id: string; name: string }, donde: string | null)
+    => void | Promise<void>
+  /** Adónde se va si huye. Lo decide quien llama porque acá no se leen `places`
+   *  ni la geografía del valle. Si devuelve null, se queda. */
+  adondeHuir?: (persona: { id: string; home_place_id: string | null; place_id: string | null })
+    => Promise<{ id: string; name: string } | null>
+}): Promise<Golpeada> {
+  const { regionId, tick, player, personId, ev } = args
+
+  const { data: victima } = await db.from('people')
+    .select('id, name, trade, place_id, home_place_id, people_id, health, max_health')
+    .eq('id', personId).eq('region_id', regionId).eq('alive', true).maybeSingle()
+  if (!victima) return { ok: false, porque: 'no hay nadie así acá' }
+
+  const armas = (await db.from('objects')
+    .select('kind, quality, made_by')
+    .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
+  const arma = armas
+    .filter((o) => ARMAS.includes(o.kind))
+    .sort((a, b) => b.quality - a.quality)[0]
+
+  // La MISMA cuenta que contra un bicho. Que el daño sea idéntico y la vida no
+  // es lo que hace que pegarle a una persona sea largo sin ser otro sistema.
+  const danio = 8 + roll(8) + Math.floor((arma?.quality ?? 0) / 6)
+  const maxima = victima.max_health ?? VIDA_PERSONA
+  const antes = victima.health ?? maxima
+  const restante = Math.max(0, antes - danio)
+  const donde = victima.place_id
+
+  const emitir = async (e: EventoPelea) => {
+    if (ev) return void await ev(e)
+    await db.from('events').insert({ region_id: regionId, tick, ...e })
+  }
+
+  const con = arma ? ` con ${arma.kind}` : ' a mano limpia'
+
+  // ── LOS QUE MIRAN ────────────────────────────────────────────────────────
+  //
+  // Van SIEMPRE, muera o no. Es la única parte de esto que no es opcional: el
+  // costo de pegarle a alguien no es que se muera, es que el valle lo vio. La
+  // memoria se guarda con el verbo en pasado y sin adornos porque de ahí sale
+  // el chusmerío, y un rumor con adjetivos se vuelve otra cosa a la tercera
+  // vuelta.
+  const testigos = (await db.from('people')
+    .select('id, name, place_id').eq('region_id', regionId).eq('alive', true)
+    .eq('place_id', donde)).data ?? []
+  for (const t of testigos) {
+    const suyo = t.id === victima.id
+    await recordar(t.id, player,
+      suyo ? `${player.name} me pegó` : `${player.name} le pegó a ${victima.name} delante mío`,
+      tick)
+    await tocarVinculo(t, player, suyo ? GOLPE_VICTIMA : GOLPE_TESTIGO)
+  }
+
+  // Y el pueblo de la que recibió, si es de uno. Mismo argumento que en
+  // `pelear()`: `peoples.aprecio` lleva escrito desde el primer día que el
+  // pueblo entero se acuerda de lo que le hiciste a cualquiera de los suyos.
+  if (victima.people_id) {
+    const { data: pueblo } = await db.from('peoples')
+      .select('id, aprecio, temor').eq('id', victima.people_id).maybeSingle()
+    if (pueblo) {
+      await db.from('peoples').update({
+        aprecio: Math.max(-100, pueblo.aprecio + GOLPE_PUEBLO.aprecio),
+        temor: Math.min(100, pueblo.temor + GOLPE_PUEBLO.temor),
+      }).eq('id', pueblo.id)
+    }
+  }
+
+  // ── SIGUE EN PIE ─────────────────────────────────────────────────────────
+  if (restante > 0) {
+    let huyo: { id: string; name: string } | null = null
+    const flojo = restante < maxima * HUIR_BAJO_EL
+    if (flojo && args.adondeHuir) huyo = await args.adondeHuir(victima)
+
+    await db.from('people').update({
+      health: restante,
+      ...(huyo ? { place_id: huyo.id } : {}),
+    }).eq('id', victima.id)
+
+    // EL AVISO ES DEL MUNDO. §9.3c regla 3: que cueste, que avise, y que el
+    // aviso no sea un cartel. Tres frases distintas para tres momentos, porque
+    // el mismo summary repetido siete veces es lo que hace que el jugador deje
+    // de leerlos justo antes del que importaba.
+    const summary = huyo
+      ? `${player.name} le pegó a ${victima.name}${con}. ${victima.name} se fue a ${huyo.name} sin devolver el golpe.`
+      : flojo
+        ? `${player.name} le pegó a ${victima.name}${con}. ${victima.name} le pidió que pare.`
+        : `${player.name} le pegó a ${victima.name}${con}.`
+    await emitir({
+      kind: 'golpe', place_id: donde, summary,
+      detail: {
+        player: player.name, person: victima.name,
+        weapon: arma?.kind ?? null, huyo: huyo?.name ?? null,
+      },
+    })
+    return {
+      ok: true, quien: victima.name, danio, health: restante, maxHealth: maxima,
+      muerta: false, huyo: huyo?.name ?? null, arma: arma?.kind ?? null,
+    }
+  }
+
+  // ── Y SI LLEGÓ A CERO ────────────────────────────────────────────────────
+  //
+  // Acá no se mata: se le pasa el muerto a quien sepa. Ver `alMorir`.
+  if (!args.alMorir) {
+    await db.from('people').update({ health: 1 }).eq('id', victima.id)
+    await emitir({
+      kind: 'golpe', place_id: donde,
+      summary: `${player.name} dejó a ${victima.name} en el piso${con === ' a mano limpia' ? ', a mano limpia' : `, ${con.trim()}`}.`,
+      detail: { player: player.name, person: victima.name, weapon: arma?.kind ?? null },
+    })
+    return {
+      ok: true, quien: victima.name, danio, health: 1, maxHealth: maxima,
+      muerta: false, huyo: null, arma: arma?.kind ?? null,
+    }
+  }
+
+  await db.from('people').update({ health: 0 }).eq('id', victima.id)
+  await args.alMorir({ id: victima.id, name: victima.name }, donde)
+
+  // Los que lo vieron se acuerdan de ESTO, que no es lo mismo que un golpe.
+  // Va después de `alMorir` a propósito: el muerto ya salió de la lista viva,
+  // así que no se acuerda de su propia muerte.
+  for (const t of testigos) {
+    if (t.id === victima.id) continue
+    await recordar(t.id, player, `${player.name} mató a ${victima.name} delante mío`, tick)
+    await tocarVinculo(t, player, { valued: -45, feared: 38 })
+  }
+
+  return {
+    ok: true, quien: victima.name, danio, health: 0, maxHealth: maxima,
+    muerta: true, huyo: null, arma: arma?.kind ?? null,
+  }
+}
