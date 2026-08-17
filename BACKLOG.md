@@ -26,6 +26,60 @@ verificado, en `ROADMAP.md`.
 Todo lo demás está libre. Antes de despachar, actualizá esta tabla: si se
 desactualiza, dos agentes se pisan y se pierde media hora.
 
+## El saber de los pueblos está vivo y el código lo da por muerto `simulacion`
+`lib/world/tick.ts` — **bloqueado**, lo tiene la rama del mercado.
+
+**Medido en producción hoy.** `siguenEnElValle()` decide quién cuenta como
+portador de un saber, y lo hace así:
+
+```ts
+h.holder_kind === 'player' ? players.some(...) : people.some(...)
+```
+
+O sea que un `holder_kind = 'people'` —un PUEBLO— cae en la rama del `else`, se
+busca en la tabla de personas, no aparece, y **queda afuera**. Comprobado
+llamando la función con los datos reales:
+
+```
+Temple de ceniza  →  lo saben: [{people: Los de la Ceniza}, {people: …}]
+                  →  el código cuenta 0 portadores
+```
+
+Dos saberes del valle están así: **`Temple de ceniza` y `Habla del Sotobosque`**,
+que son justamente los dos que sólo tienen los que no son humanos. Consecuencias
+que ya se pueden ver:
+
+- La intro de producción dice *"hoy nadie en el valle sabe hacer ese temple"*.
+  **El director no alucinó** —lo repite de una pieza del pasado marcada como
+  `sabido`, así que el invariante 3 está intacto— pero el hecho contradice a la
+  base, y el código está de acuerdo con el hecho equivocado.
+- Cualquier agenda que necesite uno de los dos se traba para siempre con
+  *"no queda nadie vivo que lo sepa"*.
+- Y lo peor: **el contenido más distinto que tiene el valle es inalcanzable.**
+  La lengua del Sotobosque y el temple de ceniza son lo único que no se parece
+  a nada más, y hoy no hay ninguna forma de aprenderlos.
+
+**El arreglo NO es una línea, y por eso está acá y no hecho.** Que un pueblo
+cuente como portador es correcto —el saber existe en el mundo— pero **no puede
+contar como maestro**: no hay camino de diálogo con un pueblo, y si una agenda
+manda a un NPC a "ir a aprender" con Los de la Ceniza, se traba igual pero por
+otro lado.
+
+Lo que hay que decidir, y es diseño y no código:
+
+1. **El saber de un pueblo no se perdió**, así que `perdida_de_saber` y el peso
+   ×3 del último portador tienen que verlo. Eso sí es una línea.
+2. **Aprenderlo tiene que ser posible y tiene que costar**, y el esquema ya dice
+   por dónde: `peoples.agravio` viene con el comentario *"no es sabor: se puede
+   averiguar hablando, y resolverlo es lo que puede darlos vuelta"*, y
+   `peoples.aprecio` existe y **no lo lee nadie** (ver §9.3d). Ahí está la
+   puerta: un pueblo te enseña lo suyo cuando dejás de ser el del recodo que le
+   quemó la casa.
+3. Y mientras tanto, **que las agendas no manden a nadie a aprender de un
+   pueblo**, o se traban.
+
+---
+
 ## Cables sueltos: código escrito que no lo llama nadie
 
 **Esto no es backlog común, es la deuda característica de este proyecto**, y
