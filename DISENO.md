@@ -1278,6 +1278,93 @@ y resolverlo es lo que puede darlos vuelta"*. Un pueblo que te odia y no puede
 dejar de odiarte es una pared. **Lo que hay que construir no es el odio: es la
 puerta de salida.**
 
+### 9.3e Atacar cuesta, y hay lugares de los que no se vuelve
+
+**DECIDIDO:**
+
+> *"No debe ser gratis o fácil atacar un pueblo: hay guardias, la gente
+> recuerda, defensas. **Las mazmorras deben ser lugares ultra peligrosos.**"*
+>
+> *"Las mazmorras deben estar por lugares especiales."*
+
+Lo primero ya arrancó: el pueblo se defiende solo, y el que tiene el oficio
+pelea primero. Pero "defenderse" es sólo el primer tercio de lo que hace caro
+atacar un pueblo, y los otros dos ya existen y están sin conectar:
+
+1. **Los guardias.** Hecho. El que tiene el oficio sale, y si no hay guardia
+   sale el que vive ahí.
+2. **La gente se acuerda**, y esto es lo que de verdad lo vuelve caro. `bonds`
+   tiene `feared` además de `valued`, el chusmerío hace viajar la memoria, y
+   `peoples.aprecio` guarda lo que un pueblo entero siente. **Atacar no tiene
+   que costarte una pelea: tiene que costarte el pueblo.** El que te teme no te
+   enseña, y perder maestros es lo más caro que hay acá.
+3. **Las defensas** son lo único que no existe todavía, y la forma correcta en
+   este juego no es un muro con puntos de vida: es que **defender sea algo que
+   alguien SABE hacer** y que el pueblo pueda perder. Un valle sin nadie que
+   sepa levantar una empalizada es un valle que se queda sin empalizadas.
+
+**Las mazmorras: lugares especiales de los que se puede no volver.** Y la regla
+que las hace distintas de "un lugar con bichos más fuertes" sale de la tesis:
+
+> **Lo que las vuelve peligrosas no es el daño, es lo que te podés dejar
+> adentro.** Si te matan lejos y sin testigos, hoy caer es gratis — te
+> levantás en la aldea. Una mazmorra tiene que ser el lugar donde eso deja de
+> ser cierto: **lo que llevabas encima se queda donde caíste**, que es
+> exactamente lo que ya le pasa a un NPC cuando se muere.
+
+Y hay una consecuencia que la vuelve el mejor contenido posible acá: **si el
+que entra y no vuelve sabía forjar, el valle se queda sin forja.** Una mazmorra
+no es un sitio con botín: es el lugar donde el mundo puede perder algo.
+
+> **INFERIDO:** que "lugar especial" se resuelva con `places.kind`, que ya
+> decide dónde se fabrica cada cosa y qué crece dónde. Una mazmorra sería un
+> `kind` nuevo con sus reglas — no una tabla aparte.
+
+### 9.3f Curarse, y hablar con los muertos
+
+**DECIDIDO:**
+
+> *"Y la gente puede regenerarse, curarse: hay médicos, pociones, magia. Mismo
+> cuando decimos que algo se perdió para siempre, **quizás haya un hechizo para
+> hablar con muertos**."*
+
+La primera mitad ya tiene su sección (§10.2): lo que distingue a las formas de
+curarse no es cuánta vida devuelven sino **dónde te dejan**. Un médico encaja
+solo: es la tercera forma, la que te deja entero **donde está él**, y **es una
+persona que puede morirse** — o sea que un valle se puede quedar sin nadie que
+sepa curar, y eso es el juego funcionando.
+
+**La segunda mitad es la mejor idea que entró a este documento, y la que más
+fácil lo rompe.** Hablar con los muertos toca el único clavo que sostiene todo:
+§8 dice que el saber se muere con la última persona que lo tenía. Un hechizo que
+te devuelva a Ilde para que te enseñe a forjar **no agrega un hechizo: borra el
+juego.**
+
+Y hay una forma de que sume en vez de romper, y es una sola línea:
+
+> **Un muerto puede contarte, no puede enseñarte.**
+
+Ilde te puede decir dónde escondió la última hoja, quién más aprendió de ella,
+por qué el temple le salía una de cada tres, qué le debía a Bruno. **Lo que no
+puede es ponerte la mano encima**, y eso ya está en el diseño: la destreza es
+tuya y no se transmite, y aprender es una cosa que pasa entre dos cuerpos.
+
+Con ese candado puesto, es el contenido más cargado que este juego puede tener:
+
+- **Le podés preguntar a la persona lo que nunca le preguntaste.** No hay
+  mecánica que compre eso.
+- Cierra la única puerta que quedaba abierta y fea: hoy, cuando alguien se
+  muere, lo que sabía **desaparece de la conversación** — nadie puede siquiera
+  hablar de eso con conocimiento. Un muerto que puede hablar hace que la
+  pérdida sea *hablable*, que es lo contrario de deshacerla.
+- Y le da a la magia un para qué que no es daño, que es justo lo que a las
+  cuatro runas les falta.
+
+> **INFERIDO, y hay que pelearlo antes de construirlo:** que cueste una sola
+> pregunta, y que el muerto responda con lo que el mundo tiene escrito de él —
+> sus eventos, su historia, lo que sabía— y **nada más**. Un fantasma que
+> improvisa es un chatbot con sábana, y §9.4 ya dice qué pasa con eso.
+
 ### 9.4 El diálogo — lo que NO se hace
 
 **Nada de NPCs charlatanes de libre conversación.** Se hablan una vez, se
