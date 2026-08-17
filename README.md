@@ -1,92 +1,72 @@
-# Saber Escaso — Fase 0
+# Saber Escaso — servidor
 
-Prototipo mínimo para contestar **una sola pregunta**:
+Un mundo de fantasía donde el conocimiento vive en gente que se muere. Si el
+último que sabe forjar se va sin enseñarle a nadie, no vuelve a haber una hoja
+nueva. Nunca.
 
-> ¿El director de IA es divertido?
+**Jugarlo:** https://saber-escaso.vercel.app ·
+**Cliente 3D:** [pcfds/saber-escaso-godot](https://github.com/pcfds/saber-escaso-godot)
 
-Sin 3D, sin motor, sin arte. Una región, unos NPCs que saben cosas, un tick que
-avanza el mundo, y un director que cuenta lo que pasó.
+Este repo es **el mundo**: la simulación, los NPCs, sus memorias, el director de
+IA que narra lo que pasó, y el sitio. No dibuja nada — de eso se encarga el
+cliente, que es reemplazable. Ya lo probamos: el primer cliente era web con
+Three.js, se tiró entero, y el valle siguió con la misma gente y las mismas
+memorias.
 
-Documento de diseño completo: https://claude.ai/code/artifact/525ba855-0f6f-4bf8-a661-0f802392ae2a
+## Qué hace
 
-## La regla que hace válido el experimento
+Un tick es un día del valle y el cron corre uno por hora, así que el mundo
+avanza tengas la sesión abierta o no. En cada tick la gente persigue sus metas,
+se enseña oficios, se muere, y se cuenta lo que vio. El director lee lo que
+pasó y te lo narra cuando volvés.
 
-**El director sólo puede narrar hechos que están en la tabla `events`.**
+```
+supabase/schema.sql       el mundo: lugares, gente, saberes, agendas, vínculos, eventos
+lib/world/tick.ts         simulación pura. step() es la unidad
+lib/world/director.ts     narrate(nombre) → crónica auditada
+lib/world/dialogo.ts      hablarle a un NPC; cada uno con su voz y su memoria
+lib/world/combate.ts      un golpe. lo único que no espera al tick
+lib/web.ts                el servidor: landing, API del cliente 3D, crónica
+```
 
-Ni uno que no haya pasado. Es tentador soltarlo a improvisar y sería un error
-fatal: estaríamos midiendo "¿es divertido chatear con un LLM?" (sí, veinte
-minutos) en vez de "¿un mundo simulado y bien narrado hace que la gente vuelva?",
-que es la pregunta que nadie contestó.
+## Los invariantes
 
-La simulación (`tick.ts`) no usa IA. El director (`director.ts`) no toca el
-estado del mundo. Esa separación es el experimento.
+No se negocian. Existen porque sin ellos el proyecto se convierte en otra cosa
+sin que nadie lo note.
 
-## Las dos preguntas del test
+1. **`tick.ts` nunca importa el SDK de Anthropic.** La simulación es
+   determinista. Si el tick usa IA, dejamos de poder distinguir si el mundo es
+   interesante o si el modelo lo está maquillando.
+2. **`director.ts` nunca escribe estado del mundo.** Lee eventos, devuelve
+   texto. Si el director puede cambiar el mundo, ya no medimos si sabe narrarlo.
+3. **Nada se afirma si no está en `events`.** El director devuelve los ids que
+   usó y el script los audita. Vale para los NPCs: pueden negarse, dudar y
+   mentir sobre lo que sienten, no inventar hechos ni prometer lo que el mundo
+   no vaya a cumplir.
+4. **Lo que pasa en el cliente llega al servidor, o no pasó.** Ya lo rompimos
+   entero una vez, con monstruos y combate que vivían sólo en la máquina de
+   cada jugador.
 
-Cuatro personas, siete días:
+## Los documentos
 
-1. ¿Vuelven al otro día **sin que se lo pidas**?
-2. A la semana, ¿cada uno puede contar una historia del mundo que vos no escribiste?
+- **[`DISENO.md`](DISENO.md)** — las bases. Qué es el juego y por qué. Nadie
+  arranca una tarea sin leerlo.
+- **[`ROADMAP.md`](ROADMAP.md)** — qué anda, qué está a medias y hacia dónde va.
+- **[`BACKLOG.md`](BACKLOG.md)** — las tareas, con dueño y archivos.
+- **[`CLAUDE.md`](CLAUDE.md)** — estado técnico y cada trampa ya pisada.
 
-La segunda es la de verdad.
-
-## Puesta en marcha
-
-1. Crear un proyecto en Supabase.
-2. Pegar `supabase/schema.sql` entero en el **SQL Editor** del proyecto y correrlo.
-3. `cp .env.example .env.local` y completar las tres variables
-   (`SUPABASE_SERVICE_ROLE_KEY` está en Project Settings → API → service_role).
+## Correrlo
 
 ```bash
 pnpm install
-pnpm check          # dice exactamente qué falta antes de que algo explote
-pnpm seed           # crea El Valle Primero
-pnpm world 60       # el mundo empieza a vivir: un tick por minuto
+pnpm check          # qué falta antes de que algo explote
+pnpm seed           # sembrar una región
+pnpm tick           # avanzar un día
+pnpm dev            # el servidor, en localhost:3210
 ```
 
-En otra terminal:
-
-```bash
-pnpm act Pedro ir fragua
-pnpm act Pedro trabajar
-pnpm act Pedro hablar Ilde
-pnpm look Pedro           # el director te cuenta qué pasó mientras tanto
-```
-
-`pnpm tick` avanza un tick a mano; `pnpm world` lo hace solo hasta que le des
-Ctrl-C. Dejalo prendido y volvé al rato: el valle va a ser otro.
-
-**`tick` y `look` son comandos separados a propósito**: uno simula, el otro
-narra. Si alguna vez hace falta fusionarlos, el experimento se rompió.
-
-## Estructura
-
-```
-supabase/schema.sql     el mundo: lugares, gente, saberes, agendas, vínculos, eventos
-lib/check.ts            chequeo previo de entorno y base
-lib/world/seed.ts       genera una región con gente que sabe cosas y persigue cosas
-lib/world/tick.ts       avanza el mundo — simulación pura, cero IA
-lib/world/run.ts        tickea solo cada N segundos
-lib/world/director.ts   lee eventos, escribe la crónica — IA, cero escritura de estado
-lib/world/actions.ts    las cinco acciones de un jugador
-```
-
-## Qué mirar mientras corre
-
-- **Agendas.** Cada NPC persigue algo y avanza sin vos. Ilde rehace el yunque,
-  Bruno quiere el temple de río y no se lo ganó, la vieja Ren se quiere morir
-  sin enseñarle la runa de quietud a nadie. Cuando una agenda se cumple se abre
-  otra: el mundo no se queda esperándote.
-- **Pérdida de saber.** Si Ren se muere y nadie le aprendió la runa de quietud,
-  la región la pierde para siempre. Eso es estado, no ambientación — y es el
-  tipo de hecho que debería doler cuando el director te lo cuenta.
-- **La auditoría del director.** Al final de cada `pnpm look` dice cuántos
-  hechos leyó y cuántos usó. Si alguna vez cita un evento que no existe, avisa
-  con un ⚠. Anotá esas: son el modo de falla que hay que medir.
-- **Región vacía.** Sin jugadores conectados las agendas avanzan a un cuarto de
-  paso. Se ve en la salida del tick.
-
-## Las cinco acciones
-
-`ir`, `hablar`, `trabajar`, `aprender`, `enseñar`. Nada más. Si el bucle no
-funciona con cinco verbos, no lo va a salvar el sexto.
+Hace falta `ANTHROPIC_API_KEY` y las credenciales de Supabase en `.env.local`.
+El director corre con `claude-haiku-4-5` por default (`DIRECTOR_MODEL` para
+cambiarlo): son unos 0,009 dólares por crónica, contra 0,057 con Opus, y la
+densidad de hechos es casi la misma — resultó ser un problema de prompt y no de
+modelo.
