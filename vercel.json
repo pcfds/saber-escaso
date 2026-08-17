@@ -10,6 +10,10 @@
       "destination": "/api/saludos"
     },
     {
+      "source": "/api/autor",
+      "destination": "/api/autor"
+    },
+    {
       "source": "/(.*)",
       "destination": "/api/index"
     }
@@ -22,6 +26,10 @@
     {
       "path": "/api/saludos",
       "schedule": "20 */2 * * *"
+    },
+    {
+      "path": "/api/autor",
+      "schedule": "40 5 * * *"
     }
   ],
   "functions": {
@@ -33,6 +41,9 @@
     },
     "api/saludos.ts": {
       "maxDuration": 60
+    },
+    "api/autor.ts": {
+      "maxDuration": 300
     }
   }
 }

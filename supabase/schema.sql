@@ -189,6 +189,13 @@ create table chronicles (
   -- ids de los eventos que se usaron. Si narra algo fuera de esta lista,
   -- es una alucinación y el experimento lo tiene que detectar.
   source_events uuid[] not null default '{}',
+  -- La otra auditoría, la que va de la crónica a los hechos: gente nombrada en
+  -- el texto que no aparece en ningún `summary` de la ventana. `source_events`
+  -- no la ve —se pueden citar tres ids reales y poblar la escena alrededor con
+  -- testigos que nadie puso ahí— y ése fue el modo de falla que pasó limpio.
+  -- Es señal, no error: lo que se mira es `avg(cardinality(...))` bajando.
+  -- Nullable a propósito: null es "no medida", '{}' es "medida y limpia".
+  unbacked_names text[],
   created_at    timestamptz not null default now()
 );
 

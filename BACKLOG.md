@@ -16,49 +16,283 @@ verificado, en `ROADMAP.md`.
 
 | Qué | Dueño | Archivos tomados |
 |---|---|---|
-| `encargarse`, `buscar`, `dar`, y subir el umbral de confianza de `aprender` | `simulacion` | `lib/world/tick.ts`, `lib/world/actions.ts`, `supabase/migrations/20260817050000_...` |
-| Que los NPCs quieran algo de la charla | `npc-voz` | `lib/world/dialogo.ts`, `supabase/migrations/20260817060000_voces_que_piden.sql` |
-| **R1** · `jugadores` en `/mundo` + baja del cliente Three.js | `esquema` | `lib/web.ts`, `lib/mapa.ts` |
-| Ilustraciones de la landing en SVG | — | `lib/landing.ts`, `lib/arte.ts` |
-| Rendimiento y censo de la escena | — | `project.godot`, `_censo.gd`, `scripts/rendimiento.gd`, `scripts/ambiente.gd`, `scripts/detalles.gd`, `scripts/mapa.gd` |
-| Que los NPCs te reconozcan al pasar | — | `scripts/valle.gd`, `scripts/interfaz.gd` |
-| **P.2** · La paleta del valle | `arte` | `scripts/paleta.gd` (nuevo) |
-| **P.1** · El valle suena | `sonido` | `scripts/sonido.gd`, `escenas/prueba_sonido.tscn` (nuevos) |
-| Auditoría de la crónica | `director-critic` | ninguno (sólo lectura) |
+| **P.2d** · la aldea no se separa del suelo: rango de valor y el kit fuera de la paleta | `arte` | `scripts/paleta.gd`, `scripts/ambiente.gd` |
+| **02.6** · nacimientos: que el saber deje de ser una función decreciente | `simulacion` | `lib/world/tick.ts`, migración `20260817140000_` |
+| **P.2d** · cablear la aduana en el kit + rehacer la medición contra la escena de ahora | `arte` | `scripts/kit.gd`, `scripts/paleta.gd` |
 
-**Nadie puede registrar autoloads**: `project.godot` está tomado. Las dos
-tareas de cliente despachadas entregan módulo suelto y **el cableado en
-`valle.gd` lo hace el orquestador** cuando ese archivo se libere.
+Todo lo demás está libre. Antes de despachar, actualizá esta tabla: si se
+desactualiza, dos agentes se pisan y se pierde media hora.
 
-La primera cubre lo que antes eran **03.1** (tomar agendas como quest) y
-**03.5** (el verbo `dar`): salieron de la lista de abajo y todavía no están
-terminadas — los tres verbos están en el `CHECK` de la migración pero no en el
-`switch` de `tick.ts`.
+> **Los agentes se caen, y hay que saber leer en qué estado dejaron el árbol.**
+> Pasó dos veces el 17 de agosto y **los dos casos son distintos**:
+> - Uno murió **antes de escribir una línea** (error de API en el primer turno).
+>   El `git diff` mostraba 378 líneas y parecía trabajo a medias: eran las
+>   iteraciones anteriores, sin commitear. **No revertir sin mirar qué es cada
+>   cosa.**
+> - Otro se colgó **en la fase de medición**, con el código y la migración ya
+>   aplicados. Ése **se reanuda con un mensaje**, no se redespacha: tiene todo
+>   el contexto y sólo le falta cerrar.
+>
+> **El chequeo mínimo antes de decidir:** `npx tsc --noEmit`, `file` sobre los
+> archivos que tocó, si la migración quedó aplicada, y qué dice el `git diff`
+> comparado con lo que ya estaba verificado.
+
+> **La regla que más se rompió, y ya van cinco veces.** Empezó con el commit
+> `36c2bf1`, que se llevó puesto `scripts/paleta.gd` —trabajo de otro agente, al
+> que se le había dicho explícitamente que no commiteara—. Después `1e036bf` con
+> un `web.ts` en curso, y `16cb5e1` y `f482426` con un `valle.gd` **a medio
+> escribir**, mientras su agente todavía trabajaba.
+>
+> **Y ahí dejó de ser suerte.** Commitear el archivo de otro mientras lo está
+> editando no es sólo desprolijo: congela un estado intermedio que nadie probó,
+> y el historial deja de servir para volver atrás. **Quien commitee stagea rutas
+> explícitas. Nunca `git add -A` ni `git add .` con ramas en vuelo.**
+
+> **El cableado es donde se rompen los módulos nuevos.** Escribirlos en archivos
+> nuevos evita que dos ramas se pisen, y el precio es que el enganche en
+> `valle.gd` queda pendiente. Pasó dos veces el mismo día: **`Sonido` quedó
+> instanciado dos veces** desde dos ramas que no se veían —dos lechos sonando
+> juntos, y uno en una variable local— y **la vegetación quedó cableada mientras
+> seguía llamándose `_armar_bosque()`**, con dos bosques encimados en el
+> Sotobosque. Las dos reglas están en el `CLAUDE.md` del cliente: **`grep` del
+> `class_name` antes de cablear**, y **la instancia va en un miembro, nunca en
+> una local**.
+>
+> Ojo con lo que se concluyó de ahí: **el duplicado NO era la causa de la fuga
+> de veinte objetos.** Eso se afirmó sin medir y era falso — la causa estaba en
+> el módulo y es del motor. Ver "Lo que puede matar esto" en `ROADMAP.md`.
 
 ---
 
-## Lo primero: recalibrar el ritmo `simulacion`
+## Dos crónicas rotas siguen guardadas en producción — sin dueño
+`chronicles`, región `valle-primero`, jugador `Prueba3D`
 
-`lib/world/tick.ts` — **bloqueado hasta que se libere** (ver arriba).
+Son **itinerarios de conversaciones que no están en la ventana** —las
+`conversacion` están excluidas por código—, sin un solo hecho detrás. El bug se
+arregló y **se comprobó que no se reproduce**, pero **el texto malo sigue en la
+base y ya se le mostró a alguien.**
 
-El día del valle pasó de 1 hora real a 6. Las probabilidades siguen bien en
-tiempo de mundo y dispararon 6× menos seguido en tiempo real. La tabla con las
-tres cuentas está en `ROADMAP.md`. Lo que hay que tocar:
+Hay que decidir qué se hace: borrarlas, marcarlas, o dejarlas como registro de
+lo que se llegó a mostrar. **No es obvio y por eso está acá y no hecho** —
+`chronicles` es historia del jugador, y este proyecto tiene por regla no
+reescribir lo que pasó. Pero lo que pasó es que se mostró una crónica falsa, y
+eso también es un dato.
 
-- **La ventana de mordida** (`region.tick - p.last_seen_tick <= 3`) pasó de 3 a
-  18 horas reales. Ahora que `player.health` es real y visible, entrás al otro
-  día herido o caído por algo que pasó mientras dormías. Rompe la regla dura de
-  `DISENO.md` §9.3: *nunca puede costarte tiempo de juego.* Bajarla a 1.
-- **Reponer amenazas** (35 % por tick, tope 3) tarda 17 horas reales. Limpiás
-  el valle y no hay nada que pelear por casi un día. Choca con la sesión de una
-  hora (§10.3).
-- **La muerte** (0,8 % por tick) está bien en tiempo de mundo —2,9 por año de
-  valle— y por eso es la más delicada. El problema es que el test de la Fase 0
-  son 28 ticks y la chance de que se muera alguien es del 20 %: **cuatro de
-  cada cinco corridas del test no ven morir a nadie**, y ésa es la tesis del
-  juego. No se arregla subiendo el número a lo bruto —el valle se consume— sino
-  decidiendo qué se está midiendo. Va con una propuesta y una corrida, no con
-  un número puesto de prepo.
+Y de paso: **su `unbacked_names` quedó en `null`** porque el parche que lo
+estampa no llegó a correr sobre ellas. La señal no existe justo para las dos
+que la habrían disparado.
+
+---
+
+## El tercer hueco: la relación se lee al revés `simulacion`
+`lib/world/tick.ts` — **bloqueado**, lo tiene 02.6.
+**Es lo único que falta para poder correr el test de siete días.**
+
+Con las redacciones que propuso el director, que son concretas:
+
+- **`ensenanza`** — poner al que aprende de sujeto y al maestro en cláusula
+  aparte: **«Bruno aprendió Temple de río. Se lo enseñó Ilde.»** Hoy sale al
+  revés en la crónica *en una ventana que contiene el hecho correcto*.
+- **`agenda_nueva`** — `«se propuso»` o `«empezó a buscar»` en vez de
+  `«se puso a»`, que se lee como cumplida: *"Sarn durmió una noche entera"*
+  cuando el hecho dice que se puso a dormir.
+- **Y uno nuevo, barato, que encontró de paso:** `nacimiento.summary` termina
+  con *«No sabe hacer nada de lo que se hace **acá**.»* **Es el único "acá" del
+  flujo de hechos, y el director lo copia** — le metió voseo en 4 de 27 hasta
+  que agregó una contra-instrucción. Cambiando ese "acá" por "aquí" en
+  `tick.ts`, **la contra-instrucción del prompt se borra y se recuperan
+  tokens.** Un carácter en el emisor contra un párrafo en el lector.
+
+**Es uno de los tres que bloquean el test de siete días**, y es el único que no
+es del director. Los `summary` de `ensenanza` y de `agenda_nueva` son **los dos
+más ambiguos que emite este archivo**, y el modelo lee la relación invertida.
+Casos medidos en la tercera auditoría:
+
+- *"Bruno le enseñó el oficio"* — fue Odila la que le enseñó **a** Bruno.
+- *"pasó por La Fragua y le enseñó a Ilde el Temple de río"* — fue Ilde la que
+  le enseñó **a él**.
+- *"Sarn al fin logró dormir una noche entera"* — es un `agenda_nueva`, o sea
+  que **se puso a** dormir, no que lo consiguió.
+
+Cinco crónicas, dos formas del mismo error. Es la misma familia que los sujetos
+ambiguos que ya se barrieron una vez (*"y sigue en pie"*): **si un `summary` se
+puede leer de dos maneras, el director elige la más dramática**, y un evento
+ambiguo es un bug de la simulación, no del narrador.
+
+---
+
+## Los `agenda_*` son el 45 % de todos los eventos `simulacion`
+`lib/world/tick.ts` — **bloqueado**, lo tiene 02.6.
+
+Medido: **243 de 546 eventos en `valle-pruebas`**, y en una ventana de 60 hechos
+eran **58**. El emisor escribe un `agenda_avanza` / `agenda_estancada` **por NPC
+por día**, y *"Tobio sigue sin conseguir lo que necesita"* llegó a aparecer
+**ocho veces idénticas** en la misma ventana.
+
+El director ya deduplica al leer y priorizó los avances al final, **pero eso es
+un parche del lector**: el arreglo es emitir sólo en la transición. Es la regla
+que este archivo tiene escrita desde el principio — **un estado que no cambió no
+es noticia** — aplicada al evento que más se emite.
+
+Y tiene consecuencia directa sobre lo que el proyecto mide: con la ventana
+llena de agenda pura, **no hay priorización posible porque no queda otra cosa
+que contar.**
+
+---
+
+## `rendimiento.gd` pisa a `ambiente.gd` `escena` o `arte`
+`scripts/rendimiento.gd`, `scripts/ambiente.gd`
+
+Medido con sonda sobre el `Environment` vivo: **`_aplicar_entorno()` reescribe
+seis propiedades de `ambiente.gd` en los tres niveles de calidad.** Lo peor:
+**`adjustment_enabled` llega a la pantalla en `false`, o sea que todo el bloque
+de corrección de color de `ambiente.gd` es código muerto** — se movió la
+saturación entre 0,85 y 1,38 y las cuatro capturas salieron idénticas en trece
+zonas. También llegan pisadas `tonemap_exposure` (0,95 y no 1,02), `ssao`, `ssr`
+y `volumetric_fog_enabled`; y `ciclo.gd` pisa `ambient_light_energy` cada cuadro.
+
+**Cualquiera que toque el look en `ambiente.gd` está escribiendo en un archivo
+que otro sobreescribe.** O se saca esa línea, o `ambiente.gd` deja de pretender
+que define el grade. Y ya costó un experimento: un test de niebla dio falso nulo
+por esto y hubo que rehacerlo.
+
+---
+
+## El suelo del pueblo está en V5, no en V4 `arte`
+`scripts/valle.gd`, `_color_terreno()` (~línea 346)
+
+La interpolación **satura en pasto seco desde y = 2**, y el pueblo está arriba de
+esa altura. O sea que el lienzo contra el que se mide la aldea no es el V4 que
+supone la composición de la paleta: **es V5, y ahí un muro V6 empata.** No hay
+color de la escalera que lo salve —V7 es la piel y V8 no lo pisa nada del
+mundo—, así que **el peldaño que falta es del terreno, no del muro.**
+
+---
+
+## `actions` no tiene columna de orden `esquema`
+`supabase/migrations/`, y después `lib/world/tick.ts`
+
+Salió de separar resolver de avanzar. **El orden entre dos acciones pendientes
+del mismo día queda indefinido**: un barrido del cron podría resolver `buscar`
+antes que `ir`, o sea buscar en el lugar equivocado. Hoy casi no muerde porque
+cada `/act` resuelve la suya al instante, y mientras tanto se ordena por
+`submitted_tick`, que es lo único que hay. **Arreglarlo bien es un `created_at`
+y una migración.**
+
+---
+
+## Una cláusula que quedó con el sentido invertido `simulacion`
+`lib/world/tick.ts`
+
+*"Tener una acción sin resolver"* contaba como estar adentro. Antes significaba
+"mano en el teclado"; **ahora significa "nadie pudo resolverla"**, porque el
+camino normal las resuelve al instante. Se dejó y está anotada en el código —
+hoy un pendiente no puede ser más viejo que el último tick, que es el que barre.
+**Pero el día que se espacie el barrido, esa cláusula se convierte en una forma
+de que te muerdan estando desconectado**, que es justo la regla dura de §9.3.
+
+---
+
+## Mover el stamp de `sinRespaldo` a `director.ts` `director`
+
+`lib/world/director.ts` — chico, y cierra bien algo que hoy está pegado con
+cinta. La medición ya funciona: `chronicles.unbacked_names text[]` existe,
+está backfilleada y hay línea de base (las 9 crónicas históricas promedian
+**1,00 nombre sin respaldo**; las 4 generadas con el prompt arreglado, **0,00**).
+
+Pero el stamp vive en `lib/web.ts` (`anotarSinRespaldo`), porque cuando se hizo
+`director.ts` estaba tomado. **Se apoya en que la única fila con
+`unbacked_names` null sea la que `narrate()` acaba de insertar** — es cierto
+hoy y es frágil. Lo correcto es una línea en el insert de `director.ts`
+(`unbacked_names: sinRespaldo`), que además cubre `pnpm look`. Cuando entre,
+borrar `anotarSinRespaldo` de `web.ts`.
+
+---
+
+## La meta de la vieja Ren, en `seed.ts` `npc-voz` o `simulacion`
+`lib/world/seed.ts` — **bloqueado**, lo tiene otro agente.
+
+*"Morirse sin haberle enseñado la runa de quietud a nadie"* **no es una meta: es
+una postura.** La simulación no la puede cumplir y ningún template la puede
+afirmar sin matar a una NPC que está viva — que es exactamente lo que pasó, y
+dos jugadores lo leyeron. Ahora la lista blanca de `tick.ts` la silencia, así
+que cerrarla ya no miente, pero tampoco dice nada.
+
+Propuesta que la deja igual de trágica y encima jugable: **«que alguien aprenda
+la runa de quietud antes de que sea tarde»**. La regla para escribir metas
+nuevas quedó anotada arriba de `METAS` en `tick.ts`.
+
+---
+
+## `tick.ts` tiene una copia entera de `combate.ts` `simulacion`
+`lib/world/tick.ts`, `lib/world/combate.ts`
+
+**Verificado:** el único importador de `combate.ts` es `lib/web.ts`. El
+`case 'pelear'` de `tick.ts` (~línea 1190) es una **reimplementación
+duplicada** — mismo daño, mismas armas, mismos `summary`, copiados.
+
+No es deuda estética: **es la razón de que el bug de los sujetos ambiguos haya
+que arreglarlo dos veces.** Hoy las dos copias están sincronizadas carácter por
+carácter, y el día que alguien toque una sola, el mismo golpe produce eventos
+distintos según venga por el tick o por la web. Eso es el invariante 3
+erosionándose por duplicación.
+
+El arreglo es que `tick.ts` importe `pelear()` pasándole su `ev`, que para eso
+existe el sumidero de eventos.
+
+**Ese momento llegó.** V.1 se paró justo en el borde —los NPCs se vuelven cuando
+hay un bicho rondando, que es la mitad no violenta— y dejó dicho lo correcto:
+hacerlos pelear obliga a extraer `combate.ts` de verdad en vez de hacer crecer
+la copia. **Va antes de V.2**, que es exactamente la tarea que necesita que un
+NPC salga y no vuelva.
+
+---
+
+## El «acá» de las memorias viaja mal `npc-voz` + `simulacion`
+`lib/world/tick.ts`, `lib/world/combate.ts`, `lib/world/dialogo.ts`
+
+Mismo mecanismo que la primera persona, que ya se arregló: una memoria se
+**copia a la cabeza de otro** cuando corre el chusmerío, y el deíctico se rompe.
+`"Los del Sotobosque tumbó a X acá"` en boca de alguien que lo escuchó en otro
+pueblo apunta al lugar donde se cuenta, no donde pasó.
+
+El arreglo es poner el nombre del lugar en vez de «acá» — `nombreDeLugar()` ya
+está a mano en los dos archivos. **Hay que hacerlo en los tres a la vez y con
+el dueño de `dialogo.ts`**, que es quien las convierte en frases.
+
+---
+
+## La reposición de amenazas mira el contador, no el reloj `simulacion`
+`lib/world/tick.ts` — **bloqueado**, lo tiene V.1.
+
+Quedó abierto del arreglo del latido: **el valle sigue tardando hasta seis horas
+reales en reponer una amenaza**, porque la tirada es por tick y ahora hay cuatro
+ticks por día real. Subir la probabilidad no lo arregla —ya se subió de 35 % a
+60 % por vacante— y latir más seguido tampoco, porque eso desharía el arreglo
+del ritmo. **Lo arregla que la reposición mire el reloj de pared**, igual que
+hicieron la presencia y la mordida.
+
+Es la misma lección tres veces seguidas: **lo que tiene que pasar en tiempo real
+no se puede medir en ticks**, porque el tick ya cambió de duración una vez y va
+a volver a cambiar.
+
+---
+
+## El cron pega a una sola región
+`vercel.json` / `api/tick.ts`. El cron usa el `REGION_SLUG` del deploy, que es
+`valle-primero`. **Cualquier otra región depende del tráfico de jugadores como
+único reloj.** Hoy no molesta porque sólo hay dos y una es de pruebas, pero el
+tramo 04 es el generador de regiones: cuando existan cinco, cuatro no tienen
+reloj. Anotarlo antes de que sea una sorpresa.
+
+---
+
+## Duplicados de agenda — el valle narra dos veces lo mismo
+
+Hay agendas activas duplicadas para la misma persona con la misma meta (Tobio
+×2 *"ver de cerca a alguien que sepa magia"*, Ilde ×2 *"rehacer las bisagras"*).
+Es ruido que llega al director, y sale de los datos, no del código. Chico, y sin
+dueño claro todavía.
 
 ---
 
@@ -84,18 +318,12 @@ el mapeo es perder el test.
 
 Queda una sola tarea. El resto está en "Anda".
 
-### 01.4 · Ver a los otros jugadores `jugabilidad` + `esquema`
-`lib/web.ts` (dónde está cada uno) y `scripts/valle.gd`
-Sin esto no hay multijugador, hay gente compartiendo una base de datos.
-Contrato: `/mundo` suma
-`jugadores: [{ name, place_slug, health, caido }]` sin incluirte a vos.
-
-### 01.6 · Dar de baja el cliente web `esquema`
-`lib/web.ts`, `lib/mapa.ts`
-El cliente Three.js está muerto (`DISENO.md` §17) y sigue en el repo: 600
-líneas y una ruta `/mapa` viva que muestra un juego que ya no es el juego.
-Borrar `lib/mapa.ts` y devolver 410 en `/mapa`, como se hizo con `/p/*`. Ya no
-está bloqueado: la landing está arriba.
+### 01.4 · Ver a los otros jugadores — **mitad servidor hecha**
+La mitad de `lib/web.ts` está **en producción y verificada**: `/mundo` devuelve
+`jugadores: [{ name, place_slug, health, caido }]`, sin incluirte, filtrado por
+presencia de 90 segundos de reloj de pared contra `players.last_seen_at` — que
+el propio `/mundo` sella en cada pedido, así que la presencia se sostiene sola.
+La mitad de cliente está despachada (ver arriba).
 
 ### 01.7 · `/pelear` no valida presencia `esquema`
 `lib/world/combate.ts`
@@ -139,15 +367,99 @@ Ojo con el ritmo — un tick es un día y ahora un día son seis horas reales.
 No va después de nada: va **en paralelo**. Es la respuesta al riesgo número uno
 (Dwarf Fortress). Ver `ROADMAP.md`.
 
-### P.1 · El valle suena `sonido`
-`scripts/sonido.gd` (nuevo) y el registro en `scripts/valle.gd`.
-Hoy no hay un solo `AudioStream` en el cliente: cero, verificado. El orden que
-rinde está en el agente: ambiente que cambia con el lugar y la hora, después
-pasos, después el golpe. **Sin assets todavía** — decí honestamente hasta dónde
-llega la síntesis y dónde hace falta grabar o comprar. Nadie del equipo puede
-escuchar el resultado: pedí que alguien lo escuche.
+### P.1 · El valle suena — **entregado, falta cablear**
+`scripts/sonido.gd` y `escenas/prueba_sonido.tscn` existen y están verificados
+en headless. Todo sintetizado al arrancar: **cero bytes en disco y cero en la
+descarga**, 101 ms de CPU una vez, once buses creados en tiempo de ejecución
+(no hizo falta tocar `project.godot`). Nueve voces, cada una con un para qué:
+el río como ancla fija, el yunque diciendo dónde queda la fragua, el fuego que
+nunca baja de 0.43 porque es *"el único techo que no se apaga"*.
 
-### P.2 · La paleta del valle `arte`
+**Falta el cableado**, que es del orquestador: seis líneas al final de
+`_ready()` en `valle.gd` —al final a propósito, para que un error ahí no deje
+al juego sin HUD— y un getter `fraccion()` de una línea en `ciclo.gd`. Hoy
+`sonido.gd` lee `_fraccion` por nombre con `has_method()` de por medio:
+funciona y está verificado contra el `Ciclo` real, pero es frágil si alguien
+renombra la variable.
+
+**Lo que hay que escuchar** (nadie del equipo pudo, el driver bajo WSL es
+Dummy). Correr `godot escenas/prueba_sonido.tscn` con parlantes y juzgar tres
+cosas: si el viento se nota como bucle, si el yunque pasa por golpe metálico o
+suena a campana, y si el Sotobosque incomoda. **La tercera es la única que no
+se puede aproximar con números.**
+
+### P.1b · Comprar o grabar el golpe del yunque `sonido`
+El único sonido que la síntesis no alcanza, y viene con presupuesto: **un solo
+sample**, unos cinco dólares en cualquier librería o veinte minutos con un
+teléfono y un martillo. El tono y el volumen ya se aleatorizan por golpe, así
+que con uno alcanza. Los pasos son el otro caso donde el oído detecta la
+falsedad al instante —los escuchás veinte veces por segundo— y necesitan
+grabación por superficie: pasto, tierra y piedra.
+
+### P.2b · Migrar los scripts a la paleta `arte` — uno por vez
+
+> **Error mío, anotado para no repetirlo.** Cuando volvió la paleta entregó una
+> tabla mapeando los 95 literales a su constante, y **acá guardé sólo los dos
+> bugs**. La tabla se perdió con el informe, y la migración de `valle.gd` tuvo
+> que reconstruirla desde cero. Es exactamente la regla que este proyecto
+> repite —*lo que no queda en un archivo, se perdió*— rota por el que la escribe.
+> **Lo que un agente entrega y el siguiente necesita, se copia acá, no se
+> resume.**
+
+**`valle.gd` y `detalles.gd` están migrados.** **Quedan siete**, de a uno por
+tarea: `interfaz.gd` (16 literales) · `figura.gd` (13) · `mapa.gd` (13) ·
+`ciclo.gd` (6) · `monstruo.gd` (4) · `ambiente.gd` (3) · `rendimiento.gd` (2).
+
+Dos cosas que dejó `detalles.gd` y son de otro dueño o de otro momento:
+- **`ventanas_y_puerta()` es código muerto** desde que las casas son del kit de
+  Kenney. Quedó migrada y compartiendo `_luz_de_ventana()` para que no haya dos
+  recetas de ventana esperando a que alguien copie la equivocada. **Borrarla es
+  un cambio aparte.**
+- **La rampa de las luciérnagas estaba mal armada** y se arregló de paso:
+  `set_color(1, ...)` corría después de dos `add_point()`, así que el índice 1
+  ya no era el final. Cada luciérnaga era invisible su primer tercio de vida y
+  después terminaba en **blanco puro opaco** —un color que no existe en la
+  paleta— y desaparecía de golpe. Es el tipo de bug que sólo aparece midiendo:
+  el código se leía bien.
+
+**Lo que dejó pedido la vegetación y hay que hacer en un solo cambio** — mover
+estas tres a `paleta.gd` **y borrar los deltas de `vegetacion.gd` a la vez**, o
+quedan tres constantes que no usa nadie, que es el problema que esto viene a
+arreglar. Los valores ya están calculados y son idénticos a lo que hoy produce
+derivando de `Paleta.COPA`, así que la migración no cambia un píxel:
+
+```gdscript
+const COPA_HUMEDA := Color(0.134, 0.175, 0.119)   ## h104 s0.32 v0.175
+const COPA_SECA   := Color(0.229, 0.262, 0.183)   ## h 85 s0.30 v0.262
+const ARBUSTO     := Color(0.124, 0.155, 0.108)   ## h100 s0.30 v0.155
+```
+
+Y una discrepancia de comentario en `paleta.gd`: el docstring de `madera()`
+lista "losas" en su familia, pero `LOSA_CAMINO` es piedra y va por
+`Paleta.piedra()`.
+
+### Los dos bugs que arrastraba la migración — **arreglados en `valle.gd`**
+`scripts/valle.gd`, `detalles.gd`, `interfaz.gd`, `figura.gd`, `mapa.gd`,
+`ciclo.gd`, `monstruo.gd`, `ambiente.gd`, `rendimiento.gd`. **De a un archivo
+por tarea**, o nadie puede revisar el cambio.
+
+`scripts/paleta.gd` ya existe con los 95 literales mapeados uno a uno. Y la
+migración arrastra **dos bugs encontrados y verificados** que no son de color:
+
+- **`valle.gd:202` está anulando la escalera de valor del terreno.**
+  `mat.albedo_color = Color(0.42, 0.46, 0.30)` con
+  `vertex_color_use_as_albedo = true` **multiplica** los colores de vértice que
+  calcula `_color_terreno()`. El pasto efectivo termina en v0.33 y saturación
+  0.60 — oscuro y verde, no lo que dice el código. El tinte tiene que ir casi
+  blanco.
+- **`detalles.gd` calcula un color por mata de pasto y lo tira.** El
+  `MultiMesh` pone `use_colors = true` y computa el tinte por instancia, pero
+  el material de `pasto()` **no** tiene `vertex_color_use_as_albedo`, así que
+  el shader lo ignora y las 26.000 matas salen del mismo color. Es exactamente
+  el estampado que ese código existe para evitar. Los materiales de ventana y
+  luciérnaga sí tienen el flag; el del pasto se olvidó.
+
+### P.2 · La paleta del valle `arte` — **hecha**, ver P.2b
 `scripts/paleta.gd` (nuevo). **No** tocar los otros scripts en la misma tarea.
 93 literales `Color(...)` repartidos en ocho scripts, cada uno con su marrón.
 Ése es el diagnóstico exacto de *"parece Playmobil"*: no hay colores malos, hay
@@ -157,15 +469,42 @@ materiales base; la migración de cada script viene después y de a uno.
 saturación a la distancia de la cámara, que es justamente lo que ya está
 resuelto.
 
-### P.3 · Vegetación a la escala del valle `naturaleza`
-`scripts/vegetacion.gd` (nuevo).
-Ojo con el diagnóstico, que en el agente está escrito de más: **sí hay
-árboles** — `_armar_bosque()` planta 46 conos con tronco. El problema es otro y
-es peor: están **sólo dentro del grupo `bosque`, en un radio de 13 m**, y el
-valle pasó de 132 a 360 m. El 99 % del mapa no tiene nada. No es agregar
-árboles, es que la vegetación nunca escaló con el mapa. MultiMesh, variación
-determinista por posición, agrupamiento junto al agua, y los colores los pide
-`paleta.gd` (P.2).
+### P.3 · Vegetación — **entregada, falta cablear** (lo hace el orquestador)
+
+`scripts/vegetacion.gd` y `escenas/prueba_vegetacion.tscn` existen y están
+verificados: headless limpio, cero `randf()` y cero `String.hash()` (todo sale
+de un hash entero propio con semilla fija, porque el bosque tiene que ser el
+mismo en la pantalla de todos). 4.945 plantas, 7.900 instancias, 274 MultiMesh
+en 104 baldosas de 34 m, 40–64 llamadas de dibujo en cámara, sin colisión.
+
+**El cableado, en `valle.gd`** — dos cosas, y la segunda es fácil de olvidar:
+
+```gdscript
+	# en _ready(), después del bucle de _armar_lugar y antes de Detalles.pasto
+	var vegetacion := Vegetacion.new()
+	add_child(vegetacion)
+	vegetacion.poblar(altura_en, LUGARES)
+```
+
+Y **borrar `_armar_bosque()` y su llamada** dentro de `_armar_lugar`, dejando
+el `return`. Si no, el Sotobosque queda con dos bosques encima.
+
+**Lo que hay que juzgar en una captura** (la escena de prueba ya viene
+encuadrada desde la aldea hacia el Sotobosque a contraluz): si el Sotobosque es
+**una** masa oscura con contorno neto o un montón de conos separados; si la tala
+se lee como mordisco y no como bache; y si el faldeo cierra el horizonte sin
+tapar la abertura norte.
+
+**Pedido a la paleta** (entra en P.2b): que `COPA_HUMEDA`, `COPA_SECA` y el
+verde de arbusto vivan en `paleta.gd`. Hoy se derivan de `Paleta.COPA` con
+deltas fijos para no inventar, pero el lugar donde eso se decide es la paleta.
+
+> **La palanca de rendimiento, anotada por si el contador duele:** las copas
+> proyectan sombra en alto y medio, y ésa es la primera que hay que bajar. Y
+> una decisión suya que conviene respetar: **el bosque no se ralea en los
+> niveles bajos, se acorta** (190/155/120 m de alcance). El pasto es adorno; el
+> bosque es estructura, y diezmarlo cambiaría la composición del mundo según la
+> máquina de cada uno.
 
 ### P.4 · Que el bicho diga de qué pueblo es `personajes`
 `scripts/figura.gd`, `scripts/monstruo.gd`
@@ -183,17 +522,181 @@ kit modular, interiores, y una decisión de cámara adentro. No antes de P.1–P
 
 ---
 
-## El bloqueo que se sacó
+### P.6 · Que los NPCs se muevan en su lugar `jugabilidad`
+`scripts/valle.gd` — **en cuanto lo suelte R2, ésta va primero.**
 
-**El piso de zoom quedó decidido el 17 de agosto** y está en `DISENO.md` §6:
-la cámara se acerca hasta leer **silueta, postura y ropa**, nunca una
-expresión. **No hacen falta caras modeladas ni animación facial**; el
-presupuesto de arte va a silueta, valor y color. Los primeros planos son un
-modo aparte, no una posición de cámara.
+**Es el pedido más repetido después de "le falta la vida", y no depende de
+nada.** Hoy los NPCs están clavados en un punto. Que caminen dentro de su lugar
+—que Ilde se mueva por la fragua, que Tobio dé vueltas por el camino— es barato,
+es visible al instante, y **no espera al servidor**.
 
-**La rama de arte está desbloqueada.** Todo prompt de `arte`, `naturaleza`,
-`arquitectura` y `personajes` lleva esta decisión adentro: es lo que define si
-lo que hacen se lee o se desperdicia.
+Es la mitad de cliente de V.1. La otra mitad —que el servidor los mueva de
+lugar de verdad, ejecutando verbos— es más grande y va aparte. Las dos son
+independientes: ésta se puede hacer hoy y sigue sirviendo cuando la otra llegue.
+
+**El límite que la mantiene honesta:** esto es animación de presencia, no
+estado. El NPC sigue estando *en la fragua* para el mundo; lo único que cambia
+es que no está congelado. **No inventes desplazamientos entre lugares en el
+cliente** — eso es estado, y el estado lo manda el servidor (invariante 4).
+
+---
+
+## El criterio de arte, y va en todo prompt de las cuatro ramas
+
+**Decidido el 17 de agosto, en `DISENO.md` §6.** El juego es **estilizado, y
+comprometido con serlo**. La frase que hace que la decisión se entienda y no se
+erosione:
+
+> Hoy el juego no es realista ni estilizado: **es indeciso, y eso es lo que se
+> lee como Playmobil.** Playmobil no se ve mal por ser estilizado: se ve mal por
+> ser plástico de color plano bajo una luz que pretende ser real. Minecraft y
+> Stardew son mucho más simples que esto y no se ven baratos, porque están
+> comprometidos con una decisión.
+
+Lo que usa quien trabaja:
+1. **El color decide separación, no imita materiales.** Un techo no es marrón
+   porque la teja sea marrona: es el valor que necesita para separarse del pasto
+   a veinte metros. Si el color "correcto" no separa, el correcto está mal.
+2. **La silueta hace el trabajo pesado.** Es lo único que se lee a la distancia
+   a la que se juega, y es la misma decisión que el piso de zoom.
+3. **Menos geometría, no más.** Subir detalle para que se vea menos rústico es
+   el camino equivocado: la respuesta es comprometerse más con lo simple.
+
+**Las cuatro ramas —`arte`, `naturaleza`, `arquitectura`, `personajes`— usan el
+mismo criterio o se rompe.** Una que apunta a lo real mientras las otras tres
+estilizan reproduce la indecisión que esto existe para terminar.
+
+---
+
+## Los bloqueos que se sacaron
+
+Los dos el 17 de agosto, los dos en `DISENO.md` §6.
+
+- **El piso de zoom.** La cámara se acerca hasta leer **silueta, postura y
+  ropa**, nunca una expresión. **No hacen falta caras modeladas ni animación
+  facial.** Los primeros planos son un modo aparte, no una posición de cámara.
+- **La dirección de arte.** Estilizado y comprometido (arriba). Salió también de
+  "lo que falta decidir" de `DISENO.md`: el renglón decía que *ningún agente
+  sostiene una dirección de arte porque es un criterio y no una tarea*, y ese
+  problema ya no existe — el criterio está escrito y tiene instrumento
+  (`paleta.gd`) y dueño (`arte`, el único que decide un color).
+
+**La rama de arte está desbloqueada, y las dos decisiones viajan juntas en todo
+prompt de las cuatro ramas.**
+
+---
+
+## La gente vive su propia vida — `DISENO.md` §9
+
+Dirección nueva del 17 de agosto, y es grande. **Son tres tareas de tamaños muy
+distintos y el orden importa más que de costumbre**, porque las dos últimas
+hechas antes de la primera no se notan.
+
+> **El límite, y va en el prompt de quien toque cualquiera de las tres:** la
+> simulación no usa IA (invariante 1). El autor **puede sembrar** metas,
+> pueblos y tensiones; **no puede decidir que algo ya pasó** — eso lo decide el
+> tick, determinista. Si alguien propone que el modelo resuelva un turno, es
+> que no.
+
+### V.2b · Que se vea que salieron `jugabilidad` o `esquema`
+`scripts/valle.gd` y/o `lib/web.ts`
+Hoy **el jugador no se entera de que alguien salió hasta que no vuelve.** Un
+evento de partida rompería el presupuesto de ruido —salir no es noticia, igual
+que `ir`— pero **el cliente lo puede mostrar como estado**: dos NPCs caminando
+juntos hacia el bosque. Es la diferencia entre enterarte de una pérdida y
+haberla visto venir.
+
+### V.1d · `dar` con iniciativa del que tiene `esquema` + `simulacion`
+`supabase/migrations/`, después `lib/world/tick.ts`
+La segunda mitad limpia de V.1b, y **paró ahí porque necesita una migración**.
+Hoy el que necesita va y pide; falta que el que tiene **ofrezca**. Es donde vive
+*"Bruno le debe un frasco a Odila y se lo paga"*, y para eso **la meta tiene que
+saber a quién se le paga** — `agendas` no tiene esa columna.
+
+### V.1e · Un rumor no se le cuenta al protagonista `simulacion`
+`lib/world/tick.ts` — una línea, en la pasada del chusmerío.
+Salió *"Sarn le contó a Bruno: Bruno no le dio hoja templada a Sarn"*. El
+agujero es viejo y también vale para jugadores: *"Ilde le contó a Pedro: Pedro
+mató a la jauría"*.
+
+### V.1f · `cuantosLoSaben()` no filtra por región `simulacion`
+`lib/world/tick.ts` — cuenta `holder_kind === 'player'` sin filtrar, así que un
+jugador de otro valle infla el *"Ahora lo saben N"*. Se ve en cualquier base con
+más de una región, o sea en ésta.
+
+### V.1b · Los verbos sociales entre NPCs — **hecha la primera mitad** `simulacion`
+`lib/world/tick.ts`
+**Es la segunda mitad limpia de V.1 y es coherente sola.** Hoy un NPC que
+necesita algo fabricado y no puede aprender a hacerlo **se traba**, cuando lo
+natural sería pedírselo al que sabe y que se lo dé. Falta `dar`, `hablar` y
+`ensenar` de NPC a NPC.
+
+Es lo que convierte el valle de siete personas trabajando en paralelo en siete
+personas que se necesitan — que es el título del juego.
+
+### V.1c · `people.home_place_id` `esquema`
+`supabase/migrations/`, y después `lib/world/tick.ts`
+Hace falta y quedó sin hacer. "Volver a casa" se deriva hoy de
+`knowledge.makes_at` porque no hay dónde más. Consecuencia visible y medida:
+**quien no sabe hacer nada no vuelve a ningún lado, y Sarn terminó viviendo en
+la fragua** después de aprender a forjar. Es coherente, pero no es lo que uno
+pondría a mano.
+
+### V.1 · Las agendas avanzan ejecutando verbos — **hecha.** `simulacion`
+`lib/world/tick.ts`
+**Ésta primero, y paga casi todo.** Hoy Ilde "avanza un 12 % en juntar carbón":
+un número que sube. Tiene que **ir** a la Casa Quemada, **buscar**, y volver con
+carbón, con las manos vacías, o no volver.
+
+Los nueve verbos ya existen y los NPCs ya tienen lugar, saberes, vínculos y
+metas. **Es sobre todo reescribir el avance de agendas para que pase por los
+verbos que ya están**, no construir un sistema nuevo. Y cuando el NPC y el
+jugador juegan con las mismas reglas, todo lo que pasa se vuelve legible: te
+cruzás a Ilde en el camino y sabés a qué fue.
+
+Por qué va primera, y es el argumento que ordena las tres: **hace visible lo
+que el mundo ya sabe.** Las metas, los oficios y los vínculos existen hace
+semanas y el jugador nunca los vio porque se resolvían como aritmética. Ejecutar
+verbos los convierte en cosas que pasan en un lugar, a una hora, delante tuyo —
+y de paso en `events`, que es lo único que el director puede contar.
+
+**Cuidado con el ruido:** un NPC que ejecuta verbos puede emitir muchos más
+eventos que uno que suma un porcentaje. Un valle de siete personas caminando
+puede convertir la crónica en un registro de tránsito. La regla de siempre: un
+estado que no cambió no es noticia.
+
+### V.2 · Salen de aventura y no vuelven `simulacion`
+`lib/world/tick.ts` — **después de V.1**, porque necesita que ya sepan `ir` y
+`pelear` por su cuenta.
+Un NPC arma una expedición, se lleva a alguien, y puede no volver. **Cuando eso
+pasa se lleva lo que sabía**, y ahí el tema del juego deja de ser una frase y es
+algo que te pasó sin que estuvieras. Es la misma pérdida que hoy sólo produce la
+muerte por azar, pero **con una causa que se puede contar**: fue al Sotobosque a
+buscar algo y no volvió.
+
+Se apoya en 03.2 (una mazmorra) y la mejora: una mazmorra deja de ser contenido
+esperando al jugador y pasa a ser un lugar peligroso donde cualquiera puede ir.
+Se puede hacer una versión flaca antes, con los lugares salvajes que ya existen.
+
+### V.3 · El autor del mundo `historia`
+`lib/world/autor.ts` (nuevo), `api/autor.ts` (nuevo), `vercel.json`
+**Lo caro, y va último.** Hoy las metas salen de una lista fija de dos por
+oficio y ése es el techo del sistema: se repiten. El autor corre **cada varios
+días del valle, no cada tick**, lee lo que pasó, y **escribe hechos nuevos en la
+base**: una meta que sale de lo que ese valle perdió, un pueblo que se enoja
+porque le talaron el claro, una figura que aparece porque murieron tres maestros
+seguidos. **No narra: siembra.** Después la simulación los ejecuta sola.
+
+Que corra cada tanto no es un ahorro, **es lo que lo hace bueno**: un mundo donde
+algo grande pasa todos los días no tiene nada grande.
+
+**Va último por una razón concreta, no por ser el más difícil:** el autor
+sembrando metas sobre un sistema que todavía avanza con `progress += 12` produce
+metas mejor escritas que siguen siendo invisibles. **V.1 es lo que hace que
+valga la pena escribirlas.**
+
+Técnicamente **no toca `tick.ts`** —archivo nuevo más una entrada de cron— así
+que se puede paralelizar con V.2 cuando llegue el momento.
 
 ---
 
@@ -314,8 +817,13 @@ la dirección del proyecto vuelva tres días seguidos.
 
 - **`events.summary` es prosa en español.** `detail` debería ser la verdad y el
   director renderizar al idioma. Bloquea el bilingüe.
-- **La auditoría es a nivel de id, no de afirmación.** El director puede citar
-  ids válidos y sobre-leerlos.
+- **La auditoría automática no sirve para detectar lo que falla.** Ya no es una
+  sospecha: las tres crónicas mentirosas que se auditaron a mano el 17 de
+  agosto pasaron con `inventados: []`. El chequeo compara ids, y las mentiras
+  no usan ids — o citan uno válido y lo sobre-leen, o no citan ninguno y sacan
+  la afirmación del bloque MUNDO. **Mientras el chequeo dé limpio sobre
+  crónicas falsas, es peor que no tenerlo**, porque da confianza. Hace falta
+  auditar afirmaciones, no ids.
 - **Un muerto puede tomar una agenda nueva** en el mismo tick en que muere.
 - **No puedo ver lo que hago en Godot.** Sin GPU bajo WSL, todo juicio visual
   depende de una captura de quien lo esté jugando.

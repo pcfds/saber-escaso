@@ -5,10 +5,31 @@
  * el director no lo puede contar. Esa separación es el experimento entero:
  * si algún día este archivo importa el SDK de Anthropic, se rompió.
  *
+ * **Los dos únicos imports de este archivo son `../db.js` y `./combate.js`, y
+ * `combate.ts` importa sólo `../db.js`.** El invariante se rompe igual de
+ * rebote que de frente, así que la cadena entera se mira antes de agregar un
+ * import acá: dos archivos, un solo destino, y ninguno de los dos toca un SDK
+ * de modelo.
+ *
  *   pnpm tick        avanza un tick
  *   pnpm tick 7      avanza siete
  */
 import { db, getRegion } from '../db.js'
+// El golpe vive afuera —ver el encabezado de `combate.ts`, que explica por qué
+// no espera al tick— y desde acá se llama a la MISMA función que llama
+// `POST /pelear`. Hasta el 17 de agosto había una segunda copia entera adentro
+// del `case 'pelear'` de este archivo: mismo daño, mismas armas, los mismos
+// `summary` escritos a mano dos veces. `recordar` y `tocarVinculo` viven allá
+// por el motivo que dice aquel encabezado — que el combate inmediato deje la
+// misma huella que el del tick— y también estaban duplicadas acá.
+//
+// Y `recibirGolpe` por lo mismo, pero al revés: la pasada 4b —«y muerden»— era
+// una TERCERA implementación del golpe del bicho, con otro daño, otro summary,
+// sin dedupe y sin costo social de la caída. Hoy los tres caminos —el tick, el
+// cliente y la web— llaman a las dos mismas funciones.
+import {
+  pelear, recibirGolpe, recordar, tocarVinculo as escribirVinculo, conA,
+} from './combate.js'
 
 type Ev = {
   region_id: string
@@ -21,6 +42,517 @@ type Ev = {
 
 const roll = (max: number) => Math.floor(Math.random() * max)
 const pick = <T>(xs: T[]): T | undefined => xs[roll(xs.length)]
+
+// ─────────────────────────────────────────────────────────────
+// EL RITMO. Un tick es un día del valle; el cron corre uno cada SEIS horas.
+// ─────────────────────────────────────────────────────────────
+//
+// **Cuatro ticks por día real.** Eran veinticuatro hasta el 17 de agosto, y
+// cuando cambió el cron nadie revisó las probabilidades: todas siguieron bien
+// calibradas en tiempo de mundo y pasaron a disparar SEIS VECES MENOS SEGUIDO
+// en tiempo real. Antes de tocar cualquier número de acá, hacé las dos
+// cuentas — por día de mundo y por día real — o vuelve a pasar.
+//
+// Este renglón decía que **una acción de un jugador también dispara un tick**,
+// y era cierto y era el bug: `POST /act` llamaba a `step()` sin condición, o
+// sea una acción = un día del valle, y `valle-primero` corrió 28 ticks en
+// 4 h 21 min. Ya no. El mundo late por vuelta del sol (`latir()` en `web.ts`)
+// y **sólo** por eso: cuatro días por día real, los pida quien los pida.
+//
+// Lo que sí sigue pasando en el acto es la resolución de lo que mandó el
+// jugador — `resolverAcciones()`, acá abajo. Son los dos relojes de
+// `DISENO.md` §7.3 y hay que tenerlos separados en la cabeza: **lo que hiciste
+// se resuelve ya; el día del valle lo mueve el sol.** Una acción resuelta
+// fuera del tick no adelanta ni un día, así que las probabilidades de este
+// archivo se siguen leyendo "por día de valle" y punto.
+export const TICKS_POR_DIA_REAL = 4
+
+// ─────────────────────────────────────────────────────────────
+// EL RELOJ DEL VALLE — la hora que ya existía y nadie usaba de este lado
+// ─────────────────────────────────────────────────────────────
+//
+// `DISENO.md` §7.3: **el sol es el reloj del mundo.** Un tick es un día y el
+// cron corre uno cada seis horas, así que seis horas reales son una vuelta
+// entera del sol. El cliente ya dibuja el cielo y las ventanas con esto
+// (`momento_del_dia`, que sale de `web.ts`); el servidor no lo miraba para
+// nada, y por eso el valle tenía reglas y no tenía rutina.
+//
+// **La cuenta, que es la que decide dónde vive la rutina y no es opinable:**
+//
+//     1 día del valle  = 6 horas reales
+//     1 hora del valle = 15 minutos reales
+//     la noche (22:00 a 06:00) = 2 horas reales
+//
+// De ahí sale todo lo demás. **Un tick no puede mandar a nadie a dormir**: el
+// tick es la unidad y adentro del tick no hay horas, así que dormir un tick es
+// dormir un día entero del valle. Y si el tick escribiera `place_id = su casa`
+// cada noche, al otro día esa persona tendría que volver a caminar hasta donde
+// estaba —y cada viaje le cuesta el día (`diaGastado`)—, o sea que nadie
+// llegaría nunca a ninguna parte. Un valle donde todos vuelven a casa por
+// escritura es un valle donde no pasa nada.
+//
+// Entonces la rutina se parte en dos, y la línea es limpia:
+//
+//   · **el tick piensa en días** y usa `people.place_id`, que quiere decir
+//     *dónde lo dejó su jornada*. Todo lo que decide la simulación —quién se
+//     cruza con quién, quién le enseña a quién, a quién muerde el bicho— sigue
+//     saliendo de ahí y no cambió una coma;
+//   · **la consulta piensa en horas** y usa `rutinaDe()`, que no toca la base:
+//     con la hora del reloj de pared contesta dónde está y si duerme AHORA.
+//
+// Es la misma separación de §7.3 que ya está en `web.ts` entre `latir()` y
+// `resolverAcciones()`, aplicada a las personas.
+
+/** Una vuelta del sol: seis horas reales, un día del valle.
+ *
+ *  Es la MISMA constante que `latir()` y `momento_del_dia` en `web.ts` y que
+ *  `DIA_REAL := 21600.0` en `ciclo.gd`. Vive acá porque el reloj del mundo es
+ *  de la simulación; `web.ts` debería importarla de acá en vez de tener su
+ *  copia. Ya cambió una vez de 1 hora a 6. */
+export const DIA_REAL_MS = 21_600_000
+
+/** Qué hora del valle es, 0 a 24 y con decimales.
+ *
+ *  Los bordes del bloque caen a las 00, 06, 12 y 18 UTC —la época Unix arranca
+ *  a medianoche— y es exactamente cuando dispara el cron. O sea que **el tick
+ *  del cron cae a medianoche del valle**: el día se cierra cuando la gente ya
+ *  se acostó, que es la hora correcta para preguntar quién no volvió a su casa.
+ *  (El que empuja un jugador cae en la primera visita del bloque nuevo, así que
+ *  puede ser un rato más tarde. Nada del cierre del día depende de la hora
+ *  exacta: depende de dónde quedó cada uno.)
+ *
+ *  El cero es la medianoche del valle. Si algún día el cielo del cliente dijera
+ *  otra cosa —que el bloque arranca al amanecer, por ejemplo— se corrige acá y
+ *  en un solo número, no repartido por el archivo. */
+export function horaDelValle(ms: number = Date.now()): number {
+  return ((ms % DIA_REAL_MS) / DIA_REAL_MS) * 24
+}
+
+/** Lo que la rutina necesita saber de una persona. */
+export type ConRutina = {
+  place_id: string | null
+  home_place_id: string | null
+  jornada_desde: number
+  jornada_hasta: number
+}
+
+/** ¿Está en pie a esta hora?
+ *
+ *  `hasta` puede ser MENOR que `desde`, y eso no es un error de datos: es una
+ *  jornada que cruza la medianoche, o sea el guardia (18 a 6). Sin este caso el
+ *  que trabaja de noche no existe, y el guardia haciendo lo contrario que todos
+ *  es la mitad de lo que hace que un pueblo tenga horarios. */
+export function despiertoA(hora: number, desde: number, hasta: number): boolean {
+  return desde <= hasta
+    ? hora >= desde && hora < hasta
+    : hora >= desde || hora < hasta
+}
+
+/** Dónde pasa la noche.
+ *
+ *  En su casa, salvo que la jornada lo haya dejado en un lugar salvaje: del
+ *  Sotobosque y de la Casa Quemada no se vuelve al oscurecer, se acampa. Eso es
+ *  lo que hace que «no volvió a dormir» sea un hecho y no una frase — y es la
+ *  única forma en que alguien duerme fuera de su cama.
+ *
+ *  Quien esté de visita en un lugar donde sí se puede volver —la aldea, el
+ *  camino, la fragua— se vuelve a su casa y no cuesta nada: son doce casas
+ *  apretadas contra el recodo del río, no un continente.
+ *
+ *  Sin casa (`home_place_id` en null, que es una región vieja sin migrar)
+ *  duerme donde está. Degrada a lo de antes y no se rompe nada. */
+export function dondeDuerme(
+  p: ConRutina, places: { id: string; kind: string }[],
+): string | null {
+  const casa = p.home_place_id ?? p.place_id
+  if (!p.place_id || p.place_id === casa) return casa
+  const kind = places.find((l) => l.id === p.place_id)?.kind
+  return kind === 'bosque' || kind === 'ruina' ? p.place_id : casa
+}
+
+/**
+ * Dónde está y qué le pasa a esta persona AHORA MISMO.
+ *
+ * **Se resuelve al consultar, nunca al tickear**, por el motivo largo de arriba:
+ * la hora es continua entre ticks y el tick es un día entero. No lee ni escribe
+ * la base — es una función de la fila que ya tenés en la mano y del reloj.
+ *
+ * La usan `/mundo` (para que el cliente dibuje a la gente donde de verdad está)
+ * y `resolveAction()` (para que el jugador pueda hablarle a quien ve, y sólo a
+ * quien ve). **Las dos tienen que usar la misma o el mundo miente**: dibujar a
+ * Bruno durmiendo en la fragua y que el servidor lo tenga en la aldea es la
+ * clase de diferencia que convierte al cliente en teatro.
+ *
+ * Lo que devuelve, y cada campo es para algo que se ve:
+ *
+ *   · `place_id` — dónde está. Es `people.place_id` mientras está en pie, y su
+ *     casa mientras duerme.
+ *   · `durmiendo` — si está durmiendo. El cliente lo mete adentro y apaga la
+ *     ventana; el que lo mira de lejos ve una casa con luz o sin luz.
+ *   · `durmiendo_afuera` — duerme, y no en su casa. Es el que se quedó en el
+ *     monte, y es la única forma de dormir a la intemperie que hay acá.
+ */
+export function rutinaDe(
+  p: ConRutina,
+  places: { id: string; kind: string }[],
+  hora: number = horaDelValle(),
+): { place_id: string | null; durmiendo: boolean; durmiendo_afuera: boolean } {
+  if (despiertoA(hora, p.jornada_desde, p.jornada_hasta)) {
+    return { place_id: p.place_id, durmiendo: false, durmiendo_afuera: false }
+  }
+  const donde = dondeDuerme(p, places)
+  return {
+    place_id: donde,
+    durmiendo: true,
+    durmiendo_afuera: donde !== (p.home_place_id ?? p.place_id),
+  }
+}
+
+/** El horario de un oficio, para el que entra al valle.
+ *
+ *  Sale de `horarios`, que es catálogo del autor —global, como `knowledge` y
+ *  `por_llegar`— y se guarda RESUELTO en la fila de la persona. Los dos pasos
+ *  hacen falta: el horario es un hecho del oficio (la fragua abre temprano),
+ *  pero quien lo cumple es una persona, y hay personas que no lo cumplen.
+ *  Guardado en la fila, el autor le puede torcer el día a una sola sin moverle
+ *  la jornada a todos los herreros del mundo.
+ *
+ *  Un oficio que no esté en la tabla se lleva el día de cualquiera, que es el
+ *  default de la columna. No es un fallo: es el horario de quien no tiene
+ *  oficio. */
+async function jornadaDe(trade: string): Promise<{ desde: number; hasta: number }> {
+  const { data } = await db
+    .from('horarios').select('desde, hasta').eq('trade', trade).limit(1).maybeSingle()
+  return { desde: data?.desde ?? 6, hasta: data?.hasta ?? 22 }
+}
+
+/** Cuánto hace que lo vimos para considerarlo ADENTRO, en milisegundos.
+ *
+ *  Cinco minutos de reloj de pared. El cliente 3D pega a `/mundo` cada pocos
+ *  segundos, así que quien está jugando entra siempre; quien cerró el juego
+ *  hace media hora, nunca. Es la ventana de la que cuelga la mordida, y por
+ *  eso es corta: `DISENO.md` §9.3 dice que perder **nunca puede costarte
+ *  tiempo de juego**, y con la ventana vieja (3 ticks = 18 horas reales) te
+ *  desconectabas a la tarde y entrabas al otro día caído. */
+const PRESENTE_MS = 5 * 60_000
+
+/** Cuánto hace que lo vimos para considerar que la región tiene gente.
+ *
+ *  Doce horas: dos ticks. Sólo decide el paso del mundo, así que es larga a
+ *  propósito — un mundo que se frena de golpe apenas te vas es peor que uno
+ *  que tarda medio día en darse cuenta. */
+const RECIENTE_MS = 12 * 60 * 60_000
+
+/** Que se muera alguien, por tick.
+ *
+ *  0,8% = una muerte cada 125 días del valle = 2,9 por año de mundo. **No se
+ *  movió**, y el razonamiento largo está donde se usa. */
+const P_MUERTE = 0.008
+
+/** Por debajo de esto el valle deja de ser un valle.
+ *
+ *  Es el MISMO tres que ya guardan las dos formas de morirse —`people.length >
+ *  3` en el sorteo y `slice(0, people.length - 3)` en las salidas—, escrito acá
+ *  con nombre porque los nacimientos dividen por él y un número suelto en una
+ *  división es una invitación a que alguien mueva uno de los tres y no los
+ *  otros dos. Los dos literales no se tocaron: cambiarlos de rebote en la
+ *  tarea de los nacimientos es exactamente cómo se rompe algo que anda. */
+const PISO_DEL_VALLE = 3
+
+// ─────────────────────────────────────────────────────────────
+// QUE EL VALLE NO TENGA FECHA DE VENCIMIENTO
+// ─────────────────────────────────────────────────────────────
+//
+/** Que llegue alguien, por tick, **con el valle en el piso**. De ahí baja en
+ *  línea recta hasta cero cuando la población llega al cupo de la región.
+ *
+ *  **Es el número que decide adónde converge la población, así que va con la
+ *  cuenta hecha y con la medición de la que sale.**
+ *
+ *  El problema, medido y no supuesto: ocho valles de laboratorio, 250 ticks
+ *  cada uno, con alguien adentro para que `pace` sea 1 y sin que ese alguien
+ *  juegue. De 7,00 personas a **4,00**, y de 6,00 saberes vivos a **3,63**. Las
+ *  dos curvas estrictamente decrecientes, y el piso duro de tres esperando al
+ *  final. Sin jugadores, lo mismo más lento: 4,63 y 3,88. Eso es §9.2 dicho con
+ *  números — *"sin nacimientos una región se despuebla monotónicamente y el
+ *  saber sólo puede bajar"*.
+ *
+ *  **La forma: logística, no plana.** Una tasa plana no tiene equilibrio —es un
+ *  paseo al azar que termina en el piso o en el infinito—, así que la
+ *  probabilidad baja con la población:
+ *
+ *      P = P_NACIMIENTO × (cupo − vivos) / (cupo − PISO_DEL_VALLE)
+ *
+ *  Con `cupo = 9` (el de la región, ver la migración) y el piso en 3:
+ *
+ *    · con 3 vivos — 3,0% por tick, uno cada 33 días del valle;
+ *    · con 7 vivos — 1,0% por tick, uno cada 100 días del valle;
+ *    · con 9 vivos — cero. El valle no crece sin techo, y no hace falta un
+ *      tope aparte: el tope ES la fórmula.
+ *
+ *  **Adónde converge, que es lo único que importa.** El equilibrio está donde
+ *  esto se cruza con la mortalidad. La mortalidad medida es 0,011 por tick con
+ *  jugador (0,008 del sorteo, que es plano, más las salidas, que escalan con
+ *  las agendas) y 0,0095 con el valle vacío. Cruzando:
+ *
+ *    · con jugador — 0,03 × (9−n)/6 = 0,011 → **n = 6,8**
+ *    · sin nadie   — 0,03 × (9−n)/6 = 0,0095 → **n = 7,1**
+ *
+ *  O sea que converge a **las siete personas con las que el valle fue
+ *  escrito**, jueguen o no. El cupo de 9 no es una opinión sobre cuánta gente
+ *  entra en un valle: es el número que pone el equilibrio ahí.
+ *
+ *  **Las dos cuentas, como manda la casa.**
+ *
+ *    · en tiempo de MUNDO — con el valle lleno, una llegada cada 100 días del
+ *      valle: 3,65 por año, contra las 3,65 muertes por año que ya se medían.
+ *      Es la misma frecuencia que la muerte, y tiene que serlo. Con el valle en
+ *      cuatro, una cada 36 días.
+ *    · en tiempo REAL, sólo cron — cuatro ticks por día: con el valle lleno,
+ *      **una llegada cada 25 días reales**; con el valle en cuatro, una cada 9.
+ *      Un valle que se vació se recompone en unos dos meses reales, que es más
+ *      o menos lo que tardó en vaciarse.
+ *
+ *  **Y no lo frena `pace`, a propósito.** `pace` existe para que la HISTORIA no
+ *  se escape mientras nadie mira. La población no es historia, es el estado del
+ *  valle — la misma desviación consciente de §7.3 que ya se tomó con las
+ *  amenazas, y por un motivo más fuerte: **la muerte tampoco está frenada por
+ *  `pace`.** Si los nacimientos lo estuvieran, un valle sin jugadores seguiría
+ *  despoblándose cuatro veces más rápido de lo que se recompone, que es
+ *  exactamente el agujero que esto viene a tapar. */
+const P_NACIMIENTO = 0.03
+
+// ─────────────────────────────────────────────────────────────
+// EL DÍA DE UN NPC
+// ─────────────────────────────────────────────────────────────
+//
+/** Cuántos días de cada cinco le dedica alguien a lo que persigue.
+ *
+ * Un tick es un día y un NPC hace **como mucho un verbo por día**, igual que
+ * el jugador. Pero no todos los días son para lo suyo: Ilde tiene una fragua
+ * que atender antes de bajar a la Casa Quemada a buscar carbón. Este número
+ * es esa diferencia, y no es decoración — es lo único que sostiene el ritmo
+ * que ya estaba calibrado.
+ *
+ * **La cuenta, que es de dónde sale el 0,2 y no de la nada.** Antes una
+ * agenda subía `2 + roll(8)` por tick (media 5,5) y tardaba ~18 ticks; medido
+ * sobre 40 ticks con siete personas daban 13 agendas cerradas, o sea **una
+ * cada 21,5 ticks por persona**. Ahora una agenda material se cierra en pasos
+ * reales:
+ *
+ *   · juntar algo que crece — 1 viaje + ~2,4 búsquedas (en el Sotobosque la
+ *     raíz sale 5 de 12 veces) = **3,4 días de trabajo**;
+ *   · una meta sin objeto — 4 jornadas de `trabajar` (25 de progreso cada una);
+ *   · un saber que tiene alguien cerca — 1 viaje + 1 `aprender` = 2 días.
+ *
+ * Con 0,2 esos 3,4 días caen cada 17 ticks, las metas sin objeto cada 20, y
+ * el promedio queda donde estaba. Las dos cuentas, que es lo que faltó la
+ * última vez que se movió un número acá:
+ *
+ *   · en tiempo de MUNDO — una agenda dura entre 10 y 20 días del valle, y
+ *     cada persona actúa un día de cada cinco;
+ *   · en tiempo REAL — el cron corre cuatro ticks por día, así que una agenda
+ *     tarda entre dos días y medio y cinco días reales si no juega nadie. Con
+ *     alguien adentro es más rápido porque cada acción suya es un tick más:
+ *     unas 17 acciones. Es exactamente la ventana que tenía antes, y era la
+ *     ventana que hacía falta para enterarte, cruzar el valle y volver.
+ *
+ * Y encima `pace` sigue multiplicando: con la región vacía es 0,05 por tick,
+ * o sea un día de trabajo cada veinte días del valle (§7.3, cuatro veces más
+ * lento vacío).
+ */
+const P_JORNADA = 0.2
+
+/** Cuánto suma un día de trabajo en una meta que no pide nada material.
+ *  Cuatro jornadas y está: "curtir lo de esta semana" no necesita más. */
+const DIA_DE_TRABAJO = 25
+
+/** Cuánto suma un día que se fue en la meta sin cerrarla: el viaje, la
+ *  búsqueda que salió vacía, el día en que no se pudo hacer nada. */
+const DIA_GASTADO = 8
+
+/** Techo del progreso de una meta material o de saber.
+ *
+ *  **Nunca llega a 100 sumando, y eso es el cambio entero.** Una meta que
+ *  pide carbón se cierra cuando hay carbón, no cuando un contador se llena;
+ *  si se llenara solo volveríamos a «Sarn consiguió un filo que no se le
+ *  mella» sin que nadie haya forjado nunca una hoja. Acá `progress` mide
+ *  cuántos días lleva detrás de eso, nada más.
+ *
+ *  El 75 tiene además una consecuencia buena y buscada: `encargarse` no deja
+ *  tomar agendas con progreso 80 o más, así que una meta material **siempre**
+ *  se le puede encargar a un jugador. Es correcto — hasta que la cosa está en
+ *  la mano nunca es tarde para traerla. */
+const TECHO_MATERIAL = 75
+
+/** Que alguien suelte la meta, por día TRABADO.
+ *
+ *  Existe porque ahora una meta puede fracasar de verdad. Tobio quiere ver
+ *  magia de cerca y la única que sabe una runa es Ren, que no enseña: antes el
+ *  contador se la daba igual y el valle anunciaba que la había visto, ahora no
+ *  se la da nadie. Sin una salida, el valle se llena de gente esperando algo
+ *  que no va a pasar.
+ *
+ *  **Cuenta sólo el día trabado, no el día que salió mal.** Buscar y no
+ *  encontrar es progreso —mañana puede salir— y no acerca a nadie a rendirse;
+ *  querer algo que nadie te va a dar, sí. Por eso Odila puede revolver el
+ *  Sotobosque veinte días seguidos sin soltar nada.
+ *
+ *  Las dos cuentas. Un día trabado cae con `P_JORNADA`, o sea uno de cada
+ *  cinco ticks: 8% sobre eso son ~62 ticks hasta que suelta, unos dos meses
+ *  del valle y quince días reales de cron. Es mucho a propósito — rendirse
+ *  rápido es peor que insistir, y una meta que se suelta en tres días no era
+ *  una meta. */
+const P_SUELTA = 0.08
+
+/** Que un NPC se vuelva sin meterse cuando hay una amenaza donde iba a buscar.
+ *
+ *  Es medio y medio, y no es un bloqueo, a propósito. Con un bicho parado en
+ *  el Sotobosque y nadie conectado para matarlo, un bloqueo duro trabaría
+ *  todas las agendas de juntar del valle hasta que alguien entre a jugar. La
+ *  mitad de las veces baja igual —hay que comer— y la otra mitad se vuelve.
+ *  El efecto es que un lugar con algo adentro rinde la mitad, y que matar al
+ *  bicho le destraba la semana a alguien. */
+const P_SE_VUELVE = 0.5
+
+/** Que aparezca una amenaza, por LUGAR VACANTE y por tick. Tope: tres vivas. */
+const P_AMENAZA = 0.6
+
+// ─────────────────────────────────────────────────────────────
+// SALEN DE AVENTURA Y NO VUELVEN — los tres números de los que cuelga
+// ─────────────────────────────────────────────────────────────
+//
+// El porqué está largo en `salir()`. Acá, las cuentas.
+//
+/** Que una salida se cobre al que la armó, cuando lo que hay adentro quedó
+ *  ENTERO. Es el techo: lo que se tira de verdad es esto multiplicado por
+ *  cuánta vida le quedó al bicho después del golpe, y dividido si fueron dos.
+ *
+ *  **Es el número más delicado del archivo y por eso va con la cuenta hecha.**
+ *  Un valle de siete personas sin nacimientos no aguanta una segunda causa de
+ *  muerte del tamaño de la primera: `P_MUERTE` ya se lleva 2,9 por año de
+ *  mundo, o sea el pueblo entero en dos años y medio. Esto tiene que ser un
+ *  agregado chico y con nombre, no una segunda guadaña.
+ *
+ *  Las cuentas están MEDIDAS y no estimadas: dos brazos de ocho valles recién
+ *  sembrados, 250 ticks cada uno (2.000 por brazo), con alguien adentro para
+ *  que `pace` sea 1 y sin que ese alguien juegue.
+ *
+ *    · **salidas** — 67 en 2.000 ticks, **0,034 por tick**. Una salida es el
+ *      día en que alguien se pone en camino a un lugar salvaje donde hay algo
+ *      parado, y eso pasa una vez por meta y no una vez por día: el que ya está
+ *      allá acampa y busca, y ése es el camino viejo, que no se tocó. Son doce
+ *      por año de valle —una por mes de mundo— y una cada siete días y medio
+ *      reales.
+ *    · **lo que cuestan** — 7 de esas 67 no volvieron, **10,4% por salida**
+ *      (esperado 7,6% con este número: 0,10 por el 76% de vida que le queda en
+ *      promedio a la cosa después del golpe; con siete casos, la diferencia
+ *      cabe entera en el ruido).
+ *    · **por año de MUNDO** — 1,3 personas, contra las 2,9 que ya se llevaba el
+ *      sorteo. Medido: el valle pasa de 2,92 muertes por año (16 en 2.000
+ *      ticks, clavado en `P_MUERTE`) a **3,65** (20 en 2.000), o sea +25%. A
+ *      cambio, **35% de las muertes del valle dejaron de ser una moneda y
+ *      pasaron a tener un porqué que se puede contar.** Ése es el canje entero
+ *      de esta tarea, y si algún día se decide que fue caro se baja este número
+ *      y no se toca nada más.
+ *    · **por mes REAL** — cuatro ticks por día, 120 ticks al mes: 4,0 salidas y
+ *      **0,42 personas por mes**, contra las 0,96 que se lleva el azar.
+ *    · **hasta dónde se vacía** — a ningún lado nuevo: las salidas respetan el
+ *      mismo piso que la pasada 4 (no se llevan a nadie con tres vivos), así
+ *      que el valle baja hasta tres y ahí se queda, con esto y sin esto. Lo que
+ *      cambia es cuánto tarda en llegar: de siete a cuatro son 1,03 años de
+ *      valle (3,1 meses reales) contra 0,82 (2,5 meses). Medido a los 250
+ *      ticks: 40 de 56 personas vivas en el brazo viejo, 36 de 56 en el nuevo.
+ *      Que el valle se encoja igual sin jugadores no lo arregla esto: lo
+ *      arreglan los nacimientos, que no existen (§9.2).
+ *
+ *  Y hay una cuenta más que no aparece en ninguna tabla y es la mejor de todas:
+ *  **este número baja solo cuando alguien juega.** Una salida sólo es peligrosa
+ *  si en el destino quedó algo parado, así que el jugador que limpia el
+ *  Sotobosque le baja la mortalidad al valle sin que nadie se lo pida — y los
+ *  propios NPCs empezaron a hacerlo, despacio: nueve amenazas muertas a manos
+ *  de gente del valle en los mismos 2.000 ticks, donde antes eran cero y los
+ *  bichos vivían para siempre. Lo medido de arriba es el techo.
+ *
+ *  Lo que NO se hizo, y es a propósito: subirlo para que se vea en una corrida
+ *  corta. Es el mismo callejón que ya está escrito en la pasada 4 — no hay
+ *  número que sea sano en tiempo de mundo y a la vez probable en veintiocho
+ *  días de mundo. Lo que se ve seguido no es la muerte, es la salida: la pelea,
+ *  el que dijo que no, y el bicho que a veces cae. */
+const P_NO_VUELVE = 0.10
+
+/** Entre cuánto se divide el riesgo cuando van de a dos.
+ *
+ *  «La gente entra de a dos o no entra» es la descripción del Sotobosque en el
+ *  `seed`, y esto es esa frase hecha número. Cada uno de los dos corre un
+ *  tercio del riesgo que corría el que iba solo, así que el par pierde a
+ *  alguien 2/3 de las veces que lo perdería el que va solo: **acompañarse
+ *  conviene, y de paso reparte a quién le toca.** Que el que no vuelva pueda
+ *  ser el que fue de favor es la mitad de la historia. */
+const RIESGO_DE_A_DOS = 3
+
+/** Que te acompañen a un lugar donde hay algo, cuando el que te lo pide no te
+ *  registra. Es la base de la misma cuenta que `P_TE_LO_DA` —sube con el
+ *  vínculo, `+ valued/80`— recortada entre 5% y 70%.
+ *
+ *  Es menos de la mitad que `P_TE_LO_DA` y el tope es más bajo, porque lo que
+ *  se pide es otra cosa: darle un frasco al vecino cuesta una tarde, meterse
+ *  en la Casa Quemada con él puede costar todo. Con `TOPE_DE_TRATO` en 20, el
+ *  trato de todos los días te lleva de 15% a 40%; el que te debe haberle
+ *  enseñado lo suyo (+20) llega a 65%. **A un desconocido casi nadie lo
+ *  acompaña, y ésa es la idea.** */
+const P_TE_ACOMPANA = 0.15
+
+// ─────────────────────────────────────────────────────────────
+// PEDIRLE ALGO A ALGUIEN — los dos números de los que cuelga
+// ─────────────────────────────────────────────────────────────
+//
+/** Hasta dónde sube el aprecio entre dos NPCs por el solo hecho de tratarse.
+ *
+ *  Vivir en el mismo cuarto te lleva de "no te conozco" a "te conozco", y ahí
+ *  se termina. Lo que sigue hay que hacérselo ganar: darle algo, enseñarle,
+ *  aparecer con lo que necesitaba. Es la misma escalera que del lado del
+ *  jugador (`UMBRAL_ENCARGO` → `UMBRAL_ENSENAR`) y existe por el mismo motivo —
+ *  sin tope, en trescientos ticks Ilde y Bruno se quieren con 100 sin que haya
+ *  pasado nada entre ellos, y entonces pedir deja de costar. */
+const TOPE_DE_TRATO = 20
+
+/** Que te den lo que pediste cuando el que te lo puede dar ni te registra.
+ *
+ *  Es la base de una cuenta que sube con el vínculo: `P_TE_LO_DA + valued/80`,
+ *  recortada entre 10% y 90%. Con `TOPE_DE_TRATO` en 20, el trato de todos los
+ *  días te lleva de 30% a 55%; de ahí para arriba hay que haberle hecho algo a
+ *  esa persona.
+ *
+ *  **Nunca llega a 1 y nunca llega a 0, y las dos puntas importan.** Un
+ *  intercambio garantizado convierte a los otros seis en una tienda con caras;
+ *  un "no" garantizado convierte el valle en siete personas que no se hablan.
+ *  Un "no" es contenido: queda en `memories`, el vínculo baja, y el que lo
+ *  recibió puede volver mañana.
+ *
+ *  Las dos cuentas, y son medidas y no estimadas. Pedir sólo se llega a pedir
+ *  cuando a alguien le falta algo FABRICADO que no sabe hacer —una o dos
+ *  personas del valle a la vez— y cada una actúa un día de cada cinco
+ *  (`P_JORNADA`). Sobre 660 ticks de cuatro valles: **18 pedidos contestados,
+ *  11 con un sí y 7 con un no.**
+ *
+ *    · en tiempo de MUNDO — un pedido contestado cada 37 días del valle, una
+ *      entrega cada 60. Es raro y tiene que serlo: si un NPC recibiera un
+ *      regalo por semana, recibir dejaría de significar algo.
+ *    · en tiempo REAL, sólo cron — cuatro ticks por día: una entrega cada
+ *      quince días reales con el valle vacío, y bastante más seguido con
+ *      alguien jugando, porque el mundo late igual pero las metas se cierran
+ *      más rápido.
+ *
+ *  El 61% de síes es más alto que el 30% de arranque, y ahí se ve la forma que
+ *  se buscaba: el primer pedido a un desconocido casi siempre sale mal, y el
+ *  vínculo que dejan las charlas es lo que lo da vuelta. Insistir sirve. */
+const P_TE_LO_DA = 0.30
+
+/** Cuánto más probable es que se vaya el último que sabe algo.
+ *
+ *  No cambia CUÁNTAS muertes hay, sólo cuál. Ver `elQueSeVa`. */
+const PESO_DEL_ULTIMO = 3
 
 /** Un saber que produce algo, y dónde. Vive en `knowledge`, no en una tabla
  *  de recetas: la receta no es un objeto que se pueda robar ni copiar — es
@@ -88,6 +620,33 @@ const LO_QUE_DA_EL_LUGAR: Record<string, { kind: string; peso: number }[]> = {
  *  no salga nada es lo que hace que traer la raíz sea traer algo. */
 const NO_HAY_NADA: Record<string, number> = {
   bosque: 2, ruina: 3, camino: 5, aldea: 6,
+}
+
+/** En qué TIPO de lugar se junta esto, si es que se junta en alguno.
+ *  `null` es "no se junta, alguien lo hace". */
+function tipoQueDa(kind: string): string | null {
+  for (const [tipo, tabla] of Object.entries(LO_QUE_DA_EL_LUGAR)) {
+    if (tabla.some((t) => t.kind === kind)) return tipo
+  }
+  return null
+}
+
+/** Lo que sale de revolver un lugar, o `null` si no salió nada.
+ *
+ * **La usan el jugador y los NPCs, y por eso está acá afuera.** Que Ilde
+ * vuelva vacía de la Casa Quemada tiene que salir del mismo sorteo con los
+ * mismos pesos que cuando vuelve vacío el jugador, o no están jugando al
+ * mismo juego. El "nada" es una entrada más del sorteo, no un chequeo aparte.
+ */
+function loQueSale(kindDeLugar: string): string | null {
+  const tabla = LO_QUE_DA_EL_LUGAR[kindDeLugar]
+  if (!tabla) return null
+  let n = roll(tabla.reduce((s, t) => s + t.peso, 0) + (NO_HAY_NADA[kindDeLugar] ?? 3))
+  for (const t of tabla) {
+    if (n < t.peso) return t.kind
+    n -= t.peso
+  }
+  return null
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -159,185 +718,1422 @@ function calidad(destreza: number): number {
   return Math.max(5, Math.min(100, Math.round(destreza * 0.85 + 8 + Math.random() * 22)))
 }
 
+// ─────────────────────────────────────────────────────────────
+// LO QUE MANDÓ EL JUGADOR — se resuelve YA, no cuando cierre el día
+// ─────────────────────────────────────────────────────────────
+//
+// `step()` hacía dos cosas pegadas: resolver las acciones de los jugadores y
+// correr un día del mundo. Cuando el tick pasó a latir por vuelta del sol,
+// frenó las dos, y la primera no tenía por qué frenarse: una acción tardaba
+// **hasta seis horas reales** en pasar. Eso mata el bucle chico de `DISENO.md`
+// §10.3 —aprendés → fabricás → regalás → te ganás a la gente → te enseñan
+// más— porque `aprender`, `ensenar`, `trabajar`, `buscar`, `dar` y
+// `encargarse` pasan todos por `/act`.
+//
+// El precedente está escrito en el encabezado de `world/combate.ts` y es el
+// mismo razonamiento: el jugador aprieta, no pasa nada durante horas, y vuelve
+// a creer que el mundo es teatro del cliente. El golpe se sacó del tick por
+// eso; esto es lo mismo para los otros ocho verbos.
+//
+// **Y no toca el reloj del mundo.** Resolver una acción no incrementa
+// `regions.tick` ni corre agendas, muerte ni rumores. Eso lo sigue moviendo el
+// sol. Son los dos relojes de §7.3, y estaban conflatados en una función.
+//
+// QUE NO SE RESUELVA DOS VECES
+//
+// La misma acción la puede agarrar el pedido del jugador y el barrido del
+// cron. El seguro es el **reclamo atómico**, y va ANTES de resolver, igual que
+// el `upsert` en `ticks` que hace `latir()`: se escribe `resolved_tick` con un
+// `UPDATE ... WHERE resolved_tick IS NULL`, que en Postgres es una sola
+// operación, y si no devuelve fila es que se la llevó otro y acá no se hace
+// nada. Reclamar después de resolver sería una carrera con premio: dos
+// procesos leen `null`, los dos forjan la hoja, y aparecen dos hojas.
+//
+// El orden reclamar→resolver elige perder una acción antes que duplicarla: si
+// el proceso se muere en el medio, la acción queda sellada sin efecto y sin
+// evento. Es lo mismo que eligió `latir()` y por el mismo motivo — un día de
+// más es peor que un día de menos, un objeto de más es peor que uno de menos.
+
+/** Lo que el bloque de acciones necesita del mundo. El tick ya lo tiene leído
+ *  cuando llega acá y se lo pasa; la web no, y lo lee sola. */
+type MundoDeAccion = {
+  players: { id: string; name: string; place_id: string | null }[]
+  // Los tres campos de la rutina viajan con la persona porque el jugador tiene
+  // que poder hablarle a quien VE, y a esta hora quien ve puede no estar donde
+  // dice `place_id`: ver `rutinaDe()`.
+  people: {
+    id: string; name: string; trade: string; place_id: string | null; teaches: boolean
+    home_place_id: string | null; jornada_desde: number; jornada_hasta: number
+  }[]
+  places: { id: string; name: string; slug: string; kind: string }[]
+}
+
+async function leerMundoDeAccion(regionId: string): Promise<MundoDeAccion> {
+  return {
+    players: (await db.from('players')
+      .select('id, name, place_id').eq('region_id', regionId)).data ?? [],
+    people: (await db.from('people')
+      .select('id, name, trade, place_id, teaches, home_place_id, jornada_desde, jornada_hasta')
+      .eq('region_id', regionId).eq('alive', true)).data ?? [],
+    places: (await db.from('places')
+      .select('id, name, slug, kind').eq('region_id', regionId)).data ?? [],
+  }
+}
+
+export type Resuelta = { verb: string; target: string | null; outcome: string }
+
+/**
+ * Resuelve las acciones encoladas que todavía no resolvió nadie.
+ *
+ * Dos llamadores y una sola implementación:
+ *
+ *   · `POST /act` en `web.ts`, con `soloJugador`, apenas encola la acción. Es
+ *     el camino normal y el que hace que apretar un botón tenga efecto ahora.
+ *   · `step()`, sin filtro, como bloque 1 del tick. Sigue existiendo porque el
+ *     cron tiene que cerrar lo que nadie resolvió: una lambda que se murió a
+ *     mitad, un cliente que perdió la respuesta, una acción de un jugador que
+ *     se fue. Si la web resolvió todo, este barrido no encuentra nada y no
+ *     escribe nada.
+ *
+ * `tick` es con qué tick se sellan `resolved_tick` y los eventos, y **no es el
+ * de `regions` sino el siguiente**. La razón está en `POST /pelear` y es la
+ * misma: el director narra con `.gt('tick', last_seen)` y después deja
+ * `last_seen = region.tick`, así que un evento escrito con el tick actual —el
+ * último día ya CERRADO— cae en un agujero de la ventana y el jugador nunca se
+ * entera de lo que hizo. Una acción que pasa ahora pasa durante el día en
+ * curso, que es el que va a cerrar el próximo tick. Cuando llama el tick,
+ * `nextTick` es exactamente ese mismo número, así que las dos puertas sellan
+ * igual y no hay dos convenciones dando vueltas.
+ */
+export async function resolverAcciones(args: {
+  region: { id: string }
+  tick: number
+  /** Sólo lo de este jugador. Lo usa la web: el pedido resuelve lo que mandó
+   *  el que golpeó la puerta, no lo de los demás. */
+  soloJugador?: string
+  /** El mundo ya leído, si el que llama lo tenía (el tick lo tiene). */
+  mundo?: MundoDeAccion
+  /** Sumidero de eventos. El tick los junta con los suyos y los inserta todos
+   *  al final; la web no tiene ese final, así que si no viene se escriben acá
+   *  mismo. Mismo patrón que `combate.ts`. */
+  ev?: (e: Omit<Ev, 'region_id' | 'tick'>) => void
+}): Promise<Resuelta[]> {
+  const { region, tick, soloJugador } = args
+  const mundo = args.mundo ?? await leerMundoDeAccion(region.id)
+
+  const propios: Ev[] = []
+  const ev = args.ev
+    ?? ((e: Omit<Ev, 'region_id' | 'tick'>) =>
+      void propios.push({ region_id: region.id, tick, ...e }))
+
+  // El filtro por jugadores es de esta región y hace falta: `actions` no tiene
+  // `region_id` y hay más de una región en la misma base. Sin el filtro, el
+  // tick de un valle lee las acciones pendientes del otro, no encuentra al
+  // jugador y las saltea — no las rompe, pero las cuenta como "hay alguien
+  // actuando ahora" en el valle equivocado.
+  const ids = soloJugador ? [soloJugador] : mundo.players.map((p) => p.id)
+  if (ids.length === 0) return []
+
+  // Por día primero. Adentro del mismo día el orden queda indefinido y no hay
+  // columna para arreglarlo (`actions` no tiene `created_at`); en el camino
+  // normal no importa, porque la web resuelve de a una apenas la encola.
+  const pendientes = (await db
+    .from('actions').select('id, player_id, verb, target')
+    .is('resolved_tick', null).in('player_id', ids)
+    .order('submitted_tick', { ascending: true })).data ?? []
+
+  const resueltas: Resuelta[] = []
+  for (const action of pendientes) {
+    const player = mundo.players.find((p) => p.id === action.player_id)
+    if (!player) continue
+
+    // EL RECLAMO. Ver el comentario largo de arriba: va antes de resolver.
+    const { data: mia } = await db.from('actions')
+      .update({ resolved_tick: tick })
+      .eq('id', action.id).is('resolved_tick', null)
+      .select('id')
+    if (!mia?.length) continue
+
+    const outcome = await resolveAction(region.id, tick, player, action, {
+      people: mundo.people, places: mundo.places, ev,
+    })
+    await db.from('actions').update({ outcome }).eq('id', action.id)
+    // `last_action_tick`, NO `last_seen_tick`. Actuar no es que te hayan
+    // contado lo que pasó: si esto adelantara el cursor del director, el
+    // jugador que más juega se quedaría sin hechos que narrar justo por jugar.
+    await db.from('players').update({ last_action_tick: tick }).eq('id', player.id)
+    resueltas.push({ verb: action.verb, target: action.target, outcome })
+  }
+
+  if (propios.length > 0) await db.from('events').insert(propios)
+  return resueltas
+}
+
 export async function step() {
   const region = await getRegion()
   const nextTick = region.tick + 1
+  // Cuánta gente sostiene este valle. Va aparte y no en `getRegion()` porque
+  // ese `select` vive en `db.ts` y lo comparten seis archivos; acá es una
+  // lectura por tick contra la clave primaria. El `?? 9` es el mismo default
+  // que puso la migración: si la columna todavía no está, el valle se comporta
+  // como el que sembró el generador y no como uno sin techo.
+  const { data: cfg } = await db
+    .from('regions').select('cupo').eq('id', region.id).limit(1).maybeSingle()
+  const cupo: number = cfg?.cupo ?? 9
   const events: Ev[] = []
+  // El `void` no es cosmético: sin él esto devuelve el `length` del array y no
+  // encaja en el sumidero que esperan `pelear()` y `recibirGolpe()`, que es el
+  // mismo patrón que ya usa `resolverAcciones()`.
   const ev = (e: Omit<Ev, 'region_id' | 'tick'>) =>
-    events.push({ region_id: region.id, tick: nextTick, ...e })
+    void events.push({ region_id: region.id, tick: nextTick, ...e })
 
   // ── Quién está dando vueltas ──────────────────────────────
-  // El reloj del servidor puede ir lento; el del mundo depende del tiempo real.
-  // Acá eso se traduce en: región vacía = las agendas avanzan a un cuarto.
+  //
+  // Acá vivían tres preguntas distintas contestadas con la misma columna, y
+  // por eso la crónica de quien más jugaba salía vacía. Son tres y hay que
+  // tenerlas separadas:
+  //
+  //   1. **¿Hasta dónde le narré?** → `last_seen_tick`. **Este archivo no lo
+  //      toca nunca.** Es del director y sólo avanza cuando de verdad escribió
+  //      una crónica. Cuando el tick lo adelantaba al resolver una acción,
+  //      cada cosa que mandabas te borraba tu propia ventana de hechos, y la
+  //      ventana vacía es lo que hace que el director narre el contexto como
+  //      si fueran noticias.
+  //   2. **¿Cuándo actuó por última vez?** → `last_action_tick`, que sí es de
+  //      este archivo. Se mide en ticks porque es tiempo de mundo.
+  //   3. **¿Está adentro AHORA?** → `last_seen_at`, reloj de pared. No se
+  //      puede contestar con ticks: un tick dura seis horas reales, así que la
+  //      ventana más chica que un contador de ticks permite es de entre 6 y 12
+  //      horas. Y ya cambió una vez de 1 h a 6 h; un reloj de pared sobrevive
+  //      al próximo recalibrado.
   const players = (await db
-    .from('players').select('id, name, place_id, last_seen_tick')
+    .from('players').select('id, name, place_id, last_action_tick, last_seen_at')
     .eq('region_id', region.id)).data ?? []
-  const populated = players.some((p) => region.tick - p.last_seen_tick <= 3)
+
+  // Una acción sin resolver quería decir "está con la mano en el teclado ahora
+  // mismo" porque `web.ts` encolaba y llamaba a `step()` en el acto. **Dejó de
+  // querer decir eso**: desde que `/act` resuelve en el momento, lo que queda
+  // pendiente es lo que NADIE pudo resolver — un colgado, no un presente. La
+  // señal buena pasó a ser `last_seen_at`, reloj de pared, que `/act` ahora
+  // estampa igual que `/mundo`; así la ventana de mordida sigue midiendo cinco
+  // minutos de verdad y no las seis horas que dura un tick.
+  //
+  // La cláusula vieja se deja porque no ensancha nada: un pendiente no puede
+  // ser más viejo que el último tick, que es el que barre lo que quedó. Pero
+  // ya no es la que contesta la pregunta.
+  //
+  // Se sigue leyendo acá arriba, y filtrado por los jugadores de ESTA región,
+  // porque `actions` no tiene `region_id`: sin el filtro, el tick de un valle
+  // contaba como presentes a los pendientes del otro.
+  const idsDeAca = players.map((p) => p.id)
+  const pending = idsDeAca.length === 0 ? [] : (await db
+    .from('actions').select('id, player_id')
+    .is('resolved_tick', null).in('player_id', idsDeAca)).data ?? []
+  const actuandoAhora = new Set(pending.map((a) => a.player_id))
+
+  const ahora = Date.now()
+  const desdeQueLoVimos = (p: { last_seen_at: string | null }) =>
+    p.last_seen_at ? ahora - new Date(p.last_seen_at).getTime() : Infinity
+
+  /** Está adentro, en serio, en este momento. Es la condición dura: lo que
+   *  cuelga de acá puede lastimarte, así que no puede dispararse mientras
+   *  dormís (DISENO §9.3: perder nunca puede costarte tiempo de juego). */
+  const adentroAhora = (p: { id: string; last_seen_at: string | null }) =>
+    actuandoAhora.has(p.id) || desdeQueLoVimos(p) < PRESENTE_MS
+
+  // Y ésta es la blanda: decide el paso del mundo, nada más. Que peque de
+  // generosa no le cuesta nada a nadie — a lo sumo las agendas avanzan a paso
+  // normal un rato después de que se fue el último.
+  const populated = players.some((p) =>
+    adentroAhora(p)
+    || desdeQueLoVimos(p) < RECIENTE_MS
+    || region.tick - p.last_action_tick <= 3)
   const pace = populated ? 1 : 0.25
 
+  // `home_place_id`, la jornada y `durmio_fuera_desde` viajan con la persona
+  // desde acá: los usa el cierre del día (pasada 6b) y los necesita
+  // `resolveAction` para ubicar a la gente a la hora que sea. Son tres columnas
+  // más en un `select` que ya se hacía, no una consulta nueva.
   const people = (await db
     .from('people')
-    .select('id, name, trade, place_id, teaches')
+    // Una sola cadena, sin concatenar: supabase-js le saca los tipos al
+    // literal, y partido en dos el `select` deja de tener tipo y todo lo que
+    // cuelga de `people` pasa a ser `GenericStringError`.
+    .select('id, name, trade, place_id, teaches, home_place_id, jornada_desde, jornada_hasta, durmio_fuera_desde')
     .eq('region_id', region.id).eq('alive', true)).data ?? []
 
   const places = (await db
-    .from('places').select('id, name, slug, kind').eq('region_id', region.id)).data ?? []
+    .from('places').select('id, name, slug, kind, ultimo_dia_abierto')
+    .eq('region_id', region.id)).data ?? []
   const placeName = (id: string | null | undefined) =>
     places.find((p) => p.id === id)?.name ?? 'algún lado'
 
-  // ── 1. Resolver las acciones que mandaron los jugadores ───
-  const pending = (await db
-    .from('actions').select('id, player_id, verb, target')
-    .is('resolved_tick', null)).data ?? []
+  // ── 1. Resolver lo que quedó sin resolver ─────────────────
+  //
+  // Antes acá se resolvía TODO lo que mandaban los jugadores, y era la mitad
+  // que no debía frenarse cuando el tick pasó a latir cada seis horas. Ahora
+  // `POST /act` llama a `resolverAcciones()` en el acto y esto es el barrido:
+  // cierra lo que nadie cerró. En una corrida normal no encuentra nada.
+  //
+  // Sigue siendo el bloque 1 y sigue corriendo ANTES que las agendas, la
+  // enseñanza y la muerte, con el mismo `nextTick` y el mismo sumidero de
+  // eventos: para el orden del tick no cambió nada.
+  // Se le pasa el MISMO array de `players`, no una copia: lo que mueve una
+  // acción —el `place_id` de `case 'ir'`— tiene que estar adentro cuando más
+  // abajo se decide a quién muerde el bicho del lugar.
+  const resueltas = await resolverAcciones({
+    region, tick: nextTick, mundo: { players, people, places }, ev,
+  })
 
-  for (const action of pending) {
-    const player = players.find((p) => p.id === action.player_id)
-    if (!player) continue
-    const outcome = await resolveAction(region.id, nextTick, player, action, {
-      people, places, ev,
-    })
-    await db.from('actions').update({ resolved_tick: nextTick, outcome })
-      .eq('id', action.id)
-    await db.from('players').update({ last_seen_tick: nextTick }).eq('id', player.id)
-  }
-
-  // ── 2. Las agendas avanzan solas ──────────────────────────
-  // Esto es lo que hace que los NPCs "avancen con sus propias historias":
-  // el mundo no espera al jugador, y cuando vuelve encuentra otra cosa.
+  // ── 2. Las agendas avanzan EJECUTANDO VERBOS ──────────────
+  //
+  // Acá vivía `progress += 2 + roll(8)`. Ilde "avanzaba un 12 % en juntar
+  // carbón" y el jugador no veía nada de eso: las metas, los oficios, los
+  // saberes y los vínculos existían hace semanas y se resolvían como
+  // aritmética adentro de una fila. Peor que invisible, mentiroso: en la
+  // corrida de referencia el contador de Sarn llegó a 100 y el valle anunció
+  // que **«Sarn consiguió un filo que no se le mella»** sin que nadie vivo
+  // supiera forjar una hoja ni hubiera una sola hoja en el mundo.
+  //
+  // Ahora Ilde **va** a la Casa Quemada, **busca**, y vuelve con carbón o
+  // vuelve con las manos vacías. Los verbos son los MISMOS que los del
+  // jugador, no una simulación aparte: `loQueSale()` es literalmente la
+  // función que usa `case 'buscar'` con los mismos pesos, fabricar exige
+  // `knows` + el lugar correcto igual que `case 'trabajar'`, y lo que junta
+  // entra al mundo con `made_by` en null igual que lo que junta el jugador.
+  // Por eso cruzártela en el camino te dice a qué fue.
+  //
+  // **CÓMO DECIDEN. No al azar y no con un modelo jugando el turno.** De lo
+  // que les falta sale un paso y uno solo, siempre el más corto que su estado
+  // permite. Es una función de dónde están, qué saben, qué llevan encima y
+  // quién sigue vivo:
+  //
+  //   le falta una cosa  → la tiene en la mano   → la gasta y cierra
+  //                      → crece en algún lado   → va ahí, y busca
+  //                      → la hace un saber suyo → va al taller, y la hace
+  //                      → la tiene o la sabe hacer otro → **va y se la pide**
+  //                      → la hace alguien que enseña → va con él, y aprende
+  //                      → no la sabe hacer nadie vivo → la meta se traba
+  //   le falta un saber  → ya lo sabe            → cierra
+  //                      → lo tiene alguien que enseña → va, y aprende
+  //                      → no queda nadie        → la meta se traba
+  //   no le falta nada   → trabaja en lo suyo, donde esté
+  //
+  // **El renglón de pedir va antes del de aprender y ése es el orden que
+  // importa.** Aprender un oficio entero para conseguir una sola cosa es lo que
+  // hacía el valle hasta ayer: en la corrida de referencia Sarn aprendió a
+  // forjar para tener una hoja y Bruno aprendió a destilar para pagarle un
+  // frasco a Odila, y de paso Forja simple pasó de dos cabezas a cinco. Ahora
+  // Sarn le pide la hoja a la fragua y sigue sin saber forjar, que es el juego.
+  // La cuenta completa —qué se movió y qué no— está en `irAPedir`.
+  //
+  // Lo único que sortea el azar es qué sale de revolver un lugar y qué día le
+  // toca dedicarle. La elección, nunca.
+  //
+  // **QUÉ MERECE UN EVENTO Y QUÉ NO. Es el riesgo entero de este cambio.**
+  // Siete personas ejecutando verbos pueden convertir la crónica en un
+  // registro de tránsito, y la crónica es lo único que este proyecto mide. La
+  // regla de siempre —un estado que no cambió no es noticia— verbo por verbo:
+  //
+  //   · `ir` — **NUNCA emite, ni una vez.** Un desplazamiento no es noticia:
+  //     es estado, y el estado ya se ve solo, porque `people.place_id` cambia
+  //     y el cliente la dibuja ahí. Te cruzás a Ilde en el camino porque Ilde
+  //     ESTÁ en el camino, no porque alguien te lo contó. El viaje se cuenta
+  //     por su resultado —«volvió de la Casa Quemada con carbón»—, que es la
+  //     frase que pide el diseño y la única que agrega algo. Siete personas
+  //     caminando cuestan cero eventos.
+  //   · `buscar` y trae lo que buscaba — siempre. Es el pago del viaje.
+  //   · `buscar` y levanta otra cosa — nunca. El objeto entra al mundo y se
+  //     guarda, pero juntar una rama de paso no es noticia.
+  //   · `buscar` y vuelve vacía — dos de cada cinco. Volver con las manos
+  //     vacías importa y el diseño lo pide, pero tres ticks seguidos de
+  //     «volvió vacía» es el disco rayado que este archivo ya arregló una vez.
+  //   · volverse porque hay algo rondando — la mitad. Ése sí pesa: dice por
+  //     qué no pudo, y le da al jugador algo que hacer al respecto.
+  //   · `trabajar` y produce — siempre. Un objeto nuevo, en un mundo donde un
+  //     objeto sólo existe si alguien vivo sabe hacerlo, es lo más caro que hay.
+  //   · `trabajar` sin producir — nunca. Es el día de laburo de cualquiera.
+  //   · `aprender` — siempre. Es la tesis del juego moviéndose de una cabeza
+  //     a otra, y encima dice cuántos lo saben ahora.
+  //   · cerrar, trabar o soltar una meta — siempre. Son transiciones.
+  //   · `hablar` entre NPCs — **nunca, ni una vez.** Es la misma decisión que
+  //     `ir` y por el mismo motivo: dos vecinos saludándose no es noticia, es
+  //     el fondo. Lo que deja es el vínculo, y el vínculo se ve por donde tiene
+  //     que verse — en a quién le pide las cosas la gente.
+  //   · `pedir` y se lo dan — siempre, y en UN solo evento que cuenta el
+  //     pedido, la entrega y el cierre de la meta juntos, igual que hace
+  //     `case 'dar'` del lado del jugador. Tres eventos para el mismo hecho
+  //     serían tres renglones y el director los narraría como tres cosas.
+  //   · `pedir` y le dicen que no — **sólo la primera vez con esa persona por
+  //     esa cosa.** Un desaire es una transición; el mismo desaire repetido
+  //     cada vez que vuelve a pedir es el disco rayado. La deduplicación vive
+  //     en `memories` (ver `recordarEntre`) y de ahí sale el permiso de emitir.
+  //
+  // Medido sobre **660 ticks por brazo** —cuatro valles recién sembrados de
+  // cada lado, las mismas siete personas— con el código de antes y el de
+  // después de los verbos sociales:
+  //
+  //   · eventos por tick: **1,02 y 1,02** (674 contra 672). Tres clases nuevas
+  //     de evento y el volumen no se movió, porque un pedido que sale bien
+  //     reemplaza una secuencia de tres —enseñanza, fabricación, cierre— por
+  //     uno solo, y el que sale mal se cuenta una vez en la vida.
+  //   · agendas cerradas por tick: **0,311 y 0,312** (205 contra 206). El valle
+  //     no se frenó por ponerse a pedir en vez de aprender.
+  //
+  // (La primera versión de esto sí frenaba, y bastante: mandaba al que pedía a
+  // esperar en el taller y dejaba NPCs estacionados de por vida. Está contado
+  // donde se arregló, en `irAPedir`.)
   const agendas = (await db
     .from('agendas')
     .select('id, person_id, goal, needs_kind, needs_id, needs_object, progress, state')
-    .eq('state', 'activa')).data ?? []
+    .eq('state', 'activa')
+    // Mismo tope mudo de 1.000 filas que en `saberesDe`, acá con menos riesgo
+    // —sólo cuenta lo activo— pero por el mismo motivo: sin filtro esto lee
+    // las agendas de todos los valles y el recorte no avisa.
+    .in('person_id', people.map((p) => p.id))).data ?? []
+
+  // Todo lo que hace falta para decidir, leído de una vez: son cuatro
+  // consultas por tick en vez de cuatro por agenda y por tick.
+  const recetas = (await db
+    .from('knowledge').select('id, name, makes, makes_at')
+    .not('makes', 'is', null)).data ?? []
+  // El `.in()` no es una optimización: **PostgREST corta toda respuesta en
+  // 1.000 filas y no lo dice.** Sin él esto lee el `knows` de TODOS los valles
+  // y, pasadas las mil filas, empieza a devolver un recorte silencioso — la
+  // gente de este valle deja de saber lo que sabe, en orden arbitrario. Se
+  // midió: 1.779 filas reales, 1.000 devueltas, cero aviso. Es el mismo modo
+  // de falla que el `grep` sobre un binario, y por eso está escrito acá.
+  const saberesDe = (await db
+    .from('knows').select('id, holder_id, knowledge_id, destreza, veces')
+    .eq('holder_kind', 'person')
+    .in('holder_id', people.map((p) => p.id))).data ?? []
+  const enMano = (await db
+    .from('objects').select('id, kind, quality, made_by, holder_id')
+    .eq('region_id', region.id).eq('holder_kind', 'person')).data ?? []
+  // Se lee acá arriba, y no en la pasada 4b donde se usaba, porque los NPCs la
+  // consultan para decidir si bajan al Sotobosque o se vuelven. Es la MISMA
+  // lista que muerde más abajo: las que nacen en este tick no muerden en este
+  // tick, exactamente igual que antes.
+  const amenazas = (await db
+    .from('threats').select('id, place_id, kind, nombre, health, max_health')
+    .eq('region_id', region.id).eq('alive', true)).data ?? []
+
+  const lugarPorId = (id: string | null | undefined) => places.find((p) => p.id === id)
+  const lugarPorKind = (kind: string) => places.find((p) => p.kind === kind)
+  const sabeQue = (personId: string, knowledgeId: string) =>
+    saberesDe.find((k) => k.holder_id === personId && k.knowledge_id === knowledgeId)
+
+  /** Dónde practica lo suyo, para volver cuando termina el mandado.
+   *
+   *  Sale de los datos y no de una tabla de oficios escrita a mano: es el
+   *  `makes_at` de algo que esa persona sabe hacer. Ilde sabe forjar, así que
+   *  su lugar es la fragua; Odila destila, así que es la aldea. **Quien no
+   *  sabe hacer nada no tiene taller y se queda donde está** — no lo
+   *  arrastramos a ninguna parte, porque el valle no tiene mapa y "volver a
+   *  casa" sin un `people.home_place_id` sería inventarle una casa. */
+  const tallerDe = (personId: string) => {
+    for (const k of saberesDe.filter((s) => s.holder_id === personId)) {
+      const r = recetas.find((x) => x.id === k.knowledge_id)
+      const l = r?.makes_at ? lugarPorKind(r.makes_at) : undefined
+      if (l) return l
+    }
+    return undefined
+  }
+
+  const mover = async (
+    quien: { id: string; place_id: string | null }, a: { id: string },
+  ) => {
+    await db.from('people').update({ place_id: a.id }).eq('id', quien.id)
+    quien.place_id = a.id
+  }
+
+  /** `hablar` entre dos NPCs. **No emite evento, nunca.**
+   *
+   *  Es la decisión de ruido de esta pasada y es la misma que tomó `ir`: dos
+   *  vecinos que se cruzan en la fragua y se hablan no es una noticia, es lo
+   *  que hace la gente. Si esto emitiera, siete personas en cinco lugares
+   *  llenarían la crónica de saludos y el director cobraría por leerlos.
+   *
+   *  Lo que sí deja es estado, y el estado es el que importa: sube el aprecio
+   *  de los dos lados hasta `TOPE_DE_TRATO`, que es lo que después decide si te
+   *  dan lo que les pedís. Así la red de `bonds` —que existe desde el primer
+   *  día y hasta hoy estaba vacía entre NPCs— se llena sola, despacio, y
+   *  `dialogo.ts` empieza a tener de qué hablar cuando alguien le pregunta a
+   *  Odila qué opina de Bruno. */
+  const hablarse = async (
+    a: { id: string }, b: { id: string },
+  ) => {
+    await tocarVinculoEntre(a.id, b.id, 2, TOPE_DE_TRATO)
+    await tocarVinculoEntre(b.id, a.id, 2, TOPE_DE_TRATO)
+  }
+
+  /** Ir a que le enseñen, que es el verbo `aprender` del lado del NPC.
+   *
+   *  El permiso entre NPCs es `teaches`, el mismo que usa la enseñanza
+   *  espontánea de la pasada 3 — **no** `UMBRAL_ENSENAR`, que mide la
+   *  confianza de un NPC hacia un JUGADOR y entre NPCs no está poblada. Que
+   *  el gate sea el mismo es lo que hace que "Ren no enseña" signifique lo
+   *  mismo mire quien mire.
+   *
+   *  Devuelve qué hizo hoy: aprendió, viajó hacia el maestro, o no hay nadie
+   *  dispuesto — y ese último caso es una historia y una puerta, porque el
+   *  jugador sí puede enseñar. */
+  const irAAprender = async (
+    quien: { id: string; name: string; place_id: string | null },
+    knowledgeId: string,
+  ): Promise<'aprendio' | 'viaja' | 'nadie'> => {
+    const maestros = people.filter((p) => p.id !== quien.id && p.teaches
+      && saberesDe.some((k) => k.holder_id === p.id && k.knowledge_id === knowledgeId))
+    if (maestros.length === 0) return 'nadie'
+
+    const aca = maestros.find((m) => m.place_id === quien.place_id)
+    if (!aca) {
+      const donde = lugarPorId(maestros[0]!.place_id)
+      if (!donde) return 'nadie'
+      await mover(quien, donde)
+      return 'viaja'
+    }
+
+    // Sin destreza, igual que cuando enseña un jugador: recibe el saber, no la
+    // mano. Va a tener que hacerlo un montón de veces para que le salga.
+    const { data: fila } = await db.from('knows').insert({
+      holder_kind: 'person', holder_id: quien.id, knowledge_id: knowledgeId,
+      learned_from: aca.id, how: 'aprendido', learned_tick: nextTick,
+      destreza: 0, veces: 0,
+    }).select('id').single()
+    if (fila) {
+      saberesDe.push({
+        id: fila.id, holder_id: quien.id, knowledge_id: knowledgeId,
+        destreza: 0, veces: 0,
+      })
+    }
+    const { data: k } = await db
+      .from('knowledge').select('name').eq('id', knowledgeId).single()
+    // Al que te enseña lo suyo se lo recuerda. Es el vínculo NPC↔NPC más
+    // fuerte que produce el valle, y encima es el que hace falta: mañana, si
+    // Sarn necesita algo de la fragua, se lo va a pedir a Ilde antes que a
+    // nadie, y se lo van a dar. La deuda del que aprendió es el motor del
+    // bucle chico corriendo entre NPCs.
+    await tocarVinculoEntre(quien.id, aca.id, 20)
+    const cuantos = await cuantosLoSaben(knowledgeId, region.id, people)
+    ev({ kind: 'ensenanza', place_id: aca.place_id,
+      summary: `${aca.name} le enseñó ${k?.name} a ${quien.name}.`
+        + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
+      detail: {
+        npc: quien.name, from: aca.name, to: quien.name,
+        knowledge: k?.name, lo_saben: cuantos,
+      } })
+    return 'aprendio'
+  }
+
+  const yaActuo = new Set<string>()
+
+  type Persona = (typeof people)[number]
+
+  /**
+   * LA SALIDA. Alguien se pone en camino a un lugar donde hay algo adentro, y
+   * puede no volver.
+   *
+   * **Por qué existe, y por qué no es una muerte más.** Hasta hoy el saber se
+   * perdía de una sola manera: el sorteo del 0,8% de la pasada 4. Funciona y
+   * la tesis se cumple —«en el tick 10 murió la vieja Ren y se llevó las dos
+   * runas del valle»— pero es una moneda, no una historia: nadie puede contar
+   * POR QUÉ pasó. Esto es la misma pérdida con una causa que se puede contar:
+   * *fue a la Casa Quemada a buscar hierro y no volvió.* Es lo que mide el
+   * tramo 00 — si el jugador puede contar una historia que nadie escribió.
+   *
+   * **QUIÉN SALE, Y NO LO DECIDE UN DADO.** Sale del estado y de nada más: el
+   * que tiene una meta abierta que pide algo que **sólo hay en un lugar
+   * salvaje**, y que hoy tiene que ponerse en camino porque no está allá. Si en
+   * ese lugar hay algo parado, el viaje deja de ser un viaje. No hay lista de
+   * aventureros, no hay tirada para ver a quién le agarran ganas: el Sotobosque
+   * es peligroso y la raíz está en el Sotobosque, y eso alcanza. El azar
+   * aparece recién en el resultado, que es donde tiene que estar.
+   *
+   * **Y pasa UNA vez por meta, no una por día.** El que ya está allá acampando
+   * sigue por el camino viejo —`P_SE_VUELVE` y `buscar`, sin tocar una coma—,
+   * así que esto no es un peaje diario: es el día que se pone en camino. De ahí
+   * salen las 28 salidas por año de mundo de la cuenta de `P_NO_VUELVE`, y de
+   * ahí sale que un lugar con algo adentro no se vuelva una picadora.
+   *
+   * **CON QUIÉN, y el "no" también es contenido.** Le pide a alguien que está
+   * donde él está —por eso la invitación es acá, en el día de partida, y no
+   * allá, donde no hay nadie— y elige **al que mejor lo mire**: el `valued` del
+   * otro HACIA él, igual que `irAPedir`. La respuesta sí es un sorteo y sube
+   * con el vínculo (`P_TE_ACOMPANA`), porque un sí garantizado convierte a los
+   * otros seis en escoltas. El "no" se acuerda y se cuenta **una sola vez** con
+   * esa persona y ese lugar, con la misma deduplicación por `memories` que usa
+   * el pedido: un desaire es una transición, el mismo desaire repetido es el
+   * disco rayado.
+   *
+   * **QUÉ MERECE EVENTO.** Salir no es noticia — es la misma decisión que `ir`
+   * y por el mismo motivo: un desplazamiento es estado, y el estado se ve solo
+   * porque `people.place_id` cambia. Lo que sí es noticia:
+   *
+   *   · el golpe — lo emite `pelear()`, la MISMA función que el jugador, así
+   *     que un NPC que le entra a la jauría se cuenta con la misma frase que
+   *     vos. Y si la mata, `amenaza_muerta`: alguien del valle limpió un lugar,
+   *     que es de lo mejor que puede pasar sin que estés.
+   *   · el "no" — una vez por par y por lugar.
+   *   · **no volver — siempre**, y es de las cosas más importantes que puede
+   *     contar este juego. Va con `perdida_de_saber` detrás cuando corresponde,
+   *     por el mismo camino que la muerte por azar (`seMuere`), no por uno
+   *     nuevo.
+   *
+   * **Lo que costó, medido.** Dos brazos de ocho valles × 250 ticks:
+   *
+   *   · eventos por tick: **0,897 → 0,861**. Bajó, y no por magia: el brazo
+   *     nuevo perdió cuatro personas más y un valle más chico produce menos
+   *     agendas, que son el 73% de todos los eventos. Lo que ESTO agrega,
+   *     contado aparte, son 94 eventos en 2.000 ticks —58 peleas, 9 amenazas
+   *     muertas, 7 que no volvieron, 11 negativas de compañía y 9 amenazas
+   *     nuevas que nacieron para reemplazar a las que mataron los NPCs— o sea
+   *     **0,047 por tick, +5,2%**. Uno cada tres semanas de valle.
+   *   · el reparto de esos 94 es la mitad del argumento: 74 son peleas y
+   *     bichos, que es la clase de evento que el director narra mejor y que
+   *     hasta hoy sólo existía si había un jugador conectado. Un valle sin
+   *     nadie adentro pasó de no tener una sola pelea a tener una cada dos
+   *     semanas de mundo.
+   *   · compañía: **la mitad de las salidas llevó a alguien** (11 negativas y
+   *     3 de las 7 muertes con un compañero al lado), así que ni es un adorno
+   *     que no dispara ni es automático.
+   *
+   * **EL PRECIO, Y DE DÓNDE SALE.** No es un número plano: es `P_NO_VUELVE`
+   * multiplicado por cuánta vida le quedó a la cosa después del golpe. Matarla
+   * cuesta cero, dejarla entera cuesta todo, y en el medio hay una pendiente.
+   * Eso hace que **el arma valga**: el que baja con una hoja templada le saca
+   * más vida, y le saca riesgo por el mismo acto. El arma existe porque alguien
+   * supo hacerla, así que sobrevivir a la Casa Quemada termina colgando de que
+   * alguien vivo sepa forjar — que es el juego entero, cerrado por otro lado.
+   */
+  const salir = async (
+    who: Persona,
+    agenda: { id: string; goal: string },
+    falta: string,
+    donde: { id: string; name: string },
+    bicho: { id: string; kind: string; nombre: string | null },
+  ): Promise<'volvio' | 'no_volvio'> => {
+    // ── 1. ¿Con quién? ────────────────────────────────────
+    let companero: Persona | undefined
+    const posibles = people.filter((p) =>
+      p.id !== who.id && p.place_id === who.place_id && !yaActuo.has(p.id))
+    if (posibles.length > 0) {
+      const vinculos = (await db.from('bonds').select('person_id, valued')
+        .eq('toward_kind', 'person').eq('toward_id', who.id)
+        .in('person_id', posibles.map((p) => p.id))).data ?? []
+      const aprecio = (id: string) => vinculos.find((v) => v.person_id === id)?.valued ?? 0
+      const b = [...posibles].sort((x, y) => aprecio(y.id) - aprecio(x.id))[0]!
+      const v = aprecio(b.id)
+      if (Math.random() < Math.max(0.05, Math.min(0.70, P_TE_ACOMPANA + v / 80))) {
+        companero = b
+        // Le costó el día, igual que al que hace un favor en `irAPedir`. Un
+        // acompañante que no paga nada no está acompañando, está de paseo.
+        yaActuo.add(b.id)
+        await tocarVinculoEntre(who.id, b.id, 12)
+      } else {
+        const primeraVez = await recordarEntre(who.id, b.id,
+          `${b.name} no quiso ir con ${who.name} a ${donde.name}`, nextTick)
+        await tocarVinculoEntre(who.id, b.id, -3)
+        if (primeraVez) {
+          // Escrita sin pronombres a propósito: «que lo acompañara» le pone
+          // masculino a Ilde. Es la misma regla que ya estaba en las frases de
+          // `irAPedir` y en las tres del cierre material.
+          ev({ kind: 'negativa', place_id: who.place_id,
+            summary: `${who.name} iba a ${donde.name} y le pidió a ${b.name} que fuera también.`
+              + ` ${b.name} dijo que no.`,
+            detail: {
+              npc: who.name, person: who.name, a_quien: b.name,
+              place: donde.name, goal: agenda.goal,
+            } })
+        }
+      }
+    }
+
+    // ── 2. Van. Sin evento, igual que `ir`. ───────────────
+    await mover(who, donde)
+    if (companero) await mover(companero, donde)
+
+    // ── 3. Se lo cruzan ───────────────────────────────────
+    //
+    // La MISMA función que el jugador. No hay una segunda copia del golpe en
+    // este archivo y no va a volver a haberla: ver el encabezado de
+    // `combate.ts`, que cuenta lo que costó la primera vez.
+    const golpe = await pelear({
+      regionId: region.id, tick: nextTick, player: who, quien: 'person',
+      threatId: bicho.id, ev,
+      // `amenazas` es la foto del arranque del día, así que el bicho puede
+      // haber caído hace tres líneas a manos de otro. `pelear()` relee con
+      // `alive = true` y contesta que no hay nada; entonces esto fue un viaje.
+      alVerNpc: async (t, npc, mato) => {
+        await recordarEntre(t.id, npc.id, `${npc.name} mató a ${mato} en ${donde.name}`, nextTick)
+        await tocarVinculoEntre(t.id, npc.id, 8)
+      },
+    })
+    if (!golpe.ok) return 'volvio'
+
+    // ── 4. El precio ──────────────────────────────────────
+    const entera = golpe.maxHealth > 0 ? golpe.health / golpe.maxHealth : 0
+    const riesgo = P_NO_VUELVE * entera / (companero ? RIESGO_DE_A_DOS : 1)
+    const fueron = companero ? [who, companero] : [who]
+    // **El mismo piso que el sorteo de la muerte, y con el mismo número.** La
+    // pasada 4 no se lleva a nadie con tres personas vivas (`people.length >
+    // 3`), y sin esto habría dos reglas distintas para lo mismo: el azar
+    // respetando un mínimo y las salidas vaciando el valle por abajo. Un valle
+    // de dos no es un valle — el que queda no tiene a quién pedirle ni de quién
+    // aprender, y todo lo demás de este archivo deja de correr.
+    //
+    // Se recorta ANTES de escribir las frases y no adentro del bucle, porque
+    // la frase de uno dice si el otro volvió: recortar después haría que el
+    // primero anunciara una muerte que el piso acaba de impedir.
+    const seVan = fueron
+      .filter(() => Math.random() < riesgo)
+      .slice(0, Math.max(0, people.length - 3))
+    if (seVan.length === 0) return 'volvio'
+
+    for (const m of seVan) {
+      const otro = fueron.find((p) => p.id !== m.id)
+      const otroVuelve = !!otro && !seVan.includes(otro)
+      // No cita la meta, cita la COSA. Es deliberado: `agenda.goal` es texto
+      // libre que escribe otro archivo, y el `seed` todavía tiene una meta que
+      // es una postura y no un objetivo («morirse sin haberle enseñado...»).
+      // Un evento de muerte con esa frase adentro es exactamente la clase de
+      // línea que ya mató a una NPC viva una vez. La meta va en `detail`, que
+      // es dato y no prosa.
+      await seMuere({
+        tick: nextTick, muerto: m, people, players, ev,
+        evento: {
+          kind: 'no_volvio', place_id: donde.id,
+          summary: `${m.name} fue a ${donde.name} a buscar ${falta} y no volvió.`
+            + (otro
+              ? (otroVuelve ? ` ${otro.name} volvió sin ${m.name}.` : ` ${otro.name} tampoco.`)
+              : ''),
+          detail: {
+            npc: m.name, person: m.name, place: donde.name, object: falta,
+            threat: bicho.nombre ?? bicho.kind, con: otro?.name ?? null,
+            goal: m.id === who.id ? agenda.goal : null,
+          },
+        },
+      })
+      // El que volvió es el que lo cuenta, y por eso el valle se entera: la
+      // pasada 5 agarra este recuerdo y lo reparte. Sin esto, alguien
+      // desaparece del valle y nadie lo menciona nunca más.
+      if (otro && otroVuelve) {
+        await recordarEntre(otro.id, m.id, `${m.name} no volvió de ${donde.name}`, nextTick)
+      }
+    }
+    return seVan.some((m) => m.id === who.id) ? 'no_volvio' : 'volvio'
+  }
+
+  /** Ir a pedírselo al que puede dártelo. Es `hablar` + `dar` entre NPCs, y es
+   *  el verbo que faltaba.
+   *
+   *  **El agujero que tapa.** Hasta hoy, un NPC que necesitaba algo fabricado y
+   *  no lo sabía hacer tenía dos salidas y las dos eran malas: si nadie
+   *  enseñaba, la meta se trababa; y si alguien enseñaba, **se ponía a aprender
+   *  el oficio entero para conseguir una sola cosa.** Lo segundo se veía peor
+   *  que lo primero y está medido: en sesenta ticks de una corrida limpia,
+   *  Forja simple pasó de dos cabezas a cinco y Destilado de raíz de una a
+   *  cinco, porque Sarn aprendió a forjar para tener una hoja y Bruno aprendió
+   *  a destilar para pagarle un frasco a Odila. Un valle donde todos saben todo
+   *  no pierde nada cuando se muere alguien, y ahí se apaga el motor del juego.
+   *
+   *  Lo natural era lo otro: **pedírselo al que sabe.** Por eso esto va ANTES
+   *  de `irAAprender` y no después — aprender el oficio es el último recurso,
+   *  no el primero.
+   *
+   *  **Y ojo con lo que eso hizo y con lo que no, porque lo medido no es lo que
+   *  uno esperaba.** Sobre 660 ticks por brazo, con las mismas siete personas y
+   *  cuatro valles recién sembrados de cada lado:
+   *
+   *    · la enseñanza BUSCADA se desplomó, que era la intención — 9 → 2;
+   *    · la ESPONTÁNEA subió sola, 17 → 25, porque pedir hace que la gente
+   *      viaje a buscarse y ese sorteo exige estar en el mismo lugar. Es
+   *      exactamente el mecanismo que descubrió la pasada 2 cuando tuvo que
+   *      bajar la espontánea de 0,35 a 0,12;
+   *    · **el total quedó igual: 26 enseñanzas contra 27, o sea 0,039 y 0,041
+   *      por tick.** La escasez no se movió, ni para bien ni para mal.
+   *
+   *  O sea: esto no frena la circulación del saber, la CAMBIA DE FORMA. Saca la
+   *  vía absurda —aprender un oficio entero para conseguir una cosa— y no
+   *  agrega ninguna. Si algún día hay que frenar el total, la palanca es el
+   *  0,12 de la pasada 3 y no ésta; no se tocó acá a propósito, porque mover
+   *  dos números en el mismo cambio deja la próxima medición sin poder atribuir
+   *  nada.
+   *
+   *  **A quién le pide, y no lo decide un dado.** Se arma la lista de los que
+   *  se lo pueden dar —el que ya lo tiene en la mano y el que lo sabe hacer— y
+   *  de ésos elige **al que mejor lo mire**: el `valued` del otro HACIA ÉL, no
+   *  al revés. Es la única elección que hay acá y sale entera del estado.
+   *
+   *  Lo único que sortea el azar es la respuesta, y eso sí tiene que ser un
+   *  sorteo: un "sí" garantizado convierte a los otros seis en una tienda con
+   *  caras. La cuenta está en `P_TE_LO_DA` y sube con el vínculo, así que
+   *  insistir sirve — cada pedido, salga o no, es una charla y acerca.
+   *
+   *  Devuelve qué hizo hoy: recibió, viajó hacia quien se lo puede dar, se
+   *  comió un "no", o no hay nadie vivo a quien pedírselo.
+   */
+  const irAPedir = async (
+    quien: { id: string; name: string; trade: string; place_id: string | null },
+    agenda: { id: string; goal: string },
+    falta: string,
+    receta: { id: string; makes_at: string | null },
+  ): Promise<'recibio' | 'viaja' | 'negativa' | 'nadie'> => {
+    type EnMano = {
+      id: string; kind: string; quality: number
+      made_by: string | null; holder_id: string
+    }
+    type Candidato = {
+      b: { id: string; name: string; place_id: string | null }
+      tiene?: EnMano
+      donde: { id: string; name: string }
+    }
+    const cands: Candidato[] = []
+
+    // (i) El que ya lo tiene en la mano: el favor barato, y el que deja el
+    //     rastro bueno — un objeto que cambia de manos **no cambia de autor**.
+    //     La hoja que hizo Ilde sigue diciendo Ilde aunque la lleve Sarn, y va
+    //     a seguir diciéndolo el día que Ilde no esté.
+    //
+    //     Acá sí vale la regla de "nadie regala lo que él mismo está
+    //     buscando": si Odila necesita un frasco, el frasco que tiene en la
+    //     mano es suyo y no lo suelta.
+    for (const o of enMano) {
+      if (o.kind !== falta || o.holder_id === quien.id) continue
+      const b = people.find((p) => p.id === o.holder_id)
+      if (!b) continue
+      if (agendas.some((a) => a.person_id === b.id
+        && a.needs_kind === 'object' && a.needs_object === falta)) continue
+      const donde = lugarPorId(b.place_id)
+      if (donde) cands.push({ b, tiene: o, donde })
+    }
+
+    // (ii) El que lo sabe hacer, esté donde esté. **Se lo va a buscar a él, no
+    //      al taller**, y eso salió de una corrida y no de la cabeza: la
+    //      primera versión mandaba al que pedía a plantarse en el taller y
+    //      esperar. Ilde se pasó cincuenta ticks revolviendo la Casa Quemada
+    //      —su propia meta pedía hierro viejo y el lugar tenía un bicho— y Sarn
+    //      quedó **parado en la fragua vacía hasta el final de la corrida**,
+    //      con el progreso clavado en el techo y sin producir un solo evento.
+    //      Un NPC estacionado es peor que uno trabado: el trabado al menos se
+    //      rinde. Se va a buscar a la persona, que es lo que hace cualquiera.
+    //
+    //      Acá NO vale lo de "nadie regala lo que busca", a propósito: el que
+    //      sabe destilar puede destilar dos. Sin esa diferencia, Bruno no le
+    //      puede pagar a Odila el frasco que le debe justamente porque Odila
+    //      anda detrás de frascos, que es al revés de lo que dice la ficción.
+    //
+    //      Y ojo con esto, que es lo que sostiene la regla: **el saber y el
+    //      lugar siguen valiendo los dos.** El favor no se fabrica en el aire —
+    //      si el que sabe no está en su taller, vuelve a él (más abajo) y lo
+    //      hace ahí. `makes_at` no se saltea nunca, igual que no se lo saltea
+    //      el jugador en `case 'trabajar'`.
+    const taller = receta.makes_at ? lugarPorKind(receta.makes_at) : undefined
+    if (taller) {
+      for (const b of people) {
+        if (b.id === quien.id) continue
+        if (cands.some((c) => c.b.id === b.id)) continue
+        if (!saberesDe.some((k) => k.holder_id === b.id && k.knowledge_id === receta.id)) continue
+        const donde = lugarPorId(b.place_id)
+        if (donde) cands.push({ b, donde })
+      }
+    }
+    // Nadie vivo de acá a quien pedirle: ni quien lo tenga ni quien lo sepa
+    // hacer. Cae al camino viejo —aprender el oficio— que después de este
+    // cambio queda para el único caso donde tiene sentido: que lo sepa hacer
+    // sólo un jugador, y entonces el valle depende de que se conecte.
+    if (cands.length === 0) return 'nadie'
+
+    const vinculos = (await db.from('bonds').select('person_id, valued')
+      .eq('toward_kind', 'person').eq('toward_id', quien.id)
+      .in('person_id', cands.map((c) => c.b.id))).data ?? []
+    const aprecio = (id: string) => vinculos.find((v) => v.person_id === id)?.valued ?? 0
+    // Al que mejor lo mire; a igualdad, al que ya lo tiene hecho.
+    const puntaje = (c: Candidato) => aprecio(c.b.id) * 10 + (c.tiene ? 1 : 0)
+    cands.sort((x, y) => puntaje(y) - puntaje(x))
+    const elegido = cands[0]!
+    const b = elegido.b
+
+    // `ir`. Sin evento, igual que en todo el resto de esta pasada.
+    if (quien.place_id !== elegido.donde.id) {
+      await mover(quien, elegido.donde)
+      return 'viaja'
+    }
+
+    // `hablar`. Pedir es hablar, y hablar acerca a dos personas aunque la
+    // respuesta sea que no. Sin evento.
+    await hablarse(quien, b)
+
+    const v = aprecio(b.id)
+    if (Math.random() >= Math.max(0.10, Math.min(0.90, P_TE_LO_DA + v / 80))) {
+      // El "no" es contenido y se acuerda. **Pero se cuenta una sola vez**: el
+      // recuerdo está deduplicado, y el evento sale sólo cuando el recuerdo es
+      // nuevo. Un desaire es una transición; repetirlo cada vez que vuelve a
+      // pedir es el disco rayado que este archivo ya arregló una vez.
+      const primeraVez = await recordarEntre(quien.id, b.id,
+        `${b.name} no le dio ${falta} a ${quien.name}`, nextTick)
+      await tocarVinculoEntre(quien.id, b.id, -3)
+      if (primeraVez) {
+        ev({ kind: 'negativa', place_id: quien.place_id,
+          summary: `${quien.name} le pidió ${falta} a ${b.name}, y ${b.name} le dijo que no.`,
+          detail: {
+            npc: quien.name, person: quien.name, a_quien: b.name,
+            object: falta, goal: agenda.goal,
+          } })
+      }
+      return 'negativa'
+    }
+
+    let cosa = elegido.tiene
+    if (cosa) {
+      // Cambia de mano, no de autor. ⚠ `made_by` NO SE TOCA ACÁ NI NUNCA: lo
+      // único en todo el código que puede escribir un `made_by` en null es
+      // `case 'buscar'`, y lo único que puede escribir un nombre es quien
+      // fabricó la cosa con sus manos.
+      await db.from('objects')
+        .update({ holder_kind: 'person', holder_id: quien.id }).eq('id', cosa.id)
+      cosa.holder_id = quien.id
+    } else {
+      // Se lo hace, con sus manos y su destreza — el mismo `trabajar` de 3a y
+      // el de `case 'trabajar'`, con la misma mejora y la misma calidad. Y sale
+      // con SU nombre puesto, que es lo que va a quedar dando vueltas por el
+      // valle cuando esa persona no esté.
+      const suyo = saberesDe.find(
+        (k) => k.holder_id === b.id && k.knowledge_id === receta.id)
+      if (!suyo || !taller) return 'nadie'
+      // **El lugar no se saltea.** Dijo que sí, así que vuelve a su taller y lo
+      // hace ahí: una hoja se forja en la fragua y en ningún otro lado, la pida
+      // quien la pida. Que el favor le mueva el cuerpo al que lo hace es
+      // correcto —le costó el día, y por eso también `yaActuo`— y de paso
+      // arregla algo que se veía feo: la herrera que salió a buscar hierro y no
+      // volvía nunca a su fragua ahora tiene un motivo para volver.
+      if (b.place_id !== taller.id) await mover(b, taller)
+      const antes: number = suyo.destreza
+      const ahora = Math.min(100, antes + mejora(antes))
+      await db.from('knows')
+        .update({ destreza: ahora, veces: suyo.veces + 1 }).eq('id', suyo.id)
+      suyo.destreza = ahora
+      suyo.veces += 1
+
+      const q = calidad(antes)
+      const { data: nuevo } = await db.from('objects').insert({
+        region_id: region.id, kind: falta, quality: q,
+        made_by: b.name, made_tick: nextTick,
+        holder_kind: 'person', holder_id: quien.id,
+      }).select('id').single()
+      if (!nuevo) return 'nadie'
+      cosa = { id: nuevo.id, kind: falta, quality: q, made_by: b.name, holder_id: quien.id }
+      enMano.push(cosa)
+      // Le costó el día. Un favor que no le cuesta nada a nadie no es un favor,
+      // y además esto es lo que mantiene la regla de un verbo por persona y por
+      // día: hoy la fragua trabajó para otro.
+      yaActuo.add(b.id)
+    }
+
+    const bonus = Math.floor(cosa.quality / 25)
+    await recordarEntre(quien.id, b.id,
+      `${b.name} le dio ${falta} a ${quien.name} cuando lo necesitaba`, nextTick)
+    await tocarVinculoEntre(quien.id, b.id, 15 + bonus)
+
+    // **Un solo evento para todo esto, y es a propósito.** El pedido, la
+    // entrega y el cierre de la meta son un hecho solo contado como pasó, igual
+    // que hace `case 'dar'` del lado del jugador. Tres eventos separados serían
+    // tres renglones para la misma cosa y el director los narraría como tres.
+    //
+    // La frase cita la meta como DESEO —«venía detrás de»— y eso siempre es
+    // verdad, así que no pasa por la lista blanca ni la necesita.
+    // Escrita para no tener que concordar con nada, como las tres frases de la
+    // rama de arriba y por el mismo motivo: `falta` sale de una tabla y en
+    // castellano «la había hecho» le pone femenino al frasco y «lo había hecho»
+    // le pone masculino a la hoja.
+    const autoria = cosa.made_by && cosa.made_by !== b.name
+      ? ` Lleva la mano de ${cosa.made_by}, no la de ${b.name}.` : ''
+    await cumplirAgenda(agenda, quien, nextTick, ev, {
+      kind: 'agenda_cumplida', place_id: quien.place_id,
+      summary: elegido.tiene
+        ? `${quien.name} le pidió ${falta} a ${b.name} y salió de ahí con eso`
+          + ` en la mano. Era lo que le faltaba para ${agenda.goal}.${autoria}`
+        : `${quien.name} venía detrás de ${agenda.goal} y no lo sacaba solo.`
+          + ` Se lo pidió a ${b.name}, que le hizo ${falta} en ${taller?.name ?? 'el valle'}.`,
+      detail: {
+        npc: quien.name, person: quien.name, goal: agenda.goal, object: falta,
+        de_quien: b.name, quality: cosa.quality, made_by: cosa.made_by ?? null,
+        como: elegido.tiene ? 'se_lo_dieron' : 'se_lo_hicieron',
+      },
+    })
+    return 'recibio'
+  }
 
   for (const agenda of agendas) {
     const who = people.find((p) => p.id === agenda.person_id)
     if (!who) continue
-    if (Math.random() > pace) continue
+    // **Un verbo por persona y por día**, igual que el jugador. Si alguien
+    // tiene dos metas abiertas, hoy le dedica el día a una sola.
+    if (yaActuo.has(who.id)) continue
+    if (Math.random() > pace * P_JORNADA) continue
+    yaActuo.add(who.id)
 
-    // ¿Le falta una COSA?
+    /** El día que se fue sin cerrar nada: el viaje, la búsqueda vacía, el día
+     *  en que no se pudo hacer nada.
+     *
+     *  `trabado` distingue las dos clases de día perdido, y la distinción
+     *  importa: buscar y no encontrar es progreso (mañana puede salir), pero
+     *  querer algo que nadie te va a dar no lo es. Sólo los días trabados
+     *  cuentan para soltar la meta, así que Odila revolviendo el Sotobosque
+     *  nunca se rinde y Tobio, que quiere ver una runa y la única que sabe una
+     *  no enseña, en algún momento sí. */
+    const diaGastado = async (trabado = false) => {
+      if (trabado && Math.random() < P_SUELTA) {
+        await db.from('agendas')
+          .update({ state: 'abandonada', ended_tick: nextTick }).eq('id', agenda.id)
+        // Cita la meta como deseo —«dejó de perseguir X»—, y que alguien
+        // quisiera algo siempre es verdad. No afirma que X haya pasado, así
+        // que no pasa por la lista blanca ni la necesita.
+        ev({ kind: 'agenda_soltada', place_id: who.place_id,
+          summary: `${who.name} dejó de perseguir ${agenda.goal}.`,
+          detail: { npc: who.name, person: who.name, goal: agenda.goal } })
+        await abrirSiguienteMeta(who, agenda.goal, nextTick, ev)
+        return
+      }
+      const p = Math.min(TECHO_MATERIAL, agenda.progress + DIA_GASTADO)
+      if (p !== agenda.progress) {
+        await db.from('agendas').update({ progress: p }).eq('id', agenda.id)
+      }
+      // Una meta trabada no es noticia todos los ticks. Si se emitiera
+      // siempre, el director recibiría ruido y la crónica sería una planilla.
+      // Que aparezca de a poco: así, cuando aparece, pesa.
+      if (trabado && Math.random() < 0.12) {
+        ev({ kind: 'agenda_estancada', place_id: who.place_id,
+          summary: `${who.name} sigue sin conseguir lo que necesita para ${agenda.goal}.`,
+          detail: { npc: who.name, person: who.name, goal: agenda.goal } })
+      }
+    }
+
+    // ── Le falta una COSA ─────────────────────────────────
     //
     // Ésta es la puerta por la que entra el jugador, y la razón de que corra
     // igual esté él o no: si te encargaste de traerle la raíz a Odila y no
-    // volvés, Odila la consigue sola. El mundo no te espera — es la lección de
-    // Red Dead y es a propósito.
+    // volvés, Odila se la va a buscar sola. El mundo no te espera — es la
+    // lección de Red Dead y es a propósito.
     if (agenda.needs_kind === 'object' && agenda.needs_object) {
-      const falta = agenda.needs_object
+      const falta: string = agenda.needs_object
 
-      // Ojo con lo que NO hay acá: no se chequea si el NPC ya tiene una en la
-      // mano, y no se le crea el objeto cuando la termina solo. Las dos cosas
-      // estuvieron escritas y las dos estaban mal.
+      // 1. ¿Ya la tiene encima? La gasta y cierra.
       //
-      // Una agenda material se cumple GASTANDO la cosa: Ilde junta carbón para
-      // el invierno y lo quema, Odila quiere la raíz para destilarla. Si al
-      // cumplirla le dejábamos el carbón en el inventario, la próxima vez que
-      // le tocara "juntar carbón" se cumplía sola en el acto — y pasó, tres
-      // ticks seguidos, en la primera corrida de esto. El valle se convertía en
-      // una persona anunciando que consiguió lo mismo una y otra vez.
-      //
-      // Lo único que entra al mundo por esta vía es lo que trae un jugador, y
-      // eso pasa por `dar`.
-
-      // Acá está la regla otra vez, del lado de los NPCs: la raíz crece sola
-      // y Odila la puede ir a juntar, pero un frasco sale de las manos de
-      // alguien que sabe destilar. Si no queda nadie vivo que lo sepa hacer, la
-      // agenda se traba igual que cuando falta un saber — y eso es exactamente
-      // lo que tiene que pasar. Si el NPC "consiguiera" un frasco de la nada,
-      // la escasez sería decorativa.
-      const crece = Object.values(LO_QUE_DA_EL_LUGAR)
-        .some((tabla) => tabla.some((t) => t.kind === falta))
-      if (!crece) {
-        const quienSabe = await quienLoSabeHacer(falta, people)
-        if (!quienSabe) {
-          await db.from('agendas').update({ state: 'bloqueada' }).eq('id', agenda.id)
-          ev({ kind: 'agenda_bloqueada', place_id: who.place_id,
-            summary: `${who.name} dejó de intentar ${agenda.goal}: ya no queda nadie que sepa hacer ${falta}.`,
-            detail: { person: who.name, goal: agenda.goal, object: falta } })
-          continue
-        }
-      }
-      // Si llegó hasta acá, es alcanzable: avanza con el progreso de siempre.
-    }
-
-    // ¿Le falta un saber que nadie cerca tiene? Se traba, y eso es una historia.
-    if (agenda.needs_kind === 'knowledge' && agenda.needs_id) {
-      const { count } = await db
-        .from('knows').select('id', { count: 'exact', head: true })
-        .eq('knowledge_id', agenda.needs_id)
-      const hasIt = await db
-        .from('knows').select('id')
-        .eq('holder_kind', 'person').eq('holder_id', who.id)
-        .eq('knowledge_id', agenda.needs_id).maybeSingle()
-
-      // Si ya consiguió lo que le faltaba, la meta está cumplida — aunque el
-      // progreso no haya llegado a 100. Sin esto la gente sigue persiguiendo
-      // cosas que ya tiene, y el director narra alrededor de ese absurdo.
-      if (hasIt.data) {
+      //    Una meta material se cumple GASTANDO la cosa: Ilde junta carbón
+      //    para el invierno y lo quema, Odila quiere la raíz para destilarla.
+      //    Por eso el objeto se borra de verdad. Si se lo dejáramos en la
+      //    mano, la próxima vez que le tocara "juntar carbón" la meta se
+      //    cumpliría sola en el acto — y pasó, tres ticks seguidos, y el valle
+      //    era una persona anunciando lo mismo una y otra vez.
+      const tiene = enMano.find((o) => o.holder_id === who.id && o.kind === falta)
+      if (tiene) {
+        await db.from('objects').delete().eq('id', tiene.id)
+        enMano.splice(enMano.indexOf(tiene), 1)
+        // No usa la lista blanca, y es a propósito: no afirma la meta, cuenta
+        // el ACTO —que sí pasó— y cita la meta como lo que venía persiguiendo.
+        // Es lo que evita que salga «Odila recuperó los frascos que le debían»
+        // cuando en realidad se destiló uno ella misma y nadie le pagó nada.
+        // Tres procedencias y tres frases, porque la diferencia es el juego:
+        // lo que juntó del suelo, lo que hizo con sus manos, y lo que le hizo
+        // otro — que es lo único que puede quedar diciendo el nombre de un
+        // muerto. `made_by = null` es "nadie lo hizo", nunca "no se sabe".
+        //
+        // Y las tres son neutras de género a propósito: «que tenía guardado»
+        // le pone masculino a la raíz. En castellano el summary no puede
+        // concordar con un `kind` que sale de una tabla, así que la frase se
+        // escribe para no tener que concordar con nada.
+        const deDonde = tiene.made_by === null ? 'de lo que tenía juntado'
+          : tiene.made_by === who.name ? 'que había hecho'
+            : `que había hecho ${tiene.made_by}`
         await cumplirAgenda(agenda, who, nextTick, ev, {
           kind: 'agenda_cumplida', place_id: who.place_id,
-          summary: `${who.name} consiguió lo que le faltaba para ${agenda.goal}.`,
-          detail: { person: who.name, goal: agenda.goal },
+          summary: `${who.name} usó ${falta} ${deDonde}`
+            + ` y cerró lo que venía persiguiendo: ${agenda.goal}.`,
+          detail: {
+            npc: who.name, person: who.name, goal: agenda.goal, object: falta,
+            made_by: tiene.made_by ?? null, como: 'lo tenía',
+          },
         })
         continue
       }
 
-      {
-        if (!count) {
-          await db.from('agendas')
-            .update({ state: 'bloqueada' }).eq('id', agenda.id)
-          ev({ kind: 'agenda_bloqueada', place_id: who.place_id,
-            summary: `${who.name} dejó de intentar ${agenda.goal}: ya no queda nadie que sepa lo que necesita.`,
-            detail: { person: who.name, goal: agenda.goal } })
-        } else if (Math.random() < 0.12) {
-          // Una agenda trabada no es noticia todos los ticks. Si se emite
-          // siempre, el director recibe ruido y la crónica se vuelve una
-          // planilla. Que aparezca de a poco: así, cuando aparece, pesa.
-          ev({ kind: 'agenda_estancada', place_id: who.place_id,
-            summary: `${who.name} sigue sin conseguir lo que necesita para ${agenda.goal}.`,
-            detail: { person: who.name, goal: agenda.goal } })
+      // 2. ¿Crece en algún lado? Va, y busca. La raíz la junta cualquiera y no
+      //    hace falta saber nada — la misma regla que en `case 'buscar'`.
+      const tipo = tipoQueDa(falta)
+      if (tipo) {
+        const donde = lugarPorKind(tipo)
+        if (!donde) { await diaGastado(true); continue }
+
+        // Ponerse en camino. **Si en el destino hay algo parado, esto no es un
+        // viaje: es una salida**, y puede terminar con alguien que no vuelve.
+        // Todo lo que decide eso está en `salir()`; acá sólo está la puerta.
+        //
+        // Un bicho sólo nace en `bosque` o `ruina` (ver la pasada 4b), así que
+        // encontrar uno en el destino ya quiere decir que el destino es un
+        // lugar salvaje: no hace falta preguntarlo dos veces.
+        if (who.place_id !== donde.id) {
+          const bicho = amenazas.find((a) => a.place_id === donde.id)
+          if (bicho) {
+            if (await salir(who, agenda, falta, donde, bicho) === 'no_volvio') continue
+            await diaGastado()
+            continue
+          }
+          // `ir`. Sin evento, y ésa es la decisión de ruido más importante de
+          // todo el archivo: ver la nota de arriba.
+          await mover(who, donde)
+          await diaGastado()
+          continue
         }
+
+        // Estar en el lugar equivocado tiene que costar algo también del lado
+        // de los NPCs, o el mapa es decorado. No es un bloqueo duro a
+        // propósito: con un bicho parado en el Sotobosque y nadie conectado
+        // para matarlo, trabaría todas las agendas de juntar del valle.
+        const bicho = amenazas.find((a) => a.place_id === donde.id)
+        if (bicho && Math.random() < P_SE_VUELVE) {
+          if (Math.random() < 0.5) {
+            ev({ kind: 'retirada', place_id: donde.id,
+              // Decía «llegó hasta X, vio ... y se volvió», y **no llegó ese
+              // día**: a esta rama sólo se entra estando ya en el lugar, así
+              // que la llegada fue ayer o la semana pasada. Es una afirmación
+              // chica y falsa, de las que el director agarra y amuebla —y
+              // ahora se ve más, porque el día que sí se llega puede salir un
+              // `pelea` al lado y quedaban los dos contando la misma llegada.
+              summary: `${who.name} estuvo en ${donde.name}, vio ${bicho.nombre ?? bicho.kind} y no se metió.`,
+              detail: {
+                npc: who.name, person: who.name, place: donde.name,
+                threat: bicho.nombre ?? bicho.kind, goal: agenda.goal,
+              } })
+          }
+          await diaGastado()
+          continue
+        }
+
+        // `buscar`, con el mismo sorteo y los mismos pesos que el jugador.
+        const sale = loQueSale(donde.kind)
+
+        if (sale === falta) {
+          // Volvió con lo suyo. Y vuelve de verdad: el mandado es de ida y
+          // vuelta, y si nadie volviera el valle se vaciaría de a una persona
+          // por vez hasta que no quede nadie en ninguna fragua.
+          const casa = tallerDe(who.id)
+          const volvio = !!casa && casa.id !== donde.id
+          if (casa && volvio) await mover(who, casa)
+          // Cuando la meta ya nombra la cosa —«traer raíz del Sotobosque»— la
+          // coletilla decía «con raíz del Sotobosque, que era lo que le
+          // faltaba para traer raíz del Sotobosque». Si la frase ya se
+          // entiende sola, se corta.
+          const porQue = agenda.goal.includes(falta)
+            ? '' : `, que era lo que le faltaba para ${agenda.goal}`
+          await cumplirAgenda(agenda, who, nextTick, ev, {
+            kind: 'agenda_cumplida', place_id: who.place_id,
+            summary: volvio
+              ? `${who.name} volvió de ${donde.name} con ${falta}${porQue}.`
+              : `${who.name} salió de ${donde.name} con ${falta}${porQue}.`,
+            detail: {
+              npc: who.name, person: who.name, goal: agenda.goal,
+              object: falta, place: donde.name, como: 'lo juntó',
+            },
+          })
+          continue
+        }
+
+        if (sale) {
+          // Levantó otra cosa de paso. Entra al mundo igual que cuando la
+          // levanta el jugador —⚠ `made_by` en null, NADIE LO HIZO— y se la
+          // guarda. No es noticia, y algún día le va a servir: el hierro que
+          // junta hoy buscando carbón es con lo que rehace las bisagras en
+          // dos semanas, y eso se cuenta solo cuando pasa.
+          const q = 40 + roll(35)
+          const { data: nuevo } = await db.from('objects').insert({
+            region_id: region.id, kind: sale, quality: q,
+            made_by: null, made_tick: nextTick,
+            holder_kind: 'person', holder_id: who.id,
+          }).select('id').single()
+          if (nuevo) {
+            enMano.push({
+              id: nuevo.id, kind: sale, quality: q, made_by: null, holder_id: who.id,
+            })
+          }
+          await diaGastado()
+          continue
+        }
+
+        // Volvió con las manos vacías.
+        if (Math.random() < 0.4) {
+          ev({ kind: 'busqueda', place_id: donde.id,
+            summary: `${who.name} anduvo revolviendo ${donde.name} y volvió con las manos vacías.`,
+            detail: {
+              npc: who.name, person: who.name, place: donde.name,
+              object: null, goal: agenda.goal,
+            } })
+        }
+        await diaGastado()
         continue
       }
+
+      // 3. No crece: lo hace alguien. Acá está la regla de la escasez del lado
+      //    de los NPCs — el frasco sale de las manos de quien sabe destilar, y
+      //    si no queda nadie vivo que lo sepa hacer, la meta se traba. Si el
+      //    NPC "consiguiera" un frasco de la nada la escasez sería decorativa,
+      //    que es exactamente lo que hacía el contador.
+      const receta = recetas.find((r) => r.makes === falta)
+      const quienSabe = receta ? await quienLoSabeHacer(falta, people, players) : null
+      if (!quienSabe || !receta) {
+        await db.from('agendas').update({ state: 'bloqueada' }).eq('id', agenda.id)
+        ev({ kind: 'agenda_bloqueada', place_id: who.place_id,
+          summary: `${who.name} dejó de intentar ${agenda.goal}: ya no queda nadie que sepa hacer ${falta}.`,
+          detail: {
+            npc: who.name, person: who.name, goal: agenda.goal, object: falta,
+          } })
+        continue
+      }
+
+      // 3a. ¿Lo sabe hacer? Va al taller y lo hace: `trabajar`, con las mismas
+      //     dos condiciones que el jugador — el saber y el lugar.
+      const suyo = sabeQue(who.id, receta.id)
+      if (suyo) {
+        const taller = receta.makes_at ? lugarPorKind(receta.makes_at) : undefined
+        if (!taller) { await diaGastado(true); continue }
+        if (who.place_id !== taller.id) {
+          await mover(who, taller)
+          await diaGastado()
+          continue
+        }
+
+        // Practicar mejora, igual que al jugador: la próxima le va a salir
+        // mejor, y eso lo ve todo el que la use.
+        const antes: number = suyo.destreza
+        const ahora = Math.min(100, antes + mejora(antes))
+        await db.from('knows')
+          .update({ destreza: ahora, veces: suyo.veces + 1 }).eq('id', suyo.id)
+        suyo.destreza = ahora
+        suyo.veces += 1
+
+        const q = calidad(antes)
+        const { data: hecho } = await db.from('objects').insert({
+          region_id: region.id, kind: falta, quality: q,
+          made_by: who.name, made_tick: nextTick,
+          holder_kind: 'person', holder_id: who.id,
+        }).select('id').single()
+        if (hecho) {
+          enMano.push({
+            id: hecho.id, kind: falta, quality: q, made_by: who.name, holder_id: who.id,
+          })
+        }
+        ev({ kind: 'fabricacion', place_id: taller.id,
+          summary: `${who.name} hizo ${falta} en ${taller.name}.`,
+          detail: {
+            npc: who.name, person: who.name, object: falta,
+            quality: q, destreza: ahora,
+          } })
+        // La meta se cierra mañana, gastándolo. Que la cosa exista un día
+        // entero antes de quemarse no es un detalle de implementación: hay
+        // algo nuevo en el mundo y alguien lo puede ver.
+        await diaGastado()
+        continue
+      }
+
+      // 3a-bis. No lo sabe hacer: **se lo pide al que sabe.**
+      //
+      //   Va antes de 3b y ése es el cambio entero. Aprender el oficio para
+      //   conseguir UNA cosa es lo que hacía el valle hasta hoy y es lo que
+      //   apaga el juego: Sarn aprendiendo a forjar para tener una hoja deja al
+      //   valle con cinco herreros y sin nada que perder cuando se muera Ilde.
+      //   Pedírselo a Ilde deja el saber donde estaba y crea una deuda.
+      const pedido = await irAPedir(who, agenda, falta, receta)
+      if (pedido === 'recibio') continue
+      if (pedido === 'viaja') { await diaGastado(); continue }
+      // Un "no" es un día trabado, con el mismo criterio que ya estaba escrito
+      // acá: buscar y no encontrar es progreso, querer algo que alguien te está
+      // negando no lo es. Es lo que le da salida a un pedido que nunca va a
+      // salir, y la salida es `P_SUELTA`, no un caso especial.
+      if (pedido === 'negativa') { await diaGastado(true); continue }
+
+      // 3b. Nadie a quien pedírselo. ¿Hay alguien vivo que enseñe? Va y
+      //     aprende — es el bucle chico del juego corriendo solo entre NPCs, y
+      //     ahora es el ÚLTIMO recurso y no el primero.
+      const fue = await irAAprender(who, receta.id)
+      await diaGastado(fue === 'nadie')
+      continue
     }
 
-    // Cuánto se avanza en un día.
-    //
-    // Estaba en `8 + roll(18)`, o sea ~16 por tick: una agenda entera en SEIS
-    // días del valle. Con eso el jugador no llega nunca — en la primera corrida
-    // de esto Odila cerró lo suyo en el mismo tick en que Pedro se encargó, y
-    // no por mala suerte: era el caso típico. Una ventana de seis días donde
-    // además tenés que enterarte, ir y volver, es no tener ventana.
-    //
-    // Con `2 + roll(8)` (media 5,5) una agenda dura unos 18 días del valle. El
-    // cron corre cuatro ticks por día real, así que son ~4 días reales si nadie
-    // juega, y ~18 acciones si hay alguien adentro (cada acción dispara un
-    // tick). Alcanza para escucharlo, cruzar el valle y volver, y sigue
-    // dejando una agenda cerrándose cada tres o cuatro ticks entre las cinco
-    // personas del valle: el mundo se mueve igual, sólo que a paso de gente y
-    // no de planilla.
-    const gained = 2 + roll(8)
-    const progress = Math.min(100, agenda.progress + gained)
+    // ── Le falta un SABER ─────────────────────────────────
+    if (agenda.needs_kind === 'knowledge' && agenda.needs_id) {
+      // Si ya consiguió lo que le faltaba, la meta está cumplida — aunque el
+      // progreso no haya llegado a ningún lado. Sin esto la gente sigue
+      // persiguiendo cosas que ya tiene y el director narra ese absurdo.
+      if (sabeQue(who.id, agenda.needs_id)) {
+        const logro = comoSeCuenta(agenda.goal)
+        await cumplirAgenda(agenda, who, nextTick, ev, {
+          kind: 'agenda_cumplida', place_id: who.place_id,
+          summary: logro
+            ? `${who.name} ${logro}: ya sabe lo que le faltaba.`
+            : `${who.name} aprendió lo que le faltaba y dio por cerrado lo suyo.`,
+          detail: { npc: who.name, person: who.name, goal: agenda.goal },
+        })
+        continue
+      }
 
-    if (progress >= 100) {
+      // ¿Queda alguien VIVO Y DE ACÁ que lo sepa? Antes se contaba `knows`
+      // entero, y las filas de un muerto no se borran nunca: una meta podía
+      // quedar esperando para siempre a un maestro enterrado, en silencio.
+      // Después se arregló lo del muerto pero no lo del valle: `holder_kind ===
+      // 'player'` pasaba a CUALQUIER jugador de la base, y un jugador de
+      // `valle-primero` dejaba esta agenda desbloqueada para siempre esperando
+      // a alguien que en este mundo no existe — el mismo silencio, otra puerta.
+      // Ahora es `siguenEnElValle`, el mismo predicado que usa
+      // `perdida_de_saber`.
+      const portadores = (await db
+        .from('knows').select('holder_kind, holder_id')
+        .eq('knowledge_id', agenda.needs_id)).data ?? []
+      const siguenAcá = siguenEnElValle(portadores, people, players)
+      if (siguenAcá.length === 0) {
+        await db.from('agendas').update({ state: 'bloqueada' }).eq('id', agenda.id)
+        ev({ kind: 'agenda_bloqueada', place_id: who.place_id,
+          summary: `${who.name} dejó de intentar ${agenda.goal}: ya no queda nadie que sepa lo que necesita.`,
+          detail: { npc: who.name, person: who.name, goal: agenda.goal } })
+        continue
+      }
+
+      const fue = await irAAprender(who, agenda.needs_id)
+      if (fue === 'aprendio') {
+        // Se cierra ACÁ, en el mismo día. Cita la meta como lo que venía
+        // persiguiendo y cuenta lo que de verdad pasó; el nombre de quien
+        // enseñó ya está en el evento `ensenanza` que acaba de salir.
+        await cumplirAgenda(agenda, who, nextTick, ev, {
+          kind: 'agenda_cumplida', place_id: who.place_id,
+          summary: `${who.name} llevaba tiempo detrás de ${agenda.goal}, y hoy se lo enseñaron.`,
+          detail: {
+            npc: who.name, person: who.name, goal: agenda.goal,
+            como: 'se lo enseñaron',
+          },
+        })
+        continue
+      }
+      // Viaja hacia el maestro, o no hay nadie dispuesto. Lo segundo es una
+      // historia —el que lo sabe se lo guarda— y una puerta: el jugador sí
+      // puede enseñárselo, y `case 'ensenar'` ya le cierra la meta con su
+      // nombre puesto.
+      await diaGastado(fue === 'nadie')
+      continue
+    }
+
+    // ── No le falta nada: trabaja en lo suyo ──────────────
+    //
+    // `trabajar` sin producto no emite evento: es el día de laburo de
+    // cualquiera y repetido cuatro veces es una planilla. Lo que se cuenta es
+    // el cruce de la mitad —una vez por meta, en la transición— y el cierre.
+    const hecho = Math.min(100, agenda.progress + DIA_DE_TRABAJO)
+    if (hecho >= 100) {
+      // Acá, y sólo acá, la simulación no tiene un acto concreto que contar:
+      // lo único que sabe es que las jornadas alcanzaron. Por eso ésta es la
+      // rama que **sí** pasa por la lista blanca — la frase que dice QUÉ pasó
+      // tiene que estar escrita para esa meta o no se dice. Es la red que
+      // evitó que un template genérico matara a una NPC viva.
+      const logro = comoSeCuenta(agenda.goal)
       await cumplirAgenda(agenda, who, nextTick, ev, {
         kind: 'agenda_cumplida', place_id: who.place_id,
-        summary: `${who.name} se salió con la suya: ${agenda.goal}.`,
-        detail: { person: who.name, goal: agenda.goal },
+        summary: logro
+          ? `${who.name} ${logro}.`
+          : `${who.name} dio por cerrado lo que venía persiguiendo.`,
+        detail: { npc: who.name, person: who.name, goal: agenda.goal },
       })
-    } else {
-      await db.from('agendas').update({ progress }).eq('id', agenda.id)
-      // Un buen día suelto no es noticia todos los días. Con la curva nueva
-      // esto sale ~1 vez por agenda: la vez que de verdad pegó un salto.
-      if (gained >= 9 && Math.random() < 0.5) {
-        ev({ kind: 'agenda_avanza', place_id: who.place_id,
-          summary: `${who.name} avanzó bastante con ${agenda.goal}.`,
-          detail: { person: who.name, goal: agenda.goal, progress } })
-      }
+      continue
+    }
+    await db.from('agendas').update({ progress: hecho }).eq('id', agenda.id)
+    // Una vez por meta, en la transición, y por construcción no se puede
+    // repetir: cuatro jornadas de 25 cruzan la mitad exactamente una vez.
+    if (agenda.progress < 50 && hecho >= 50) {
+      ev({ kind: 'agenda_avanza', place_id: who.place_id,
+        summary: comoSeCuenta(agenda.goal)
+          ? `${who.name} avanzó bastante con ${agenda.goal}.`
+          : `${who.name} avanzó bastante con lo suyo.`,
+        detail: {
+          npc: who.name, person: who.name, goal: agenda.goal, progress: hecho,
+        } })
+    }
+  }
+
+  // ── 2b. Se hablan, y eso no es noticia ────────────────────
+  //
+  // Un par por día, de los que están en el mismo lugar, y **cero eventos**. Es
+  // `hablar` entre NPCs y la decisión de ruido es la misma que la de `ir`: un
+  // saludo entre vecinos no es una noticia, es el fondo. Lo que deja es estado
+  // —el aprecio sube de a dos hasta `TOPE_DE_TRATO`— y el estado se ve por
+  // donde tiene que verse: en a quién le pide las cosas la gente, y en lo que
+  // los NPCs dicen de otros NPCs cuando el jugador les pregunta.
+  //
+  // Va detrás de `pace` como las agendas y la enseñanza, porque esto sí es
+  // historia: con la región vacía el valle también teje más despacio.
+  //
+  // Las dos cuentas: un par por tick son ~365 acercamientos por año de mundo
+  // repartidos entre los pares que de verdad comparten lugar (dos o tres), y
+  // como el tope corta en 20, cada par llega ahí en unos diez encuentros y
+  // después esto no hace nada. En tiempo real, cuatro por día.
+  if (Math.random() < pace) {
+    const grupo = pick(places
+      .map((l) => people.filter((p) => p.place_id === l.id))
+      .filter((xs) => xs.length >= 2))
+    if (grupo) {
+      const uno = pick(grupo)!
+      const otro = pick(grupo.filter((p) => p.id !== uno.id))
+      if (otro) await hablarse(uno, otro)
     }
   }
 
   // ── 3. Enseñanza espontánea entre NPCs ────────────────────
+  //
   // El saber circula solo. Lento, pero circula.
-  if (populated && Math.random() < 0.35) {
+  //
+  // **Bajó de 0,35 a 0,12 y no es un ajuste cosmético: era la enseñanza
+  // espontánea o la escasez.** Este sorteo elige un maestro y un alumno que
+  // estén EN EL MISMO LUGAR, y hasta ayer casi nadie se movía: los pares
+  // posibles eran Ilde+Bruno en la fragua y Odila+Sarn en la aldea, así que la
+  // mayoría de los tiros no encontraba a nadie y salían dos enseñanzas cada
+  // cuarenta ticks. Con la pasada 2 ejecutando verbos la gente cruza el valle
+  // todo el tiempo, el sorteo empezó a acertar y en la primera corrida
+  // **Forja simple pasó de una cabeza a cinco en veinticinco ticks**. Un valle
+  // donde todos saben todo no tiene nada que perder cuando se muere alguien, y
+  // eso es el juego entero.
+  //
+  // Lo otro que cambió es que esto ya no es lo único que mueve el saber: un
+  // NPC que necesita un oficio ahora **va a buscarlo** (`irAAprender`). Esa
+  // enseñanza es mejor que ésta en todo sentido — tiene motivo, cierra una
+  // meta y se puede contar. Así que la espontánea pasa a ser lo que dice el
+  // nombre: el saber que se pega por estar al lado, de vez en cuando.
+  //
+  // Las dos cuentas: 12% por tick son ~44 tiros por año de mundo, y sólo
+  // aciertan los que caen sobre un par con algo nuevo que pasarse. Medido,
+  // deja el total de enseñanzas (espontáneas + buscadas) en ~0,11 por tick.
+  //
+  // ── El `populated` que había acá era un CERO, no un freno ────────────────
+  //
+  // **El 0,12 no se movió y no se va a mover.** Lo que se movió es la puerta,
+  // y era una puerta binaria en un archivo donde todo lo demás es `pace`:
+  // las agendas corren a `pace * P_JORNADA`, el chusmerío a `pace`, las
+  // amenazas a paso entero. Sólo la enseñanza estaba en `populated &&`, o sea
+  // **apagada del todo** cuando no hay nadie mirando. Y la muerte, que es lo
+  // que hay del otro lado de la balanza, nunca estuvo frenada por nada.
+  //
+  // Eso convertía a §7.3 —«cuatro veces más lento con la región vacía»— en
+  // «infinitamente más lento», y es la causa mecánica de la frase de §9.2 que
+  // motivó esta tarea: *una región sin jugadores... el saber sólo puede bajar*.
+  // No podía hacer otra cosa: el saber se moría a tasa completa y lo único que
+  // lo copia estaba en cero.
+  //
+  // Está medido y por eso se toca. Ocho valles × 600 ticks sin nadie adentro,
+  // con los nacimientos ya puestos: **0,0037 enseñanzas por tick**, y las 18
+  // que hubo eran TODAS buscadas —la espontánea aportó cero, como corresponde a
+  // un `false &&`—. Con jugador, en la misma versión, 0,0202.
+  //
+  // El cambio es exactamente equivalente en un valle con gente adentro: ahí
+  // `populated` es true y `pace` es 1, así que `pace * 0,12` es 0,12, el mismo
+  // número y el mismo sorteo. **Sólo cambia lo que pasa cuando no mira nadie**,
+  // que es de 0 a 0,03 por tick — los cuatro veces más lento que pide §7.3, ni
+  // uno más.
+  if (Math.random() < pace * 0.12) {
     const maestro = pick(people.filter((p) => p.teaches))
     if (maestro) {
       const alumno = pick(people.filter(
@@ -359,59 +2155,81 @@ export async function step() {
             knowledge_id: candidato.knowledge_id,
             learned_from: maestro.id, how: 'aprendido', learned_tick: nextTick,
           })
+          // Igual que en la enseñanza buscada: al que te enseñó lo suyo se lo
+          // recuerda, y eso es lo que después hace que te den lo que le pedís.
+          await tocarVinculoEntre(alumno.id, maestro.id, 20)
+          const cuantos = await cuantosLoSaben(candidato.knowledge_id, region.id, people)
           ev({ kind: 'ensenanza', place_id: maestro.place_id,
-            summary: `${maestro.name} le enseñó ${k?.name} a ${alumno.name}. Ahora lo saben dos.`,
-            detail: { from: maestro.name, to: alumno.name, knowledge: k?.name } })
+            summary: `${maestro.name} le enseñó ${k?.name} a ${alumno.name}.`
+              + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
+            detail: {
+              from: maestro.name, to: alumno.name, knowledge: k?.name,
+              lo_saben: cuantos,
+            } })
         }
       }
     }
   }
 
   // ── 4. Muerte, y lo que se lleva puesto ───────────────────
-  // La parte que le da peso a todo: un maestro que se muere sin enseñar
-  // borra ese saber de la región. No es lore, es estado.
-  // 0.8% por tick. Con un tick por hora son ~1 muerte cada 5 días en un valle
-  // de siete personas — suficiente para que duela, poco para que el valle se
-  // vacíe. Estuvo en 6% y con ticks de 10 minutos el valle se consumía en una
-  // tarde: nadie llega a encariñarse con alguien que se muere en media hora.
-  if (Math.random() < 0.008 && people.length > 3) {
-    const muerto = pick(people)
+  //
+  // La parte que le da peso a todo: un maestro que se muere sin enseñar borra
+  // ese saber de la región. No es lore, es estado.
+  //
+  // **El número no se movió y hay que entender por qué.** 0,8% por tick es una
+  // muerte cada 125 días del valle, o sea 2,9 por año de mundo en un valle de
+  // siete personas. Eso es demografía sana y es lo único que importa: en
+  // tiempo de mundo está bien. (El comentario que había acá decía "con un tick
+  // por hora son ~1 muerte cada 5 días" y quedó viejo con el cambio de ritmo.)
+  //
+  // En tiempo real, con cuatro ticks por día, es una muerte cada ~31 días si
+  // no juega nadie — y bastante más seguido si sí, porque cada acción de un
+  // jugador es un tick más.
+  //
+  // Lo que NO arregla mover este número: el test de la Fase 0 son siete días
+  // reales = 28 ticks de cron, y P(alguien se muera) = 1 − 0,992²⁸ = 20%.
+  // Para llevarlo al 80% haría falta 5,6% por tick, o sea una muerte cada 18
+  // días del valle: veinte por año en un pueblo de siete. Eso ya se probó (al
+  // 6% con ticks de diez minutos eran ocho muertes diarias) y consume el
+  // valle. **No hay número que sea sano en tiempo de mundo y a la vez
+  // probable en 28 días de mundo: la ventana del test es corta, no la
+  // probabilidad chica.** El arreglo va en el diseño del test, no acá.
+  //
+  // Lo que sí se puede hacer sin tocar la tasa: elegir mejor QUIÉN se muere.
+  // Ver `elQueSeVa`.
+  if (Math.random() < P_MUERTE && people.length > 3) {
+    const muerto = await elQueSeVa(people, players)
     if (muerto) {
-      await db.from('people')
-        .update({ alive: false, died_tick: nextTick }).eq('id', muerto.id)
-      ev({ kind: 'muerte', place_id: muerto.place_id,
-        summary: `Murió ${muerto.name}, ${muerto.trade}, en ${placeName(muerto.place_id)}.`,
-        detail: { person: muerto.name } })
-
-      const tenia = (await db
-        .from('knows').select('knowledge_id')
-        .eq('holder_kind', 'person').eq('holder_id', muerto.id)).data ?? []
-
-      for (const k of tenia) {
-        const otros = (await db
-          .from('knows').select('holder_id, holder_kind')
-          .eq('knowledge_id', k.knowledge_id)
-          .neq('holder_id', muerto.id)).data ?? []
-        if (otros.length === 0) {
-          const { data: info } = await db
-            .from('knowledge').select('name').eq('id', k.knowledge_id).single()
-          ev({ kind: 'perdida_de_saber',
-            summary: `Con ${muerto.name} se fue ${info?.name}. No queda nadie en el valle que lo sepa.`,
-            detail: { person: muerto.name, knowledge: info?.name } })
-        }
-      }
-
-      await db.from('agendas')
-        .update({ state: 'abandonada', ended_tick: nextTick })
-        .eq('person_id', muerto.id).eq('state', 'activa')
+      // Todo lo que significa morirse —bajar la bandera, contar lo que se
+      // llevó puesto, cerrarle las metas— vive en `seMuere` y lo comparten las
+      // dos formas de irse que tiene este valle: ésta, el sorteo, y la salida
+      // que no vuelve. Es el mismo hecho contado con otra frase, y **la frase
+      // es lo único que cambia**: si `perdida_de_saber` se escribiera dos
+      // veces, el evento del que cuelga la tesis del juego tendría dos dueños.
+      await seMuere({
+        tick: nextTick, muerto, people, players, ev,
+        evento: {
+          kind: 'muerte', place_id: muerto.place_id,
+          summary: `Murió ${muerto.name}, ${muerto.trade}, en ${placeName(muerto.place_id)}.`,
+          detail: { person: muerto.name },
+        },
+      })
 
       // Las agendas corren antes que la muerte en el mismo tick, así que un
       // muerto puede haber "conseguido" algo y "puesto a" otra cosa segundos
       // antes de morirse. El director lee esos eventos y narra a un fantasma
       // laburando — pasó de verdad: «Ren sigue en la Casa Quemada persiguiendo
       // algo nuevo». Se descartan antes de escribirlos.
+      //
+      // Y ahora la pasada 2 no sólo mueve contadores: el muerto pudo haber
+      // bajado a la Casa Quemada, forjado algo o aprendido una runa en este
+      // mismo tick. Todo lo que hace un NPC por su cuenta va marcado con
+      // `detail.npc`, así que se cae junto con lo demás. **No filtra por
+      // nombre suelto a propósito**: un evento de un JUGADOR que lo nombra
+      // —«Pedro le dio la raíz a Ren»— pasó de verdad y tiene que quedar.
       const vivos = events.filter((e) =>
-        !(e.kind.startsWith('agenda_') && e.detail?.person === muerto.name))
+        !(e.kind.startsWith('agenda_') && e.detail?.person === muerto.name)
+        && e.detail?.npc !== muerto.name)
       events.length = 0
       events.push(...vivos)
     }
@@ -421,33 +2239,111 @@ export async function step() {
   // Antes los monstruos vivían en la máquina de cada jugador: los matabas y
   // el mundo no se enteraba. Ahora viven acá, los ve todo el mundo, y matar
   // uno deja un evento que el director puede contar.
-  const amenazas = (await db
-    .from('threats').select('id, place_id, kind, health, max_health')
-    .eq('region_id', region.id).eq('alive', true)).data ?? []
+  //
+  // `amenazas` se lee arriba, en la pasada 2: los NPCs la consultan para
+  // decidir si se meten en el Sotobosque o se vuelven. La lista es la misma y
+  // el momento en que se lee también, así que las que nacen abajo siguen sin
+  // morder en el mismo tick en que nacen, igual que siempre.
 
   // Aparecen donde tiene sentido que aparezcan, y de a poco. Un valle lleno de
-  // bichos deja de dar miedo: se vuelve una cola de tareas.
+  // bichos deja de dar miedo: se vuelve una cola de tareas — por eso el tope
+  // de tres, que es lo que sostiene esa regla y no se toca.
+  //
+  // Lo que cambió es la VELOCIDAD DE REPOSICIÓN, y son dos cosas:
+  //
+  //   · **Se tira una vez por lugar vacante, no una vez por tick.** Así el
+  //     valle se repone más rápido cuanto más vacío está, que es la forma que
+  //     uno quiere: limpiaste las tres y el valle vuelve a tener dientes;
+  //     quedan dos y no pasa casi nada. Con 60% por vacante, salir de cero es
+  //     93,6% en UN tick (1 − 0,4³) contra 35% antes.
+  //   · **Ya no lo frena `pace`.** `pace` existe para que la HISTORIA no se
+  //     escape mientras nadie mira: agendas, enseñanza, chusmerío. Una amenaza
+  //     no es historia, es el estado del valle, y un valle que cría bichos
+  //     mientras no hay nadie es exactamente lo que querés encontrar cuando
+  //     volvés. Con `pace` puesto, el que limpiaba el valle y se iba se lo
+  //     encontraba igual de vacío al otro día: 0,35 × 0,25 = 8,75% por tick,
+  //     cuatro ticks por día, o sea cinco días reales para volver al tope.
+  //     Es una desviación consciente de §7.3 ("cuatro veces más lento vacío"),
+  //     y se la banca el tope de tres: esto no puede desbordar.
+  //
+  // Las cuentas, que es lo que faltó la última vez:
+  //   · en tiempo de MUNDO — con dos vivas, una nueva cada 1,7 días del valle.
+  //   · en tiempo REAL, sólo cron — 4 ticks/día: de cero a tres en ~2,5 ticks,
+  //     unas 15 horas; la primera aparece en ~6 horas. Antes eran 17 horas
+  //     sólo para la primera y cinco días para el tope.
+  //   · en tiempo REAL, con alguien jugando — cada acción es un tick, así que
+  //     el valle vuelve al tope en tres o cuatro acciones.
+  //
+  // Tope de dos nuevas por tick: es ruido lo que estamos racionando, no
+  // bichos. Tres «Hay algo rondando X» en la misma crónica es una planilla.
   const salvaje = places.filter((p) => p.kind === 'bosque' || p.kind === 'ruina')
-  if (amenazas.length < 3 && Math.random() < 0.35 * pace) {
+  let nacidas = 0
+  for (let vacante = 3 - amenazas.length; vacante > 0 && nacidas < 2; vacante--) {
+    if (Math.random() >= P_AMENAZA) continue
     const donde = pick(salvaje)
     const que = pick(['una jauría de sombra', 'algo que baja del Sotobosque', 'un merodeador'])!
-    if (donde) {
-      const vida = 30 + roll(40)
-      await db.from('threats').insert({
-        region_id: region.id, place_id: donde.id, kind: que,
-        health: vida, max_health: vida, spawned_tick: nextTick,
-      })
-      ev({ kind: 'amenaza', place_id: donde.id,
-        summary: `Vieron ${que} rondando ${donde.name}.`,
-        detail: { threat: que, place: donde.name } })
-    }
+    if (!donde) break
+    const vida = 30 + roll(40)
+    await db.from('threats').insert({
+      region_id: region.id, place_id: donde.id, kind: que,
+      health: vida, max_health: vida, spawned_tick: nextTick,
+    })
+    nacidas++
+    // Decía «Vieron X rondando Y» y no vio nadie: no hay testigo en ninguna
+    // tabla. El director agarra ese "vieron" y te inventa quién lo vio.
+    ev({ kind: 'amenaza', place_id: donde.id,
+      summary: `Hay ${que} rondando ${donde.name}.`,
+      detail: { threat: que, place: donde.name } })
   }
 
   // Y muerden. Estar en el lugar equivocado tiene que costar algo, o el mapa
   // es decorado.
+  //
+  // **Muerden sólo al que está adentro AHORA.** La ventana era `tick -
+  // last_seen <= 3`, que con el tick de seis horas son DIECIOCHO HORAS REALES:
+  // te desconectabas a la tarde y entrabas al otro día herido o caído por algo
+  // que pasó mientras dormías. Con `players.health` real y visible en el
+  // cliente eso es exactamente lo que `DISENO.md` §9.3 prohíbe — perder nunca
+  // puede costarte tiempo de juego — y §2, perder no te devuelve a cero.
+  //
+  // No se tocó el 50% por tick: en tiempo de mundo está bien (medio día de
+  // valle parado al lado de un bicho y te muerde una vez). Lo que cambió es
+  // cuándo cuenta ese tick. En tiempo real: un tick de cron cae dentro de tu
+  // ventana de cinco minutos el 1,4% de las veces (5/360), así que en la
+  // práctica **te muerde el mundo mientras jugás y nadie más** — y jugando te
+  // muerde seguido, porque cada acción tuya es un tick.
+  //
+  // El daño sí se movió, y es la única cosa que se movió acá: era `6 + roll(10)`
+  // —6 a 15, 10,5 de media— y pasó a ser el de `recibirGolpe()`, `8 + roll(8)`
+  // —8 a 15, 11,5 de media—. Es +1 punto por mordida, +9,5%: de 100 de vida,
+  // caer pasa de 9,5 mordidas a 8,7. No es un número nuevo, es el que ya
+  // recibías del otro camino; lo que se eligió no fue subir el daño sino tener
+  // uno solo, y el que sobrevive es el que está calibrado contra lo que pega el
+  // jugador a mano limpia (`pelear()` sin arma: también `8 + roll(8)`).
+  //
+  // Cuántas veces dispara, que es lo que hay que saber antes de mover un
+  // número. Por (bicho, jugador presente) es 0,5 por tick, con tope de tres
+  // bichos:
+  //
+  //   · **por día de MUNDO** — parado al lado de un bicho, media mordida por
+  //     día; parado en el Sotobosque con las tres, 1,5. Medido: diez ticks
+  //     seguidos con un jugador quieto ahí dieron **14 mordidas, 1,40 por
+  //     tick** (baja de 1,5 porque el día que cae no lo vuelven a morder).
+  //   · **por día REAL** — el mundo late cuatro veces al día y **sólo por vuelta
+  //     del sol**: desde que `POST /act` dejó de llamar a `step()`, una acción
+  //     tuya ya no es un tick. Un tick de cron cae dentro de tu ventana de
+  //     presencia de cinco minutos el 1,4% de las veces (5/360), así que son
+  //     4 × 0,014 × 1,5 = **0,08 mordidas por día real**. O sea que por este
+  //     camino no te muerde casi nunca: **el que te muerde mientras jugás es
+  //     `POST /danio` desde el cliente**, que llama a la misma función.
+  //
+  // Y eso es justamente lo que hace que unificar importe más que el +1 de daño:
+  // el camino que casi nunca corre era el que tenía las reglas distintas, así
+  // que la diferencia sólo se iba a ver en la crónica de alguien, una vez, sin
+  // que nadie supiera por qué esa mordida se contó de otra manera.
   for (const a of amenazas) {
     const presentes = players.filter(
-      (p) => p.place_id === a.place_id && region.tick - p.last_seen_tick <= 3)
+      (p) => p.place_id === a.place_id && adentroAhora(p))
     for (const p of presentes) {
       if (Math.random() > 0.5) continue
 
@@ -480,26 +2376,36 @@ export async function step() {
           .eq('id', a.id)
         ev({ kind: queda > 0 ? 'defensa' : 'amenaza_muerta', place_id: a.place_id,
           summary: queda > 0
-            ? `${defensor.name} se metió y le sacó a ${a.kind} de encima a ${p.name}.`
-            : `${defensor.name} mató a ${a.kind} para sacárselo de encima a ${p.name}.`,
-          detail: { person: defensor.name, player: p.name, threat: a.kind } })
+            ? `${defensor.name} se metió y le sacó ${conA(a.nombre ?? a.kind)} de encima a ${p.name}.`
+            : `${defensor.name} mató ${conA(a.nombre ?? a.kind)} para sacárselo de encima a ${p.name}.`,
+          detail: { person: defensor.name, player: p.name, threat: a.nombre ?? a.kind } })
         // Que te salven crea una deuda, y la deuda es contenido: el que te
         // bancó ahora tiene algo tuyo que cobrar.
-        await recordar(defensor.id, p, `me metí a defender a ${p.name}`, nextTick)
+        await recordar(defensor.id, p, `${defensor.name} se metió a defender a ${p.name}`, nextTick)
         continue
       }
 
-      const { data: estado } = await db
-        .from('players').select('health').eq('id', p.id).maybeSingle()
-      const vida = Math.max(0, (estado?.health ?? 100) - (6 + roll(10)))
-      await db.from('players')
-        .update({ health: vida, ...(vida === 0 ? { downed_at_tick: nextTick } : {}) })
-        .eq('id', p.id)
-      ev({ kind: vida === 0 ? 'caida' : 'herida', place_id: a.place_id,
-        summary: vida === 0
-          ? `${a.kind} tumbó a ${p.name} en ${placeName(a.place_id)}.`
-          : `${a.kind} lastimó a ${p.name} en ${placeName(a.place_id)}.`,
-        detail: { player: p.name, threat: a.kind } })
+      // La mordida es UNA sola función y está en `combate.ts`, igual que el
+      // golpe de ida. Acá había una tercera copia escrita a mano —ver el
+      // encabezado de `recibirGolpe()`— y pegaba distinto, narraba distinto, no
+      // deduplicaba y no le bajaba el miedo a nadie: te mordía distinto el tick
+      // que tu propio cliente. Lo único que queda de este lado es la decisión
+      // de A QUIÉN se le tira el dado, que sí es del tick.
+      //
+      // Y de yapa arregla dos cosas que la copia hacía mal por su cuenta:
+      // `amenazas` se leyó en la pasada 2, así que un bicho que acaba de matar
+      // un defensor unas líneas más arriba seguía mordiendo con datos viejos, y
+      // un jugador ya caído volvía a "caer" —`downed_at_tick` reescrito y un
+      // segundo evento `caida` en el mismo tick—. `recibirGolpe()` relee el
+      // bicho con `alive = true` y al caído no le pega.
+      await recibirGolpe({
+        regionId: region.id, tick: nextTick, player: p, threatId: a.id, ev,
+        // El tick buferea sus eventos hasta el final, así que el corte de ruido
+        // de `recibirGolpe()` no los ve en la tabla: se los mostramos.
+        yaEnEsteTick: (kind, jugador, bicho) => events.some((e) =>
+          e.kind === kind && e.detail?.player === jugador
+          && e.detail?.threat === bicho),
+      })
     }
   }
 
@@ -513,8 +2419,14 @@ export async function step() {
     if (rumores >= 3) break
     if (Math.random() > 0.4) continue
     const contador = people.find((p) => p.id === m.person_id)
+    // No se le cuenta a alguien lo que hizo alguien, si ese alguien es él.
+    // «Sarn le contó a Bruno: Bruno no le dio hoja templada a Sarn» salió en la
+    // primera corrida con recuerdos entre NPCs y es una frase absurda, pero el
+    // agujero es viejo y también valía para los jugadores: «Ilde le contó a
+    // Pedro: Pedro mató a la jauría». Un rumor es lo que se dice de un tercero.
     const oyente = pick(people.filter(
-      (p) => p.id !== m.person_id && p.place_id === contador?.place_id))
+      (p) => p.id !== m.person_id && p.id !== m.about_id
+        && p.place_id === contador?.place_id))
     if (!contador || !oyente) continue
     // .limit(1) no es cosmético: maybeSingle() DEVUELVE ERROR si matchea más
     // de una fila, y entonces `data` viene null y la deduplicación no dedupea
@@ -564,22 +2476,259 @@ export async function step() {
       const quien = people.find((p) => p.id === a.person_id)
       const jugador = players.find((p) => p.id === enc.player_id)
       if (!quien || !jugador) continue
+      // La rama de "cumplida" afirma la meta, así que pasa por la lista
+      // blanca igual que las demás. La de "soltó lo suyo" la cita como deseo
+      // —«se había encargado de eso: <meta>»— y eso siempre es verdad.
+      const logro = comoSeCuenta(a.goal)
       ev({ kind: 'encargo_perdido', place_id: quien.place_id,
         summary: a.state === 'cumplida'
-          ? `${quien.name} lo resolvió sin esperar a ${jugador.name}, que se había encargado: ${a.goal}.`
+          ? (logro
+            ? `${quien.name} ${logro} sin esperar a ${jugador.name}, que se había encargado.`
+            : `${quien.name} lo resolvió solo, sin esperar a ${jugador.name}, que se había encargado.`)
           : `${quien.name} soltó lo suyo y ${jugador.name} se había encargado de eso: ${a.goal}.`,
         detail: { person: quien.name, player: jugador.name, goal: a.goal } })
+    }
+  }
+
+  // ── 6b. El cierre del día — quién no volvió, y qué no abrió ───────────────
+  //
+  // **El tick del cron cae a medianoche del valle.** No es casualidad: late por
+  // vuelta del sol y los bordes del bloque son las 00, 06, 12 y 18 UTC (ver
+  // `horaDelValle()` y `latir()` en `web.ts`). Así que este es, casi siempre, el
+  // momento en que el valle se acuesta, y es la hora en que preguntar quién
+  // volvió a su casa quiere decir algo. El que empuja un jugador puede caer un
+  // rato más tarde y no cambia nada: lo que se mira no es la hora, es dónde
+  // quedó cada uno al terminar el día.
+  //
+  // **Acá NO se emite la rutina.** Es la trampa entera de esta pasada y hay que
+  // decirla fuerte: si cada persona emitiera «se fue a dormir» y «se levantó»,
+  // catorce eventos diarios de gente durmiendo convertirían la crónica en una
+  // planilla y el director cobraría por leerla. La regla de siempre, aplicada
+  // al caso: **un estado que cambió como todos los días no es noticia.** Que
+  // Ilde duerma en su cama es el fondo, no el hecho.
+  //
+  // Lo que se cuenta es la AUSENCIA de rutina, y son dos cosas, las dos por
+  // TRANSICIÓN y las dos con su estado en la base para no repetirse:
+  //
+  //   · **no volvió a dormir** — la jornada lo dejó en el monte o en la ruina y
+  //     ahí se quedó. Se cuenta la primera noche y ninguna más: las que siguen
+  //     son el estado, y el estado se ve solo (`people.durmio_fuera_desde`).
+  //     Medido en `valle-pruebas`: Odila lleva catorce noches en el Sotobosque
+  //     y el valle lo dijo **una vez**, el día que se quedó.
+  //   · **el taller no abrió** — nadie que trabaje ahí pisó el lugar en todo el
+  //     día. Una vez, el día que se apaga; una fragua que lleva un mes apagada
+  //     no es noticia todos los días (`places.ultimo_dia_abierto`).
+  //
+  // Y no se cuenta la vuelta —ni la del que volvió del monte ni la del taller
+  // que volvió a abrir— por lo mismo: **la rutina que se restablece es rutina.**
+  //
+  // Nada de esto pasa por `pace`. No es historia que se escape mientras nadie
+  // mira: es el estado del valle, igual que las amenazas y las llegadas, y
+  // además no tiene probabilidad que frenar — o volvió o no volvió.
+  //
+  // **Las dos cuentas, medidas y no estimadas.** Ocho valles recién sembrados,
+  // 200 ticks cada uno, con alguien adentro para que `pace` sea 1 y sin que ese
+  // alguien juegue. Cuatro con las dos noticias sueltas y cuatro con la fusión
+  // de más abajo:
+  //
+  //   · sueltas — 98 en 800 ticks, **0,1225 por tick** (66 `noche_afuera` y 32
+  //     `sin_abrir`), y salían casi siempre pegadas, que es lo que hizo falta
+  //     medir para darse cuenta de que eran una sola;
+  //   · fusionadas — 64 en 800 ticks, **0,080 por tick**: 60 `noche_afuera` (22
+  //     de ellos con el taller cerrado adentro) y 4 `sin_abrir` sueltos. Un 35%
+  //     menos de renglones para exactamente los mismos hechos.
+  //
+  //   · en tiempo de MUNDO — una noticia de rutina cada **12 días del valle**,
+  //     y es el **7,1%** de todo lo que emite el valle (1,13 eventos por tick).
+  //     Está muy por debajo del techo de dos o tres por día que pedía la tarea,
+  //     y tiene que estarlo: lo que se ve todo el tiempo es la rutina, que no
+  //     cuesta un solo evento; lo que se cuenta es cuando se rompe.
+  //   · en tiempo REAL, sólo cron — cuatro ticks por día: **una cada tres días
+  //     reales**. Con alguien jugando es lo mismo: el mundo late por vuelta del
+  //     sol y no por acción.
+  //
+  // (Los ocho valles quedaron en la base como `rutina-1` … `rutina-8`, los
+  // cuatro primeros con las noticias sueltas y los cuatro últimos con la
+  // fusión, por si alguien quiere volver a contar.)
+
+  // ── Los talleres. Se miran PRIMERO, y no se emiten todavía ────────────────
+  //
+  // **Un taller es un lugar donde se hace un oficio, y no todos los `makes_at`
+  // lo son.** La aldea y el camino quedan afuera a propósito: ahí vive y pasa
+  // gente todo el tiempo, así que «hoy no abrió Vado Bajo» sería falso y «hoy
+  // no abrió El Camino del Norte» no querría decir nada. Lo que abre y cierra
+  // es la fragua — y cualquier taller que el generador ponga mañana.
+  const NO_SON_TALLER = new Set(['aldea', 'camino'])
+  // Quién trabaja en cada taller: los vivos de acá que saben una receta que se
+  // hace ahí. Sale de lo que ya está leído; no cuesta una consulta.
+  const trabajanEn = new Map<string, typeof people>()
+  for (const k of saberesDe) {
+    const r = recetas.find((x) => x.id === k.knowledge_id)
+    const l = r?.makes_at ? lugarPorKind(r.makes_at) : undefined
+    if (!l || NO_SON_TALLER.has(l.kind)) continue
+    const quien = people.find((q) => q.id === k.holder_id)
+    if (!quien) continue                       // muerto, o de otro valle
+    const xs = trabajanEn.get(l.id) ?? []
+    if (!xs.some((q) => q.id === quien.id)) xs.push(quien)
+    trabajanEn.set(l.id, xs)
+  }
+  // El día que se muere alguien la crónica ya tiene su noticia, y la fragua
+  // apagada es la misma noticia contada dos veces: la herrera se murió, la
+  // fragua no abre. Se calla acá y se cuenta sola cuando el valle siga.
+  const huboMuerte = events.some((e) => e.kind === 'muerte' || e.kind === 'no_volvio')
+  const cerroHoy: { lugar: { id: string; name: string }; trabajan: typeof people }[] = []
+  for (const [placeId, trabajan] of trabajanEn) {
+    const lugar = lugarPorId(placeId)
+    if (!lugar) continue
+    if (trabajan.some((q) => q.place_id === placeId)) {
+      if (lugar.ultimo_dia_abierto !== nextTick) {
+        await db.from('places').update({ ultimo_dia_abierto: nextTick }).eq('id', placeId)
+        lugar.ultimo_dia_abierto = nextTick
+      }
+      continue
+    }
+    // Sólo la transición: abrió ayer y hoy no. Si ya estaba cerrado —o si no lo
+    // vimos abrir nunca, que es `null`— no pasó nada nuevo.
+    if (lugar.ultimo_dia_abierto !== nextTick - 1 || huboMuerte) continue
+    cerroHoy.push({ lugar, trabajan })
+  }
+
+  // ── Los que no volvieron ──────────────────────────────────────────────────
+  //
+  // `dondeDuerme` es la misma función que usa el cliente por `rutinaDe()`, así
+  // que el que aparece durmiendo en el Sotobosque en la pantalla es exactamente
+  // el que sale nombrado acá.
+  //
+  // **Y acá se juntan las dos noticias cuando son una sola.** Ilde vive en la
+  // fragua: el día que se va a la Casa Quemada a buscar hierro, «no volvió a
+  // dormir» y «la fragua no abrió» son el mismo hecho contado dos veces, y
+  // medido eran el doble de eventos y la mitad de historia — la primera corrida
+  // los emitía por separado y salían siempre pegados. Un hecho, un renglón,
+  // igual que el pedido que sale bien en `irAPedir`.
+  for (const p of people) {
+    const donde = dondeDuerme(p, places)
+    const enCasa = donde === (p.home_place_id ?? p.place_id)
+    if (enCasa) {
+      // Volvió. No es noticia (es lo que hace todo el mundo todas las noches),
+      // pero hay que apagar el estado o la próxima salida no se cuenta.
+      if (p.durmio_fuera_desde != null) {
+        await db.from('people').update({ durmio_fuera_desde: null }).eq('id', p.id)
+        p.durmio_fuera_desde = null
+      }
+      continue
+    }
+    if (p.durmio_fuera_desde != null) continue   // ya se contó la primera noche
+    await db.from('people').update({ durmio_fuera_desde: nextTick }).eq('id', p.id)
+    p.durmio_fuera_desde = nextTick
+    const i = cerroHoy.findIndex((c) => c.trabajan.some((q) => q.id === p.id))
+    const cerrado = i >= 0 ? cerroHoy.splice(i, 1)[0]! : null
+    // Escritas para no tener que concordar con nada y para no afirmar de más:
+    // «se quedó» es el estado de ahora mismo, no una predicción sobre la noche
+    // que recién empieza. Es la misma cautela que arregló el «llegó hasta X» de
+    // la retirada.
+    ev({ kind: 'noche_afuera', place_id: donde,
+      summary: `Cayó la noche y ${p.name} no volvió a su casa: se quedó en ${placeName(donde)}.`
+        + (cerrado ? ` Hoy no abrió ${cerrado.lugar.name}.` : ''),
+      detail: {
+        npc: p.name, person: p.name, place: placeName(donde),
+        sin_abrir: cerrado?.lugar.name ?? null,
+      } })
+  }
+
+  // Y los talleres que no abrieron sin que nadie se quedara afuera: la herrera
+  // que se pasó el día en la aldea, o el que dejó el oficio y no volvió al
+  // yunque. Es la misma noticia, sin la mitad que explica por qué.
+  for (const { lugar, trabajan } of cerroHoy) {
+    ev({ kind: 'sin_abrir', place_id: lugar.id,
+      summary: `Hoy no abrió ${lugar.name}.`,
+      detail: { place: lugar.name, trabajan: trabajan.map((q) => q.name) } })
+  }
+
+  // ── 7. Llega alguien, y el valle deja de tener fecha de vencimiento ───────
+  //
+  // Es la contracara de la pasada 4 y la razón por la que este archivo dejó de
+  // ser una cuesta abajo. El porqué largo está en `llegaAlguien()` y la cuenta
+  // en `P_NACIMIENTO`; acá está la puerta, que es una fórmula y no un dado:
+  //
+  //   P = P_NACIMIENTO × (cupo − vivos) / (cupo − piso)
+  //
+  // Con el valle lleno da cero y con el valle en el piso da el triple que en
+  // equilibrio, así que un valle vacío se recompone y uno próspero no crece.
+  //
+  // **Va último y eso es una decisión.** Nada de lo que pasó hoy puede
+  // reaccionar a alguien que entró al valle al final del día: no se lo cruza el
+  // chusmerío de la pasada 5, no lo muerde el bicho de la 4b, no lo elige el
+  // sorteo de la 4 y no entra en el `people` de este tick. El valle se entera
+  // mañana, y se entera por donde tiene que enterarse — el recuerdo que deja el
+  // que lo vio llegar lo levanta el chusmerío en el próximo tick.
+  //
+  // **Ruido: un evento, siempre, y nada alrededor.** Una llegada es lo
+  // contrario de una muerte y el valle entero se entera, así que no lleva
+  // probabilidad. Lo que sí se calló es lo que la rodea: `abrirSiguienteMeta()`
+  // emite `agenda_nueva` y acá eso serían dos renglones para el mismo hecho, así
+  // que la meta se abre con el sumidero tapado y lo que hay que contar viaja
+  // adentro del evento de la llegada. Medido: **+0,010 eventos por tick**, que
+  // es exactamente una llegada cada 100 ticks y ni un evento más.
+  //
+  // El piso del `if` es cosmético —la fórmula ya da negativo— pero evita tirar
+  // el dado 250 veces por año para nada.
+  if (people.length < cupo) {
+    const hueco = (cupo - people.length) / Math.max(1, cupo - PISO_DEL_VALLE)
+    if (Math.random() < P_NACIMIENTO * hueco) {
+      await llegaAlguien({
+        regionId: region.id, tick: nextTick, people, players, places, ev,
+      })
     }
   }
 
   if (events.length > 0) await db.from('events').insert(events)
   await db.from('regions').update({ tick: nextTick }).eq('id', region.id)
 
-  console.log(`tick ${nextTick} ${populated ? '' : '(vacío, a un cuarto de paso) '}— ${events.length} eventos`)
+  console.log(`tick ${nextTick} ${populated ? '' : '(vacío, a un cuarto de paso) '}— ${events.length} eventos`
+    + (resueltas.length > 0 ? ` (${resueltas.length} acciones que habían quedado colgadas)` : ''))
   for (const e of events) console.log(`  · ${e.summary}`)
 }
 
-/** Lo próximo que va a perseguir alguien de ese oficio.
+// ─────────────────────────────────────────────────────────────
+// LAS METAS, Y POR QUÉ CADA UNA LLEVA DOS TEXTOS
+// ─────────────────────────────────────────────────────────────
+//
+// Una meta se escribe en infinitivo porque casi siempre se cuenta como un
+// deseo: «Ilde se puso a juntar carbón», «Ilde sigue sin conseguir lo que
+// necesita para juntar carbón». Eso siempre es verdad — que alguien quiera
+// algo es un hecho sobre esa persona.
+//
+// El problema aparece cuando el mismo infinitivo entra en un template que lo
+// AFIRMA. `X consiguió <goal>` con la meta *"morirse sin haberle enseñado la
+// runa de quietud a nadie"* produjo esto, y está en la base:
+//
+//     La vieja Ren consiguió morirse sin haberle enseñado la runa de quietud
+//     a nadie.
+//
+// Dos jugadores de producción recibieron la muerte de una NPC que está viva
+// (`people.alive = true`, cero eventos `muerte` en la región), y el director
+// encima le agregó "eso es un saber perdido", que tampoco pasó. **No fue una
+// alucinación del narrador: la simulación escribió esa frase.**
+//
+// Se arregla con las dos cosas a la vez, y hace falta que sean las dos:
+//
+//   1. **Las metas se redactan para que ningún template pueda mentir.** Reglas
+//      duras para el que agregue una:
+//        · nombra algo que conseguir o terminar — nunca un estado del cuerpo
+//          ni de la vida de esa persona (morirse, enfermarse, irse del valle);
+//        · sin negaciones ("sin haber...", "que no...");
+//        · no nombra a otra persona haciendo algo, porque entonces el evento
+//          afirma también sobre esa otra.
+//   2. **Nada afirma una meta si no está acá con su `logro`.** Es la red, y es
+//      la que aguanta de verdad: las metas del `seed` las escribe otro archivo
+//      y una región nueva puede traer mañana otra "morirse...". `COMO_SE_CUENTA`
+//      es una lista blanca: si una meta no figura, la simulación **no dice que
+//      pasó** — dice que la persona la dio por cerrada, y listo. Que la
+//      crónica pierda una frase es infinitamente más barato que una muerte
+//      inventada.
+type Meta = { goal: string; obj?: string; saber?: string; logro: string }
+
+/** El catálogo por oficio: lo próximo que va a perseguir alguien.
  *
  * `obj` es lo que convierte una meta en algo que un jugador puede cerrar. No
  * todas lo tienen a propósito: "dormir una noche entera" no se resuelve
@@ -590,43 +2739,838 @@ export async function step() {
  * ésas sólo las puede cerrar alguien que aprendió el oficio. Ahí está el bucle
  * entero en una línea de datos: aprendés → fabricás → regalás → te ganás a la
  * gente → te enseñan más.
+ *
+ * `logro` es cómo se cuenta cuando se cumplió. Está escrito a mano una por una
+ * y no sale de pegarle un verbo al infinitivo, porque pegarle un verbo al
+ * infinitivo es justo lo que rompió.
  */
-function siguienteMeta(trade: string, evitar?: string): { goal: string; obj?: string } {
-  const metas: Record<string, { goal: string; obj?: string }[]> = {
-    herrera: [
-      { goal: 'juntar carbón para el invierno', obj: 'carbón' },
-      { goal: 'rehacer las bisagras del granero', obj: 'hierro viejo' },
-    ],
-    aprendiz: [
-      { goal: 'ganarse que lo dejen tocar el yunque' },
-      { goal: 'pagar lo que debe', obj: 'frasco de raíz' },
-    ],
-    cazadora: [
-      { goal: 'marcar una senda nueva antes de las lluvias' },
-      { goal: 'curtir lo de esta semana' },
-      { goal: 'conseguir una piedra que le devuelva el filo', obj: 'piedra de afilar' },
-    ],
-    destiladora: [
-      { goal: 'conseguir raíz del Sotobosque', obj: 'raíz del Sotobosque' },
-      { goal: 'cobrar tres deudas viejas', obj: 'frasco de raíz' },
-    ],
-    guardia: [
-      { goal: 'conseguir que le paguen el mes' },
-      { goal: 'dormir una noche entera' },
-      { goal: 'conseguir un filo que no se le melle', obj: 'hoja templada' },
-    ],
-    'chico del camino': [
-      { goal: 'ver de cerca a alguien que sepa magia' },
-      { goal: 'juntar algo que valga para cambiar', obj: 'piedra de afilar' },
-    ],
-  }
-  const catalogo = metas[trade] ?? [{ goal: 'pasar el invierno sin deberle nada a nadie' }]
+/** El telar, en dos géneros. Los oficios de `METAS` son claves literales y las
+ *  metas están escritas a mano, así que «hilandero» e «hilandera» son dos
+ *  claves; el catálogo es uno solo y se comparte, que es lo contrario de
+ *  copiarlo dos veces y que se desincronicen.
+ *
+ *  Y hay un detalle que no es casual: éstas son las dos primeras metas del
+ *  archivo que piden algo de la ALDEA. `lino en rama` y `caña de la orilla`
+ *  estaban en `LO_QUE_DA_EL_LUGAR` desde el primer día y no las quería nadie,
+ *  así que revolver la aldea no servía para nada. Ahora sirve. */
+const HILADO: Meta[] = [
+  { goal: 'terminar la pieza que tiene en el telar',
+    logro: 'terminó la pieza que tenía en el telar' },
+  { goal: 'juntar lino para la pieza nueva', obj: 'lino en rama',
+    logro: 'juntó el lino para la pieza nueva' },
+  { goal: 'conseguir caña de la orilla para el bastidor', obj: 'caña de la orilla',
+    logro: 'consiguió la caña que le faltaba para el bastidor' },
+]
+
+/** El que trabaja para otros y no tiene oficio propio. Es el catálogo del que
+ *  llega al valle con las manos y nada más, y por eso ninguna de las tres pide
+ *  saber hacer nada: se cierran juntando, que es lo que puede hacer cualquiera
+ *  (ver el comentario largo arriba de `LO_QUE_DA_EL_LUGAR`). */
+const JORNAL: Meta[] = [
+  { goal: 'ganarse el jornal de la semana',
+    logro: 'se ganó el jornal de la semana' },
+  { goal: 'juntar leña antes de que baje el frío', obj: 'rama de roble',
+    logro: 'juntó la leña antes de que bajara el frío' },
+  { goal: 'conseguir una piedra que le devuelva el filo al hacha', obj: 'piedra de afilar',
+    logro: 'consiguió la piedra que le devuelve el filo al hacha' },
+]
+
+const METAS: Record<string, Meta[]> = {
+  herrera: [
+    { goal: 'juntar carbón para el invierno', obj: 'carbón',
+      logro: 'juntó el carbón que le faltaba para el invierno' },
+    { goal: 'rehacer las bisagras del granero', obj: 'hierro viejo',
+      logro: 'rehízo las bisagras del granero' },
+  ],
+  aprendiz: [
+    { goal: 'ganarse que lo dejen tocar el yunque',
+      logro: 'se ganó que lo dejen tocar el yunque' },
+    { goal: 'pagar lo que debe', obj: 'frasco de raíz',
+      logro: 'saldó lo que debía' },
+  ],
+  cazadora: [
+    { goal: 'marcar una senda nueva antes de las lluvias',
+      logro: 'dejó marcada la senda nueva antes de las lluvias' },
+    { goal: 'curtir lo de esta semana',
+      logro: 'terminó de curtir lo de esta semana' },
+    { goal: 'conseguir una piedra que le devuelva el filo', obj: 'piedra de afilar',
+      logro: 'consiguió la piedra que le devuelve el filo' },
+  ],
+  destiladora: [
+    // Decía «conseguir raíz del Sotobosque» y el template escupía «Odila
+    // consiguió conseguir raíz del Sotobosque». Está en la base, tick 65.
+    { goal: 'traer raíz del Sotobosque', obj: 'raíz del Sotobosque',
+      logro: 'consiguió la raíz del Sotobosque que andaba buscando' },
+    // Era «cobrar tres deudas viejas» y pedía un frasco: el encargo salía
+    // «Odila le encargó a Pedro cobrar tres deudas viejas: le hace falta
+    // frasco de raíz», que no se entiende. Ahora la deuda ES el frasco.
+    { goal: 'recuperar los tres frascos que le deben', obj: 'frasco de raíz',
+      logro: 'recuperó los frascos que le debían' },
+  ],
+  guardia: [
+    { goal: 'conseguir que le paguen el mes',
+      logro: 'consiguió que le pagaran el mes' },
+    { goal: 'dormir una noche entera',
+      logro: 'durmió una noche entera de un tirón' },
+    { goal: 'conseguir un filo que no se le melle', obj: 'hoja templada',
+      logro: 'consiguió un filo que no se le mella' },
+  ],
+  'chico del camino': [
+    // `saber` es nuevo y viene con la pasada 2. Hasta que las agendas no
+    // ejecutaron verbos no había forma de perseguir un saber —el contador
+    // cerraba la meta igual—, así que el catálogo no lo podía expresar y ésta
+    // se cumplía **trabajando**: el valle anunciaba «Tobio vio de cerca a
+    // alguien que sabe magia» sin que nadie le hubiera mostrado una runa.
+    // Es el mismo agujero que la lista blanca tapa del lado de la frase,
+    // ahora tapado del lado del hecho. El slug es el del `seed`; si no
+    // existiera, la meta vuelve a ser una de trabajar y no se rompe nada.
+    { goal: 'ver de cerca a alguien que sepa magia', saber: 'runa-de-brasa',
+      logro: 'vio de cerca a alguien que sabe magia' },
+    { goal: 'juntar algo que valga para cambiar', obj: 'piedra de afilar',
+      logro: 'juntó algo que le sirve para cambiar' },
+  ],
+  // Los tres oficios de la gente que llega (`por_llegar`). Entran acá y no en
+  // otro lado porque `COMO_SE_CUENTA` se arma con `Object.values(METAS)`: una
+  // meta que no pasa por esta tabla no tiene `logro`, y sin `logro` la
+  // simulación no afirma que se cumplió. Ésa es la lista blanca, y es la que
+  // evitó que un template genérico matara a una NPC viva.
+  hilandera: HILADO,
+  hilandero: HILADO,
+  jornalera: JORNAL,
+}
+
+const META_POR_DEFECTO: Meta = {
+  goal: 'pasar el invierno sin deberle nada a nadie',
+  logro: 'pasó el invierno sin deberle nada a nadie',
+}
+
+/** Lo primero que persigue el que llega al valle, y no está en `METAS` porque
+ *  no depende de su oficio: depende del valle.
+ *
+ *  `needs_id` no se puede escribir acá —lo elige `llegaAlguien()` mirando qué
+ *  saber tiene menos cabezas vivas hoy—, así que esta constante lleva sólo el
+ *  texto. El `logro` entra igual a `COMO_SE_CUENTA` y por eso la simulación
+ *  puede afirmar que se cumplió.
+ *
+ *  Cumple las tres reglas de redacción: nombra algo que conseguir, no lleva
+ *  negaciones, y dice «alguien» en vez del nombre de una persona — que es lo
+ *  que evita que el cierre afirme también sobre el que enseñó, cuando puede
+ *  haber sido un jugador. */
+const META_DEL_QUE_LLEGA: Meta = {
+  goal: 'que alguien le enseñe un oficio',
+  logro: 'consiguió que alguien le enseñara un oficio',
+}
+
+/** Cómo se cuenta que una meta se cumplió. Lista blanca: lo que no está acá,
+ *  no se afirma.
+ *
+ * Incluye las metas que siembra `seed.ts` —ese archivo tiene otro dueño y las
+ * suyas son buenas— **menos una a propósito**: *"morirse sin haberle enseñado
+ * la runa de quietud a nadie"* no está y no va a estar. No es una meta, es una
+ * postura: la simulación no la puede cumplir, no hay contador que la vuelva
+ * verdadera, y cualquier frase que la afirme mata a una NPC viva. Mientras
+ * siga en el `seed`, cerrarla no dice nada. (Recomendación al dueño de
+ * `seed.ts`: sacarla y darle a Ren una meta de verdad — la deja igual de
+ * trágica y encima jugable, «que alguien aprenda la runa de quietud antes de
+ * que sea tarde».)
+ */
+const COMO_SE_CUENTA: Record<string, string> = {
+  ...Object.fromEntries(
+    [...Object.values(METAS).flat(), META_POR_DEFECTO, META_DEL_QUE_LLEGA]
+      .map((m) => [m.goal, m.logro])),
+  // Las del seed.
+  'rehacer el yunque partido antes de que baje el frío':
+    'rehízo el yunque partido antes de que bajara el frío',
+  // Ojo con ésta: la meta nombra a Ilde, pero el cierre se dispara con que
+  // Bruno SEPA el temple de río, y se lo puede haber enseñado un jugador. Si
+  // el `logro` dijera "se lo mostró Ilde", la simulación estaría inventando
+  // quién enseñó. Se cuenta lo que sí es verdad: que ya lo sabe.
+  'que Ilde le muestre el temple de río':
+    'aprendió por fin el temple de río',
+  'encontrar el claro que vio una vez y no volvió a encontrar':
+    'volvió a dar con el claro que había visto una sola vez',
+  'cobrarle a Bruno lo del invierno pasado':
+    'le cobró a Bruno lo del invierno pasado',
+  'que alguien le pague la guardia de este mes':
+    'consiguió que le pagaran la guardia del mes',
+  'ver de cerca a alguien que sepa magia':
+    'vio de cerca a alguien que sabe magia',
+  // Dos redacciones viejas que siguen vivas en `agendas` de las dos regiones.
+  // Sin esto, las que están a mitad de camino se cierran con la frase vaga.
+  // Se pueden borrar cuando no quede ninguna activa con estos textos.
+  'conseguir raíz del Sotobosque':
+    'consiguió la raíz del Sotobosque que andaba buscando',
+  'cobrar tres deudas viejas':
+    'cobró las tres deudas viejas',
+  'conseguir un yunque nuevo':
+    'consiguió el yunque nuevo',
+}
+
+/** La frase de "esto se cumplió", o null si la meta no es afirmable.
+ *
+ * `null` no es un caso raro que se pueda ignorar: es la respuesta correcta
+ * para toda meta que este archivo no escribió. Quien la reciba tiene que
+ * contar el cierre **sin repetir la meta**. */
+export function comoSeCuenta(goal: string): string | null {
+  return COMO_SE_CUENTA[goal] ?? null
+}
+
+/** Lo próximo que va a perseguir alguien de ese oficio. */
+function siguienteMeta(trade: string, evitar?: string): Meta {
+  const catalogo = METAS[trade] ?? [META_POR_DEFECTO]
   // Nunca la misma que acaba de terminar. Sin esto el sorteo repetía la meta y
   // el valle quedaba con «Ilde consiguió juntar carbón» / «Ilde se puso a
   // juntar carbón» tres ticks seguidos: no es un mundo que avanza, es un disco
   // rayado, y el director cobra por leerlo.
   const otras = catalogo.filter((m) => m.goal !== evitar)
   return pick(otras.length ? otras : catalogo)!
+}
+
+/** A quién le toca, cuando le toca a alguien.
+ *
+ * **No cambia la tasa de muerte ni un punto** —eso lo decide `P_MUERTE` y ya
+ * se tiró el dado antes de llamar acá—; cambia sólo QUIÉN, y pesa más al que
+ * es el último que sabe algo.
+ *
+ * El porqué: la tesis del juego es *el saber vive en gente que se muere*, y el
+ * evento que la demuestra no es `muerte`, es `perdida_de_saber`. Con sorteo
+ * uniforme en un valle de siete donde dos son los últimos de lo suyo, sólo el
+ * 29% de las muertes se lleva algo puesto; con peso 3 son el 55%. **Se duplica
+ * la cosecha del experimento sin agregar un solo muerto**, que es la única
+ * palanca honesta que hay acá: la ventana del test (28 días de valle) es
+ * demasiado corta para que una tasa demográficamente sana dispare, así que lo
+ * que queda es hacer que cuando dispare, importe.
+ *
+ * Y narrativamente es lo correcto además de lo conveniente: el valle no pierde
+ * a cualquiera, pierde lo que sólo una persona cargaba.
+ *
+ * Se consulta `knows` entero, sin filtro: es una tabla chica y esto corre en
+ * el 0,8% de los ticks, sólo cuando ya se sabe que alguien se muere.
+ */
+async function elQueSeVa(
+  people: { id: string; name: string; trade: string; place_id: string | null }[],
+  players: { id: string }[],
+) {
+  // Filtrado en el servidor por el tope mudo de 1.000 filas de PostgREST (está
+  // explicado entero arriba, en `saberesDe`). Acá el recorte sería peor que en
+  // ningún otro lado: si se pierden las filas del último que sabe algo, deja
+  // de contar como el último, pierde el peso ×3 y el sorteo se lleva a otro.
+  // O sea que la escasez se apagaría sola, en silencio, al crecer la tabla.
+  const todos = (await db
+    .from('knows').select('holder_kind, holder_id, knowledge_id')
+    .in('holder_id', [...people.map((p) => p.id), ...players.map((p) => p.id)])).data ?? []
+  // Un saber sigue en el valle si lo tiene alguien vivo DE ACÁ o un jugador DE
+  // ACÁ. Éste era el cuarto lugar del archivo que contaba gente de otro valle:
+  // decía `holder_kind !== 'player' && !vivo.has(...)`, o sea que un jugador de
+  // `valle-primero` contaba como portador en `valle-pruebas` e impedía que un
+  // NPC de acá fuera "el último" — perdía el peso ×3 y el sorteo se llevaba a
+  // cualquiera en vez de al que cargaba algo solo. No se medía todavía, porque
+  // ningún jugador de la otra región sabe nada que acá sepa uno solo, pero es
+  // el mismo error que ya suprimió un `perdida_de_saber` de verdad. Los otros
+  // tres ya los había resuelto `siguenEnElValle`; éste faltaba.
+  const portadores = new Map<string, string[]>()
+  for (const k of siguenEnElValle(todos, people, players)) {
+    const xs = portadores.get(k.knowledge_id) ?? []
+    xs.push(k.holder_id)
+    portadores.set(k.knowledge_id, xs)
+  }
+  const esElUltimo = (id: string) =>
+    [...portadores.values()].some((xs) => xs.length === 1 && xs[0] === id)
+
+  const bolillero: typeof people = []
+  for (const p of people) {
+    const veces = esElUltimo(p.id) ? PESO_DEL_ULTIMO : 1
+    for (let i = 0; i < veces; i++) bolillero.push(p)
+  }
+  return pick(bolillero)
+}
+
+/**
+ * Se muere alguien, y el valle pierde lo que sólo esa persona cargaba.
+ *
+ * **Es el único lugar donde se muere gente**, y eso es el punto: hay dos formas
+ * de irse de este valle —el sorteo de la pasada 4 y una salida que no vuelve— y
+ * las dos tienen que dejar exactamente el mismo rastro. Lo único que cambia
+ * entre las dos es la frase, que la trae quien llama en `evento`.
+ *
+ * Lo que hace, y son cuatro cosas que van juntas o no van:
+ *
+ *   1. baja la bandera (`alive = false`, `died_tick`) **y saca a la persona de
+ *      la lista viva del tick**, que es lo que hace que en lo que queda del día
+ *      no defienda a nadie, no chusmee, no le enseñe a nadie y no la vuelva a
+ *      elegir el sorteo de la muerte;
+ *   2. cuenta la muerte;
+ *   3. **`perdida_de_saber` por cada cosa que se llevó puesta**, que es el
+ *      evento del que cuelga la tesis del juego y por eso no puede estar
+ *      escrito dos veces. Se apoya en `siguenEnElValle`, y ahí hay dos silencios
+ *      ya pagados: las filas de `knows` de un muerto no se borran nunca, así
+ *      que "queda otro que lo sabe" era falso apenas alguien más se hubiera
+ *      muerto con ese saber encima; y `holder_kind === 'player'` daba por vivo
+ *      a cualquier jugador de la base, así que **un portador fantasma de otro
+ *      valle suprimía el evento entero**;
+ *   4. le cierra las metas abiertas. No abre la siguiente, obviamente, y no
+ *      emite `agenda_soltada`: nadie soltó nada.
+ *
+ * El `excluir` de `siguenEnElValle` no hace falta acá porque el muerto ya salió
+ * de `people` en el paso 1 — antes hacía falta porque `people` se leía al
+ * principio del tick y el muerto seguía adentro.
+ */
+async function seMuere(args: {
+  tick: number
+  muerto: { id: string; name: string }
+  /** La lista viva del tick. **Se modifica**: ver el paso 1. */
+  people: { id: string }[]
+  players: { id: string }[]
+  ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
+  /** Cómo se cuenta esta muerte. Es lo único que difiere entre las dos formas
+   *  de irse, y por eso lo trae quien llama en vez de decidirse acá. */
+  evento: Omit<Ev, 'region_id' | 'tick'>
+}) {
+  const { tick, muerto, people, players, ev } = args
+
+  await db.from('people')
+    .update({ alive: false, died_tick: tick }).eq('id', muerto.id)
+  const i = people.findIndex((p) => p.id === muerto.id)
+  if (i >= 0) people.splice(i, 1)
+
+  ev(args.evento)
+
+  const tenia = (await db
+    .from('knows').select('knowledge_id')
+    .eq('holder_kind', 'person').eq('holder_id', muerto.id)).data ?? []
+
+  for (const k of tenia) {
+    const otros = (await db
+      .from('knows').select('holder_id, holder_kind')
+      .eq('knowledge_id', k.knowledge_id)
+      .neq('holder_id', muerto.id)).data ?? []
+    if (siguenEnElValle(otros, people, players).length > 0) continue
+    const { data: info } = await db
+      .from('knowledge').select('name').eq('id', k.knowledge_id).single()
+    ev({ kind: 'perdida_de_saber',
+      summary: `Con ${muerto.name} se fue ${info?.name}. No queda nadie en el valle que lo sepa.`,
+      detail: { person: muerto.name, knowledge: info?.name } })
+  }
+
+  await db.from('agendas')
+    .update({ state: 'abandonada', ended_tick: tick })
+    .eq('person_id', muerto.id).eq('state', 'activa')
+}
+
+/**
+ * Llega alguien al valle, y por primera vez el valle puede subir.
+ *
+ * **Es el único lugar donde entra gente**, igual que `seMuere` es el único
+ * donde sale, y por el mismo motivo: el día que haya dos, van a divergir.
+ *
+ * ── Por qué llega gente y no nacen bebés ──────────────────────────────────
+ *
+ * `DISENO.md` §9.2 dice *"viven, mueren y nacen"* y la función que le pide a
+ * los nacimientos es una sola: que una región sin jugadores deje de
+ * despoblarse. **Un bebé no puede darla a esta escala de tiempo.** Un tick es
+ * un día; el chico de doce de §"la gente vive su propia vida" está a 4.380
+ * ticks de nacer, o sea **tres años reales de una fila inerte**, y en el medio
+ * el director narraría a un recién nacido volviendo del Sotobosque con carbón.
+ * El juego además no tiene edad: nadie envejece, los siete del `seed` tienen
+ * `born_tick = 0` y Ren lleva la cuenta de sus inviernos en la biografía y no
+ * en una columna.
+ *
+ * Lo que sí puede dar esa función ya estaba escrito en la geografía. §7.4: la
+ * cordillera tiene **una sola abertura, al norte**, por donde entra El Camino
+ * del Norte, y *"cuando el mundo crezca, crece por ahí"*. Y en esa abertura ya
+ * vive alguien cuyo oficio entero es saber quién entró y quién salió. Así que
+ * el valle se recompone por su única puerta, con gente que puede trabajar hoy,
+ * y quien estaba ahí ese día lo vio.
+ *
+ * Que esto no es la versión barata de los nacimientos se ve en lo que NO
+ * habilita: no hay linaje, no hay padres, no hay apellido que el mundo
+ * recuerde. Eso es §8.5 y es una tarea aparte, escrita al final de este
+ * comentario.
+ *
+ * ── Quién es, y por qué no lo arma este archivo ───────────────────────────
+ *
+ * §9.2: un NPC es identidad, historia y voz propia. El valle tiene siete
+ * personas escritas a mano que se distinguen tapando el nombre, y ésa es la
+ * vara: un habitante armado con plantillas en tiempo de tick es un maniquí con
+ * nombre. Y este archivo **no puede llamar a un modelo**, ni de rebote, así que
+ * tampoco puede escribir una voz.
+ *
+ * Entonces la voz no se escribe acá: **ya está escrita**, en `por_llegar`, por
+ * el autor y antes de tiempo. Es literalmente lo que describe `DISENO.md` en
+ * "La gente vive su propia vida": *"el autor corre cada tanto, lee lo que pasó,
+ * y escribe hechos nuevos en la base... No narra: siembra. Después la
+ * simulación los ejecuta sola, determinista."* El precedente vivo es
+ * `saludos.ts`, que corre por su propio cron y guarda texto de modelo en
+ * `people.saludos` para que el tick y la web lo sirvan sin llamar a nadie.
+ *
+ * El reparto es el mismo que separa al tick del director y no se cruza:
+ *
+ *   · **el autor decide QUIÉN** — nombre, oficio, carácter, voz, procedencia y
+ *     la mitad de la historia que es de antes del valle;
+ *   · **la simulación decide TODO LO DEMÁS** — si llega alguien, cuándo, por
+ *     dónde, quién estaba ahí para verlo, qué se encontró al llegar, y qué
+ *     empieza a perseguir. Nada de eso sale de un dado suelto: sale del hueco
+ *     que dejó la muerte, de la geografía y de lo que el valle ya perdió.
+ *
+ * Cuando se acaba el catálogo, no llega nadie más y queda dicho en el log. Es
+ * la señal de que le toca al autor, no un fallo silencioso.
+ *
+ * ── Qué sabe, y acá está la tensión central del juego ─────────────────────
+ *
+ * **Nada. `knows` se queda vacío.** Es la respuesta a §8 y hay que decir las
+ * dos mitades, porque las dos son trampas:
+ *
+ *   · Si llegara sabiendo un oficio, la muerte de Ilde dejaría de costar algo:
+ *     el valle repondría el temple de río esperando sentado, y la escasez —lo
+ *     único que este juego vende— sería decorativa. §8.1 es explícito: el saber
+ *     *"se pierde con la última persona que lo tenía"*. Si se recupera solo, no
+ *     se perdió.
+ *   · Si llegara sin nada y eso fuera todo, el valle se llenaría de gente
+ *     inútil y el saber igual sólo bajaría.
+ *
+ * La salida no está en lo que trae, está en **lo que habilita**. §8.2: aprender
+ * es la única operación del juego donde *"al terminar, dos personas saben"* — es
+ * lo único que multiplica el saber en vez de moverlo. Y esa maquinaria ya está
+ * entera: la enseñanza espontánea de la pasada 3 y la buscada de `irAAprender`.
+ * Lo que le faltaba no era una regla: **le faltaba a quién enseñarle.** El
+ * sorteo espontáneo elige un maestro y un alumno y busca algo que el alumno no
+ * tenga; en un valle de cuatro donde los cuatro ya saben lo mismo, no encuentra
+ * nada y no pasa nada. Una cabeza vacía vuelve a encender esa máquina, y ahí
+ * está la pista de las bases hecha sistema: *cualquiera puede aprender
+ * cualquier cosa*, y un chico de doce puede terminar siendo el herrero.
+ *
+ * Lo medible, que es lo único que vale: los nacimientos no suben el número de
+ * saberes distintos del valle —eso sigue sin poder subir, y está bien que
+ * siga— pero suben los **portadores por saber**, que es lo que decide si el
+ * próximo muerto se lleva algo puesto. La curva deja de bajar porque la
+ * redundancia le gana a la mortalidad.
+ *
+ * **Y `trade` no es `knows`.** El oficio es un papel social; el saber es la
+ * receta. El precedente son dos de los mejores personajes del `seed`: Sarn es
+ * guardia y no sabe hacer absolutamente nada, Tobio es el chico del camino y
+ * tampoco. Nadie los llamaría maniquíes, y ninguno de los dos puede fabricar un
+ * clavo.
+ *
+ * ── El valle tiene que valer la pena, y eso también sale del estado ───────
+ *
+ * La probabilidad de la puerta dice si hay LUGAR. Acá, en la segunda etapa, se
+ * pregunta si hay MOTIVO, y la respuesta es **cuánto de lo que este valle supo
+ * sigue en pie**:
+ *
+ *      atractivo = saberes vivos / saberes que el valle llegó a tener
+ *
+ * Un valle que conserva lo suyo atrae a todo el que quepa. Uno que perdió la
+ * mitad atrae a la mitad, y su equilibrio baja con él. Eso hace dos cosas que
+ * ninguna constante haría: **la espiral de la muerte sigue existiendo** —un
+ * jugador que se lleva puestos a todos los maestros no sólo roba el saber, deja
+ * un valle al que ya no viene nadie, y eso es §8.2 con consecuencia
+ * demográfica— y **el valle nunca resucita lo que perdió**: la gente que llega
+ * repone cabezas, jamás recetas.
+ *
+ * Se calcula acá adentro y no en la puerta porque cuesta dos consultas y la
+ * puerta se cruza el 1% de los ticks. Multiplicar dos probabilidades en dos
+ * etapas es lo mismo que multiplicarlas en una, y cuesta cien veces menos.
+ *
+ * ── Lo que quedó afuera, dicho para que no lo reinvente nadie ─────────────
+ *
+ *   · **El linaje (§8.5).** Un recién llegado no tiene padres en el valle y no
+ *     carga ningún apellido. Los nacimientos de verdad —dos personas del valle,
+ *     un hijo que hereda acceso, historia y deuda— son otra tarea y necesitan
+ *     una columna de edad y una de padres.
+ *   · **Que traiga un saber que el valle NUNCA tuvo.** Es legítimo y no rompe
+ *     nada —§8 sólo prohíbe recuperar lo perdido, no importar lo ajeno— y sería
+ *     la única forma de que el repertorio de una región crezca. No entró acá a
+ *     propósito: mover la escasez y arreglar la demografía en la misma pasada
+ *     deja la próxima medición sin poder atribuir nada.
+ *   · **Escribirle la voz con un modelo.** Hoy la voz la escribe el autor a
+ *     mano y viene en la fila. El día que el catálogo se agote, el que lo
+ *     rellene tiene que correr por su propio cron y guardar, como
+ *     `saludos.ts` — nunca desde acá.
+ */
+async function llegaAlguien(args: {
+  regionId: string
+  tick: number
+  /** La lista viva del tick. **No se modifica**: quien llega hoy no hace nada
+   *  hoy. Ver por qué esto va último en el bloque 7 de `step()`. */
+  people: { id: string; name: string; place_id: string | null; teaches: boolean }[]
+  players: { id: string }[]
+  places: { id: string; name: string; kind: string }[]
+  ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
+}): Promise<boolean> {
+  const { regionId, tick, people, players, places, ev } = args
+
+  // ── 1. ¿El valle tiene con qué? ───────────────────────────
+  //
+  // Toda la gente que pasó por acá, viva y muerta. Los muertos son el dato:
+  // las filas de `knows` de un muerto no se borran nunca, y en las tres
+  // decisiones anteriores de este archivo eso era una molestia que había que
+  // filtrar. Acá es justo lo que hace falta — son las únicas que saben qué
+  // llegó a saber este valle.
+  const todaLaGente = (await db
+    .from('people').select('id, name').eq('region_id', regionId)).data ?? []
+
+  // **El filtro por `holder_id` va en el SERVIDOR y no acá, y eso no es una
+  // optimización: es lo único que hace que la respuesta sea correcta.**
+  //
+  // `knows` es global —no tiene `region_id`— y encima es polimórfica, así que
+  // no tiene foreign key: **borrar una región no borra sus filas de saber.**
+  // Quedan huérfanas para siempre. Y PostgREST corta toda respuesta en **1.000
+  // filas sin avisar**, así que un `select()` sin filtro sobre esta tabla
+  // devuelve una ventana arbitraria en cuanto la base pasa ese número, y
+  // filtrar en memoria después es filtrar una muestra.
+  //
+  // Se vio y se midió el 17 de agosto, con la tabla en 1.779 filas: `count` real
+  // 1.779, `select()` 1.000. **No hay error, no hay aviso, y la lectura queda
+  // muda exactamente igual que un `grep` sobre un archivo binario.** Un valle
+  // entero se leía sin un solo portador y el atractivo daba cero.
+  //
+  // ⚠ Hay al menos cuatro lecturas de `knows` sin filtro más viejas que ésta en
+  // este archivo —`saberesDe` en la pasada 2, `elQueSeVa`, `cuantosLoSaben` y
+  // `quienLoSabeHacer`— y tienen el mismo agujero. No se tocaron en esta tarea
+  // porque cambiarlas mueve el comportamiento de las agendas y no había con qué
+  // volver a medirlas; está anotado como lo que es.
+  const ids = [...todaLaGente.map((p) => p.id), ...players.map((p) => p.id)]
+  const knows = ids.length === 0 ? [] : (await db
+    .from('knows').select('holder_kind, holder_id, knowledge_id')
+    .in('holder_id', ids)).data ?? []
+
+  // La rama `people` de `holder_kind` —la lengua de un pueblo, de la migración
+  // de pueblos— no cuenta de ningún lado: no es saber humano de este valle, ni
+  // lo fue nunca. Un `people_id` no puede colisionar con un `person_id`, así
+  // que el `.in()` de arriba ya la deja afuera; el filtro explícito se queda
+  // igual, porque es la clase de suposición que envejece mal.
+  const deAca = new Set(todaLaGente.map((p) => p.id))
+  const deEllos = new Set(players.map((p) => p.id))
+  const hubo = new Set(knows
+    .filter((k) => k.holder_kind === 'person' ? deAca.has(k.holder_id)
+      : k.holder_kind === 'player' ? deEllos.has(k.holder_id) : false)
+    .map((k) => k.knowledge_id))
+  // Lo que sigue en pie sale del predicado de siempre, que es el que filtra por
+  // región Y por vivo. No hay una cuarta forma de contar portadores.
+  const enPie = new Set(siguenEnElValle(knows, people, players).map((k) => k.knowledge_id))
+
+  //
+  // **Entre la mitad y el todo, y el piso de la mitad no es cosmético.** La
+  // primera versión usaba la razón pelada y se midió: el valle se estabilizaba
+  // en 6,25 y seguía bajando despacio, porque la realimentación se muerde la
+  // cola —menos saber, menos gente, menos cabezas para copiarlo, menos saber—
+  // y arrastraba el equilibrio hacia abajo con ella. Medido, 8 valles × 600
+  // ticks: 7,38 en el tick 100 y 6,25 en el 600, sin plano a la vista.
+  //
+  // Y además decía algo falso: que a un valle sin herrero no se mudaría nadie.
+  // A un valle se viene por la tierra, por el trabajo y porque hay dónde
+  // dormir, no sólo por quién enseña. Lo que el saber cambia es cuánta gente
+  // sostiene, no si sostiene gente.
+  //
+  // Con el piso en la mitad, la consecuencia sigue entera y deja de ser una
+  // espiral: un valle que perdió TODO su saber vale la mitad y su equilibrio
+  // baja de siete a menos de seis, para siempre. El que se lleva puestos a los
+  // maestros no roba nada más: deja un lugar más chico.
+  const atractivo = hubo.size === 0 ? 1 : 0.5 + 0.5 * (enPie.size / hubo.size)
+  if (Math.random() >= atractivo) return false
+
+  // ── 2. ¿Queda alguien por llegar? ─────────────────────────
+  //
+  // El catálogo es global y el descarte es por región y por NOMBRE, no por una
+  // columna de "usado": lo que no puede pasar es que el valle reciba a alguien
+  // que ya vivió acá. Y muy en particular que reciba a un muerto — «llegó Ilde
+  // por el camino» sería la peor frase que este juego pueda producir, y sale
+  // gratis evitarla contando también a los muertos.
+  const catalogo = (await db.from('por_llegar')
+    .select('name, trade, llega, disposition, voice, procedencia, historia, teaches')).data ?? []
+  const usados = new Set(todaLaGente.map((p) => p.name))
+  const quien = pick(catalogo.filter((a) => !usados.has(a.name)))
+  if (!quien) {
+    // No es un fallo silencioso: es el pedido de trabajo al autor. Cae en el
+    // log del cron, que es donde se mira.
+    console.warn('por_llegar: el catálogo se agotó para esta región.'
+      + ' El valle deja de recomponerse hasta que alguien escriba gente nueva.')
+    return false
+  }
+
+  // ── 3. Por dónde entra ────────────────────────────────────
+  //
+  // §7.4: una sola abertura, al norte. Si una región no tuviera camino, entra
+  // por donde vive la gente; y si no tuviera ni eso, no entra.
+  const donde = places.find((p) => p.kind === 'camino')
+    ?? places.find((p) => p.kind === 'aldea') ?? places[0]
+  if (!donde) return false
+
+  // ── 4. Con qué se encontró ────────────────────────────────
+  //
+  // Lo que el valle ya había perdido cuando llegó. Es la mitad de la biografía
+  // que este archivo sí puede escribir, porque no la inventa: sale de restar
+  // dos conjuntos que ya están calculados, y cada nombre de esa lista tiene
+  // detrás un `perdida_de_saber` en `events`. Es la tesis del juego escrita en
+  // la ficha de alguien que ni siquiera estaba.
+  const perdidos = [...hubo].filter((id) => !enPie.has(id))
+  const nombresPerdidos = perdidos.length === 0 ? [] : ((await db
+    .from('knowledge').select('name').in('id', perdidos)).data ?? []).map((k) => k.name)
+
+  // ── 4b. Dónde va a dormir, y a qué hora se levanta ────────
+  //
+  // Entra por el camino y se queda: la casa es la aldea, que es donde están las
+  // doce casas. No se le inventa una casa propia —eso lo decide el autor el día
+  // que alguien construya— pero tampoco se la deja sin ninguna, porque quien no
+  // tiene casa duerme parado donde lo dejó el día y eso es justo lo que esta
+  // tarea vino a sacar. Si el valle no tuviera aldea, duerme donde llegó.
+  //
+  // El horario sale de `horarios` por su oficio, y se guarda resuelto en la
+  // fila: ver `jornadaDe()`. Un guardia que llega hoy hace la noche desde la
+  // primera noche, sin que nadie lo cablee.
+  const casa = places.find((p) => p.kind === 'aldea') ?? donde
+  const jornada = await jornadaDe(quien.trade)
+
+  // ── 5. La fila ────────────────────────────────────────────
+  const historia = quien.historia
+    + ` Llegó al valle por ${donde.name} sin conocer a nadie.`
+    + (nombresPerdidos.length > 0
+      ? ` Cuando llegó, el valle ya había perdido ${yLista(nombresPerdidos)}.`
+      : '')
+  const { data: nuevo } = await db.from('people').insert({
+    region_id: regionId, place_id: donde.id,
+    home_place_id: casa.id,
+    jornada_desde: jornada.desde, jornada_hasta: jornada.hasta,
+    name: quien.name, trade: quien.trade, disposition: quien.disposition,
+    voice: quien.voice, procedencia: quien.procedencia, historia,
+    teaches: quien.teaches,
+    // La única marca de que ésta no es una de las del generador. `saludos_de`
+    // queda en null, así que el cron de `saludos.ts` le escribe las dieciocho
+    // líneas al pasar, sin que nadie tenga que acordarse.
+    born_tick: tick,
+  }).select('id, name, trade, place_id').single()
+  if (!nuevo) return false
+
+  // ── 6. Quién lo vio llegar ────────────────────────────────
+  //
+  // Sale del estado: quien estuviera en esa punta del valle ese día, y nadie
+  // más. El recuerdo es lo que hace que el valle se entere — el chusmerío de la
+  // pasada 5 lo levanta en el próximo tick y lo reparte, que es exactamente
+  // cómo se entera un pueblo de que llegó alguien. Y le deja al recién llegado
+  // el único vínculo que tiene: los mismos dos puntos que deja un saludo.
+  const testigo = pick(people.filter((p) => p.place_id === donde.id))
+  if (testigo) {
+    await recordarEntre(testigo.id, nuevo.id,
+      `${nuevo.name} llegó al valle por ${donde.name} y se quedó`, tick)
+    await tocarVinculoEntre(testigo.id, nuevo.id, 2, TOPE_DE_TRATO)
+    await tocarVinculoEntre(nuevo.id, testigo.id, 2, TOPE_DE_TRATO)
+  }
+
+  // ── 7. Lo primero que persigue: que le enseñen ────────────
+  //
+  // **Ésta es la mitad que hace que el saber deje de bajar, y sin ella la otra
+  // mitad no alcanza.** Está medido y la primera versión de esta tarea lo tenía
+  // mal: con la llegada sola, ocho valles × 600 ticks recomponían la población
+  // hasta siete y el saber seguía cayendo igual — 3,00 saberes vivos con
+  // jugador, 2,38 sin nadie, contra 3,50 y 2,63 del brazo viejo. **La población
+  // se arreglaba y la escasez no.**
+  //
+  // El porqué salió del desglose de eventos y es concreto: la enseñanza casi no
+  // se movió (0,0108 → 0,0144 por tick con jugador; 0,0015 → 0,0017 sin nadie)
+  // aunque de golpe hubiera cuatro o cinco cabezas vacías dando vueltas. Las dos
+  // vías de enseñar tienen cada una su freno y ninguno lo destraba la población:
+  //
+  //   · la ESPONTÁNEA es un sorteo que exige maestro y alumno en el mismo lugar
+  //     el mismo día. Más gente sube un poco los encuentros y nada más;
+  //   · la BUSCADA —`irAAprender`, que es la buena, la que tiene motivo y cierra
+  //     una meta— **sólo arranca si a alguien le falta un saber para su meta**.
+  //     Y las metas de los oficios nuevos piden cosas, no saberes. Así que los
+  //     recién llegados eran cabezas vacías que nadie iba a llenar: gente
+  //     inútil, que es exactamente la mitad de la trampa de §8 que había que
+  //     esquivar.
+  //
+  // Entonces la primera meta del que llega **no sale del catálogo de su
+  // oficio**: sale del estado del valle, y es aprender **lo que está a una
+  // muerte de perderse** — el saber vivo que menos cabezas tiene hoy. No hay
+  // dado en esa elección; el dado sólo desempata.
+  //
+  // Es la pista de las bases hecha sistema: *cualquiera puede aprender
+  // cualquier cosa*, y el sistema para que un chico de doce termine siendo el
+  // herrero ya estaba entero — lo que faltaba era alguien a quien le hiciera
+  // falta usarlo. Y es §8.2 sin adornos: aprender es la única operación del
+  // juego donde **al terminar, dos personas saben**.
+  //
+  // Que sea el MÁS RARO y no uno al azar es lo que la vuelve regenerativa en
+  // vez de decorativa: cada llegada le suma una cabeza justo al saber que está
+  // por caerse, en vez de repartir al voleo sobre los que ya están a salvo. Y
+  // no diluye la escasez, porque suma de a uno y sólo donde hace falta: sobre
+  // 600 ticks son unas cinco cabezas nuevas contra unas cuarenta muertes.
+  //
+  // Si el saber más raro lo tiene alguien que no enseña —Ren y sus dos runas—,
+  // la meta se traba y termina saliendo por `P_SUELTA`, y eso está bien: es la
+  // historia de siempre contada desde el otro lado, y le abre la puerta al
+  // jugador, que sí puede enseñar.
+  //
+  // Cuando la cierra, `cumplirAgenda` le abre la que sigue del catálogo de su
+  // oficio y esta persona pasa a ser una más del valle.
+  // **Y el más frágil DE LOS QUE ALGUIEN ENSEÑA.** El «de los que alguien
+  // enseña» tampoco es cosmético y también salió de una corrida, no de la
+  // cabeza: la primera versión apuntaba al más raro a secas, y el más raro es
+  // casi siempre una de las dos runas de Ren, que tiene `teaches = false`. O
+  // sea que el recién llegado se pasaba semanas detrás de algo que nadie le iba
+  // a enseñar y la meta terminaba en `abandonada` por `P_SUELTA`. Medido sobre
+  // ocho valles × 600 ticks: **las seis metas de aprendizaje que se ven en las
+  // filas terminaron todas abandonadas** —progresos 0, 16, 32, 75, 75, 75— y de
+  // yapa inflaban el ruido (`agenda_estancada` 0,0029 → 0,0217 por tick).
+  //
+  // El que llega pregunta y aprende lo que hay para aprender; no se obsesiona
+  // con el secreto que la vieja no suelta. Y las runas siguen exactamente igual
+  // de inalcanzables para los NPCs, que es lo que las hace valer: **la única
+  // puerta que tienen sigue siendo un jugador**, porque `case 'ensenar'` no
+  // pregunta por `teaches`.
+  //
+  // Un saber que sólo tiene un jugador tampoco cuenta como alcanzable, y es
+  // correcto: `irAAprender` mira `people` y nada más, así que un NPC no puede
+  // ir a buscar a alguien que está desconectado.
+  const cabezas = new Map<string, number>()
+  const seEnsena = new Set<string>()
+  for (const k of siguenEnElValle(knows, people, players)) {
+    cabezas.set(k.knowledge_id, (cabezas.get(k.knowledge_id) ?? 0) + 1)
+    if (k.holder_kind === 'person'
+      && people.find((p) => p.id === k.holder_id)?.teaches) {
+      seEnsena.add(k.knowledge_id)
+    }
+  }
+  const alcanzables = [...cabezas].filter(([id]) => seEnsena.has(id))
+  const menos = alcanzables.length === 0 ? 0 : Math.min(...alcanzables.map(([, n]) => n))
+  const masFragil = pick(alcanzables.filter(([, n]) => n === menos).map(([id]) => id))
+
+  // El sumidero va tapado en las dos ramas: `agenda_nueva` acá sería un segundo
+  // renglón para el mismo hecho y el director lo narraría como dos cosas. Lo que
+  // hay que contar viaja adentro del evento de abajo.
+  let meta: string | null = null
+  if (masFragil) {
+    meta = META_DEL_QUE_LLEGA.goal
+    await db.from('agendas').insert({
+      person_id: nuevo.id, goal: meta, started_tick: tick,
+      needs_kind: 'knowledge', needs_id: masFragil, needs_object: null,
+    })
+  } else {
+    // Un valle donde ya no queda ningún saber vivo. No hay nada que aprender,
+    // así que se pone con lo suyo. (Si el `trade` del catálogo no estuviera en
+    // `METAS`, esta persona perseguiría la meta por defecto para siempre; por
+    // eso la columna lleva el aviso en la migración.)
+    const tapado: Omit<Ev, 'region_id' | 'tick'>[] = []
+    await abrirSiguienteMeta(nuevo, '', tick, (e) => void tapado.push(e))
+    meta = (tapado[0]?.detail?.goal as string | undefined) ?? null
+  }
+
+  // ── 8. Y eso sí es noticia ────────────────────────────────
+  //
+  // Siempre, sin probabilidad: es lo contrario de una muerte y el valle entero
+  // se entera. Un evento y uno solo.
+  //
+  // Las tres frases están escritas para no tener que concordar con nada, igual
+  // que las del cierre material y por el mismo motivo: el género de quien llega
+  // sale de una tabla. Por eso `llega` es «una muchacha» y no un booleano, y
+  // por eso el testigo «estaba ahí» en vez de «lo vio».
+  //
+  // Y la última frase no es color: es el estado real de `knows` en este
+  // instante, es lo más importante que hay que saber de esta persona, y es la
+  // que le dice al jugador y al valle que acá hay alguien a quien enseñarle.
+  //
+  // El `kind` dice lo que pasó y no lo que la tarea se llamaba. Esto es lo que
+  // `DISENO.md` §9.2 pide bajo la palabra "nacimiento" —la región deja de
+  // despoblarse— pero nadie nació, y `events.kind` de este proyecto no puede
+  // decir una cosa mientras el `summary` dice otra: tres veces este mes una
+  // diferencia así terminó en una crónica mentirosa. El comentario de
+  // `events.kind` en el esquema todavía nombra `nacimiento` como ejemplo; es un
+  // ejemplo, no un contrato.
+  ev({ kind: 'llegada_al_valle', place_id: donde.id,
+    summary: `Llegó ${quien.llega} por ${donde.name} y se quedó: ${nuevo.name}, ${nuevo.trade}.`
+      + (testigo ? ` ${testigo.name} estaba ahí cuando llegó.` : '')
+      + ' No sabe hacer nada de lo que se hace acá.',
+    detail: {
+      person: nuevo.name, place: donde.name, trade: nuevo.trade,
+      visto_por: testigo?.name ?? null, goal: meta, saberes: 0,
+    } })
+  return true
+}
+
+/** «A», «A y B», «A, B y C». Existe porque la biografía del que llega enumera
+ *  lo que el valle ya había perdido, y una lista pegada con comas se lee como
+ *  una planilla. */
+function yLista(xs: string[]): string {
+  if (xs.length <= 1) return xs[0] ?? ''
+  return `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
+}
+
+/**
+ * Los portadores de un saber que **están en ESTE valle hoy**: gente viva de
+ * acá, y jugadores de acá.
+ *
+ * Existe porque `knows` no tiene `region_id` —las filas de saber son globales—
+ * y en la misma base hay dos regiones. Contar `holder_kind === 'player'` sin
+ * mirar de qué valle es ese jugador mete gente de otro mundo en las tres
+ * decisiones que cuelgan de esta pregunta, y las tres son de las que importan:
+ *
+ *   · si una agenda se traba por falta de maestro (un jugador del otro valle la
+ *     deja esperando para siempre a alguien que acá no existe),
+ *   · si se emite `perdida_de_saber` (un portador fantasma **suprime el evento
+ *     del que cuelga la tesis del juego**: el saber se pierde con la última
+ *     persona que lo tenía),
+ *   · si queda alguien que sepa fabricar algo.
+ *
+ * Era el mismo predicado escrito tres veces con tres formas distintas de estar
+ * mal, que es exactamente cómo se erosionan los invariantes por duplicación.
+ * Ahora es uno solo y lo leen los tres.
+ *
+ * `people` ya viene filtrado por `region_id` y `alive`; `players`, por
+ * `region_id`. Los dos están en scope en `step()`, así que esto no cuesta una
+ * sola consulta más.
+ *
+ * `excluir` es para el caso de la muerte: `people` se leyó antes de matarlo,
+ * así que el muerto todavía figura en esa lista.
+ */
+export function siguenEnElValle<T extends { holder_kind: string; holder_id: string }>(
+  holders: T[],
+  people: { id: string }[],
+  players: { id: string }[],
+  excluir?: string,
+): T[] {
+  return holders.filter((h) => h.holder_id !== excluir && (
+    h.holder_kind === 'player'
+      ? players.some((q) => q.id === h.holder_id)
+      : people.some((q) => q.id === h.holder_id)))
+}
+
+const EN_LETRAS = ['nadie', 'uno', 'dos', 'tres', 'cuatro', 'cinco',
+  'seis', 'siete', 'ocho', 'nueve', 'diez']
+const enLetras = (n: number) => EN_LETRAS[n] ?? String(n)
+
+/** Cuántos lo saben en el valle HOY: vivos y jugadores.
+ *
+ * Existe porque los dos eventos de enseñanza terminaban en «Ahora lo saben
+ * dos», y eso era mentira siempre que ya lo supiera un tercero. Es chiquito,
+ * pero es exactamente el modo de falla que estamos cazando: el director lee
+ * "dos" y escribe *"sólo dos personas en el valle lo saben"*, que es una
+ * afirmación fuerte sobre la escasez y no la respalda nada. Y contarlo bien
+ * además le da la frase buena: cuando pasa de uno a dos, ese saber dejó de
+ * estar a una muerte de perderse.
+ *
+ * **Y "en el valle" quiere decir EN ESTE VALLE.** Los NPCs ya venían filtrados
+ * —`people` llega con `region_id` y `alive`— pero los jugadores se contaban
+ * sueltos, con un `holder_kind === 'player'` sin filtro, y hay más de una
+ * región en la misma base: un jugador de `valle-primero` inflaba el «Ahora lo
+ * saben N» de `valle-pruebas` y viceversa. Es el mismo bug que ya apareció en
+ * `perdida_de_saber` y en `agenda_bloqueada` contando muertos, y se arregla
+ * igual: contando sólo a los que están acá. La frase es una afirmación fuerte
+ * sobre la escasez del valle y no la puede respaldar gente de otro valle. */
+async function cuantosLoSaben(
+  knowledgeId: string, regionId: string, people: { id: string }[],
+): Promise<number> {
+  const holders = (await db
+    .from('knows').select('holder_kind, holder_id')
+    .eq('knowledge_id', knowledgeId)).data ?? []
+  const ids = holders.filter((h) => h.holder_kind === 'player').map((h) => h.holder_id)
+  // Sin jugadores que lo sepan no hay consulta que hacer, y `.in()` con una
+  // lista vacía es una consulta que no sirve para nada.
+  const deAca = ids.length === 0 ? [] : (await db
+    .from('players').select('id')
+    .eq('region_id', regionId).in('id', ids)).data ?? []
+  return holders.filter((h) => h.holder_kind === 'player'
+    ? deAca.some((p) => p.id === h.holder_id)
+    : people.some((p) => p.id === h.holder_id)).length
 }
 
 /** ¿Hay alguien vivo que sepa hacer esto? Devuelve su nombre, o null.
@@ -638,9 +3582,18 @@ function siguienteMeta(trade: string, evitar?: string): { goal: string; obj?: st
  *
  * (Los jugadores también cuentan. Si el único que sabe forjar es un jugador,
  * el valle depende de que se conecte, y eso está bien.)
+ *
+ * **Y "alguien" quiere decir alguien DE ACÁ.** El jugador se buscaba por id
+ * contra `players` entera, sin mirar la región: un jugador de `valle-primero`
+ * que supiera destilar mantenía viva la escasez de `valle-pruebas` —la agenda
+ * no se trababa y el NPC seguía esperando un frasco que en este mundo no puede
+ * salir de ningún lado. `players` ya viene filtrado por `region_id`, así que
+ * pasarlo además ahorra la consulta que había acá adentro.
  */
 async function quienLoSabeHacer(
-  kind: string, people: { id: string; name: string }[],
+  kind: string,
+  people: { id: string; name: string }[],
+  players: { id: string; name: string }[],
 ): Promise<string | null> {
   const { data: receta } = await db
     .from('knowledge').select('id').eq('makes', kind).limit(1).maybeSingle()
@@ -648,16 +3601,11 @@ async function quienLoSabeHacer(
   const holders = (await db
     .from('knows').select('holder_kind, holder_id')
     .eq('knowledge_id', receta.id)).data ?? []
-  for (const h of holders) {
-    if (h.holder_kind === 'person') {
-      const p = people.find((q) => q.id === h.holder_id)
-      if (p) return p.name
-    }
-    if (h.holder_kind === 'player') {
-      const { data: pl } = await db
-        .from('players').select('name').eq('id', h.holder_id).limit(1).maybeSingle()
-      if (pl) return pl.name
-    }
+  for (const h of siguenEnElValle(holders, people, players)) {
+    const quien = h.holder_kind === 'player'
+      ? players.find((q) => q.id === h.holder_id)
+      : people.find((q) => q.id === h.holder_id)
+    if (quien) return quien.name
   }
   return null
 }
@@ -691,16 +3639,45 @@ async function cumplirAgenda(
       .eq('agenda_id', agenda.id).eq('player_id', porJugador.id).eq('state', 'activo')
   }
 
-  // Una agenda cumplida abre la siguiente. El mundo no se queda quieto.
-  const nueva = siguienteMeta(who.trade, agenda.goal)
+  await abrirSiguienteMeta(who, agenda.goal, tick, ev)
+}
+
+/** Abre la meta que sigue. El mundo no se queda quieto.
+ *
+ * Está separado de `cumplirAgenda` porque hay dos finales distintos y los dos
+ * tienen que dejar a la persona con algo entre manos: la que se cumplió, y la
+ * que se soltó después de insistir sin llegar a nada. Si el segundo caso no
+ * abriera la siguiente, el valle se apagaría de a una persona por vez —
+ * justamente ahora, que una meta puede fracasar de verdad.
+ */
+async function abrirSiguienteMeta(
+  who: { id: string; name: string; trade: string; place_id: string | null },
+  evitar: string,
+  tick: number,
+  ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void,
+) {
+  const nueva = siguienteMeta(who.trade, evitar)
+  // Una meta puede pedir un SABER y no una cosa. Se guarda el id acá y no el
+  // slug porque `agendas.needs_id` es un uuid; si el saber no existe en esta
+  // región, la meta queda como una de trabajar y no se rompe nada.
+  let needsId: string | null = null
+  if (nueva.saber) {
+    const { data: k } = await db
+      .from('knowledge').select('id').eq('slug', nueva.saber).limit(1).maybeSingle()
+    needsId = k?.id ?? null
+  }
   await db.from('agendas').insert({
     person_id: who.id, goal: nueva.goal, started_tick: tick,
-    needs_kind: nueva.obj ? 'object' : null,
+    needs_kind: nueva.obj ? 'object' : (needsId ? 'knowledge' : null),
     needs_object: nueva.obj ?? null,
+    needs_id: needsId,
   })
   ev({ kind: 'agenda_nueva', place_id: who.place_id,
     summary: `${who.name} se puso a ${nueva.goal}.`,
-    detail: { person: who.name, goal: nueva.goal, object: nueva.obj ?? null } })
+    detail: {
+      person: who.name, goal: nueva.goal, object: nueva.obj ?? null,
+      saber: nueva.saber ?? null,
+    } })
 }
 
 async function resolveAction(
@@ -708,7 +3685,7 @@ async function resolveAction(
   player: { id: string; name: string; place_id: string | null },
   action: { verb: string; target: string | null },
   ctx: {
-    people: { id: string; name: string; trade: string; place_id: string | null; teaches: boolean }[]
+    people: (MundoDeAccion['people'][number])[]
     places: { id: string; name: string; slug: string; kind: string }[]
     ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
   },
@@ -716,6 +3693,21 @@ async function resolveAction(
   const { people, places, ev } = ctx
   const target = action.target?.toLowerCase() ?? ''
   const norm = (s: string) => s.toLowerCase()
+
+  // **Dónde está cada uno AHORA**, que a esta hora puede no ser `place_id`.
+  //
+  // Resolver una acción es tiempo de consulta, no tiempo de tick: pasa cuando
+  // el jugador aprieta el botón, y a esa hora la mitad del valle puede estar
+  // durmiendo en su casa. El cliente dibuja a la gente con `rutinaDe()`, así
+  // que si acá se comparara `place_id` pelado el mundo diría dos cosas
+  // distintas — ves a Bruno durmiendo en la fragua y el servidor te contesta
+  // que no hay ningún Bruno acá. Es el invariante 4 al revés: lo que se ve en
+  // el cliente tiene que ser lo que el servidor cree.
+  //
+  // Se le puede hablar, encargar y enseñar a alguien que duerme: le golpeás la
+  // puerta y se levanta. No hay verbo que se caiga por la hora, y es a
+  // propósito — la rutina tiene que agregar mundo, no puertas cerradas.
+  const aca = (p: ConRutina) => rutinaDe(p, places).place_id === player.place_id
 
   switch (action.verb) {
     case 'ir': {
@@ -740,14 +3732,14 @@ async function resolveAction(
       ev({ kind: 'conversacion', place_id: quien.place_id,
         summary: `${player.name} habló con ${quien.name}.`,
         detail: { player: player.name, person: quien.name } })
-      await recordar(quien.id, player, `${player.name} vino a hablar conmigo`, tick)
+      await recordar(quien.id, player, `${player.name} anduvo hablando con ${quien.name}`, tick)
       await tocarVinculo(quien, player, { valued: 2 }, ev)
       return `habló con ${quien.name}`
     }
 
     case 'trabajar': {
       const lugar = places.find((p) => p.id === player.place_id)
-      const testigos = people.filter((p) => p.place_id === player.place_id)
+      const testigos = people.filter(aca)
 
       // Trabajar produce algo sólo si SABÉS hacer algo y estás donde se hace.
       // No hay recetas escritas en ningún lado, no hay tienda y no hay drops:
@@ -806,56 +3798,37 @@ async function resolveAction(
       return 'trabajó'
     }
 
+    // El golpe NO se resuelve acá. Lo resuelve `pelear()` en `combate.ts`, que
+    // es exactamente la misma función que llama `POST /pelear`, y por eso el
+    // mismo golpe produce el mismo evento venga por donde venga.
+    //
+    // **Esto era una copia entera de esa función** —el mismo daño, la misma
+    // lista de dos armas, los mismos `summary` tipeados dos veces— y el
+    // encabezado de `combate.ts` cuenta lo que costaba: un `summary` ambiguo
+    // hubo que arreglarlo dos veces, y las dos copias se mantenían idénticas a
+    // mano. La primera que alguien tocara sola convertía el mismo hecho en dos
+    // hechos distintos según el camino, que es el invariante 3 pudriéndose sin
+    // que se note.
+    //
+    // El `ev` es el mismo sumidero del tick: los eventos del golpe se juntan
+    // con los del día y se insertan todos al final. Sin `ev`, `pelear()`
+    // inserta sola — que es lo que hace la web, que no tiene un final de tick.
     case 'pelear': {
-      const { data: bicho } = await db
-        .from('threats').select('id, kind, health, max_health')
-        .eq('region_id', regionId).eq('place_id', player.place_id ?? '')
-        .eq('alive', true).limit(1).maybeSingle()
-      if (!bicho) return 'no hay nada que pelear acá'
-
-      // Acá es donde los objetos dejan de ser una lista y pesan: con qué le
-      // pegás cambia el resultado, y con qué le pegás depende de que alguien
-      // haya sabido hacerlo.
-      const { data: armas } = await db
-        .from('objects').select('kind, quality, made_by')
-        .eq('holder_kind', 'player').eq('holder_id', player.id)
-      const arma = (armas ?? [])
-        .filter((o) => o.kind === 'hoja templada' || o.kind === 'filo de agua')
-        .sort((a, b) => b.quality - a.quality)[0]
-      const danio = 8 + roll(8) + Math.floor((arma?.quality ?? 0) / 6)
-      const restante = Math.max(0, bicho.health - danio)
-
-      if (restante > 0) {
-        await db.from('threats').update({ health: restante }).eq('id', bicho.id)
-        ev({ kind: 'pelea', place_id: player.place_id,
-          summary: arma
-            ? `${player.name} le entró a ${bicho.kind} con ${arma.kind}, y sigue en pie.`
-            : `${player.name} le entró a ${bicho.kind} a mano limpia, y sigue en pie.`,
-          detail: { player: player.name, threat: bicho.kind, weapon: arma?.kind ?? null } })
-        return `lastimó a ${bicho.kind}`
-      }
-
-      await db.from('threats')
-        .update({ alive: false, health: 0, killed_by: player.name, killed_tick: tick })
-        .eq('id', bicho.id)
-      ev({ kind: 'amenaza_muerta', place_id: player.place_id,
-        summary: arma
-          ? `${player.name} mató a ${bicho.kind} con ${arma.kind}${arma.made_by && arma.made_by !== player.name ? `, que había hecho ${arma.made_by}` : ''}.`
-          : `${player.name} mató a ${bicho.kind} sin nada en las manos.`,
-        detail: { player: player.name, threat: bicho.kind, weapon: arma?.kind ?? null } })
-
-      // Lo ven, y no todos lo leen igual: al que te teme le sube el miedo, no
-      // el aprecio. Dos ejes, no una barra.
-      for (const t of people.filter((p) => p.place_id === player.place_id)) {
-        await recordar(t.id, player, `${player.name} mató a ${bicho.kind} acá`, tick)
-        await tocarVinculo(t, player, { valued: 8, feared: 5 }, ev)
-      }
-      return `mató a ${bicho.kind}`
+      const golpe = await pelear({
+        regionId, tick, player, ev,
+        // Lo ven, y no todos lo leen igual: matar algo sube el aprecio y el
+        // miedo a la vez. Eso pasa adentro de `pelear()`. Lo que se decide
+        // ACÁ es el aviso: cruzar un escalón de confianza abre un verbo del
+        // jugador y sin decirlo, ganarse a alguien sería superstición.
+        avisarVinculo: (t, antes, ahora) => avisarConfianza(t, player, antes, ahora, ev),
+      })
+      if (!golpe.ok) return golpe.porque
+      return golpe.muerta ? `mató a ${golpe.threat}` : `lastimó a ${golpe.threat}`
     }
 
     case 'aprender': {
       const maestro = people.find(
-        (p) => norm(p.name).includes(target) && p.place_id === player.place_id)
+        (p) => norm(p.name).includes(target) && aca(p))
       if (!maestro) return `no hay ningún ${action.target} acá`
       if (!maestro.teaches) {
         ev({ kind: 'negativa', place_id: maestro.place_id,
@@ -897,13 +3870,21 @@ async function resolveAction(
       ev({ kind: 'ensenanza', place_id: maestro.place_id,
         summary: `${maestro.name} le enseñó ${info?.name} a ${player.name}.`,
         detail: { from: maestro.name, to: player.name, knowledge: info?.name } })
-      await recordar(maestro.id, player, `le enseñé ${info?.name} a ${player.name}`, tick)
+      await recordar(maestro.id, player, `${maestro.name} le enseñó ${info?.name} a ${player.name}`, tick)
       return `aprendió ${info?.name}`
     }
 
     case 'ensenar': {
+      // El `target` puede venir como «<saber> a <alguien>» —el jugador eligió
+      // cuál le deja— o pelado, y ahí elige el servidor como siempre. Se parte
+      // por el ÚLTIMO " a ", igual que `dar`, porque el nombre de un saber
+      // puede tener uno adentro ("Temple a la piedra") y el de una persona no.
+      const bruto = action.target ?? ''
+      const corte = bruto.toLowerCase().lastIndexOf(' a ')
+      const queStr = corte > 0 ? bruto.slice(0, corte).trim().toLowerCase() : null
+      const quienStr = norm((corte > 0 ? bruto.slice(corte + 3) : bruto).trim())
       const alumno = people.find(
-        (p) => norm(p.name).includes(target) && p.place_id === player.place_id)
+        (p) => norm(p.name).includes(quienStr) && aca(p))
       if (!alumno) return `no hay ningún ${action.target} acá`
       const sabe = (await db
         .from('knows').select('knowledge_id')
@@ -925,7 +3906,20 @@ async function resolveAction(
         .from('agendas').select('id, goal, needs_id')
         .eq('person_id', alumno.id).in('state', ['activa', 'bloqueada'])
         .eq('needs_kind', 'knowledge').limit(1).maybeSingle()
-      const nuevo = puede.find((k) => k.knowledge_id === suya?.needs_id) ?? pick(puede)!
+      // Pero si el jugador eligió, manda el jugador: la preferencia por la
+      // agenda trabada es un buen default, no una corrección. Que el servidor
+      // te pise la elección es peor que no dejarte elegir.
+      let elegido: (typeof puede)[number] | undefined
+      if (queStr) {
+        const nombres = (await db
+          .from('knowledge').select('id, name')
+          .in('id', puede.map((k) => k.knowledge_id))).data ?? []
+        const m = nombres.find((c) => c.name.toLowerCase().includes(queStr))
+        if (!m) return `${alumno.name} ya sabe eso, o él no lo sabe`
+        elegido = puede.find((k) => k.knowledge_id === m.id)
+      }
+      const nuevo = elegido
+        ?? puede.find((k) => k.knowledge_id === suya?.needs_id) ?? pick(puede)!
 
       const { data: info } = await db
         .from('knowledge').select('name').eq('id', nuevo.knowledge_id).single()
@@ -937,10 +3931,16 @@ async function resolveAction(
         knowledge_id: nuevo.knowledge_id, learned_from: null,
         how: 'aprendido', learned_tick: tick, destreza: 0, veces: 0,
       })
+      const cuantos = await cuantosLoSaben(nuevo.knowledge_id, regionId, people)
       ev({ kind: 'ensenanza', place_id: alumno.place_id,
-        summary: `${player.name} le enseñó ${info?.name} a ${alumno.name}. Ahora lo saben dos.`,
-        detail: { from: player.name, to: alumno.name, knowledge: info?.name } })
-      await recordar(alumno.id, player, `${player.name} me enseñó ${info?.name}`, tick)
+        summary: `${player.name} le enseñó ${info?.name} a ${alumno.name}.`
+          + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
+        detail: {
+          from: player.name, to: alumno.name, knowledge: info?.name,
+          lo_saben: cuantos,
+        } })
+      await recordar(alumno.id, player,
+        `${player.name} le enseñó ${info?.name} a ${alumno.name}`, tick)
       await tocarVinculo(alumno, player, { valued: 20 }, ev)
 
       // Y si eso era lo que le faltaba, la agenda se cierra ACÁ y con tu
@@ -950,10 +3950,14 @@ async function resolveAction(
       if (suya && suya.needs_id === nuevo.knowledge_id) {
         await cumplirAgenda(suya, alumno, tick, ev, {
           kind: 'agenda_cumplida', place_id: alumno.place_id,
-          summary: `${alumno.name} llevaba tiempo detrás de ${suya.goal}. Se lo enseñó ${player.name}, y ahora lo saben dos.`,
+          // «llevaba tiempo detrás de X» cita la meta como deseo y eso siempre
+          // es cierto; lo que hacía falta arreglar era el «ahora lo saben dos»
+          // de antes, que era una cuenta inventada.
+          summary: `${alumno.name} llevaba tiempo detrás de ${suya.goal}, y se lo enseñó ${player.name}.`
+            + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
           detail: {
             person: alumno.name, player: player.name, goal: suya.goal,
-            knowledge: info?.name,
+            knowledge: info?.name, lo_saben: cuantos,
           },
         }, player)
         await tocarVinculo(alumno, player, { valued: 25 }, ev)
@@ -975,7 +3979,7 @@ async function resolveAction(
     // parte del diseño, no un bug.
     case 'encargarse': {
       const quien = people.find(
-        (p) => norm(p.name).includes(target) && p.place_id === player.place_id)
+        (p) => norm(p.name).includes(target) && aca(p))
       if (!quien) return `no hay ningún ${action.target} acá`
 
       const abiertas = (await db
@@ -1050,8 +4054,7 @@ async function resolveAction(
       const lugar = places.find((p) => p.id === player.place_id)
       if (!lugar) return 'no está en ningún lado'
 
-      const tabla = LO_QUE_DA_EL_LUGAR[lugar.kind]
-      if (!tabla) {
+      if (!LO_QUE_DA_EL_LUGAR[lugar.kind]) {
         ev({ kind: 'busqueda', place_id: lugar.id,
           summary: `${player.name} se puso a revolver ${lugar.name} y no hay nada que juntar: acá las cosas se hacen, no se encuentran.`,
           detail: { player: player.name, place: lugar.name, object: null } })
@@ -1061,15 +4064,13 @@ async function resolveAction(
       // Sorteo con pesos, y el "nada" es una entrada más del sorteo. Sin esa
       // entrada `buscar` es una máquina expendedora y traer la raíz deja de
       // ser traer algo.
-      const nada = NO_HAY_NADA[lugar.kind] ?? 3
-      let n = roll(tabla.reduce((s, t) => s + t.peso, 0) + nada)
-      let sale: string | null = null
-      for (const t of tabla) {
-        if (n < t.peso) { sale = t.kind; break }
-        n -= t.peso
-      }
+      //
+      // Es la misma función que usan los NPCs en la pasada 2, y tiene que
+      // seguir siéndolo: si el valle le tirara dados distintos a Ilde que a
+      // vos, dejarían de estar jugando al mismo juego.
+      const sale = loQueSale(lugar.kind)
 
-      const testigos = people.filter((p) => p.place_id === player.place_id)
+      const testigos = people.filter(aca)
       if (!sale) {
         // Esto sí se emite siempre aunque no haya cambiado nada, y es la única
         // excepción a la regla del ruido: lo pidió un jugador. Un tick que
@@ -1128,7 +4129,7 @@ async function resolveAction(
       if (!quienStr) return 'uso: dar <cosa> a <persona>'
 
       const quien = people.find(
-        (p) => norm(p.name).includes(quienStr) && p.place_id === player.place_id)
+        (p) => norm(p.name).includes(quienStr) && aca(p))
       if (!quien) return `no hay ningún ${quienStr} acá`
 
       const mios = (await db
@@ -1172,7 +4173,7 @@ async function resolveAction(
             player: player.name, person: quien.name, object: regalo.kind,
             quality: regalo.quality, made_by: regalo.made_by ?? null, cumple: false,
           } })
-        await recordar(quien.id, player, `${player.name} me regaló ${regalo.kind}`, tick)
+        await recordar(quien.id, player, `${player.name} le regaló ${regalo.kind} a ${quien.name}`, tick)
         await tocarVinculo(quien, player, { valued: 5 + bonus }, ev)
         return `le dio ${regalo.kind} a ${quien.name}`
       }
@@ -1199,7 +4200,7 @@ async function resolveAction(
       }, player)
 
       await recordar(quien.id, player,
-        `${player.name} me trajo ${regalo.kind} cuando lo necesitaba`, tick)
+        `${player.name} le trajo ${regalo.kind} a ${quien.name} cuando lo necesitaba`, tick)
       await tocarVinculo(quien, player, { valued: 25 + bonus }, ev)
       return `le cumplió a ${quien.name}: ${cumple.goal}`
     }
@@ -1219,20 +4220,91 @@ async function resolveAction(
 function dondeSeConsigue(
   kind: string, places: { name: string; kind: string }[],
 ): string | null {
-  for (const [tipo, tabla] of Object.entries(LO_QUE_DA_EL_LUGAR)) {
-    if (!tabla.some((t) => t.kind === kind)) continue
-    const lugar = places.find((p) => p.kind === tipo)
-    if (lugar) return lugar.name
-  }
-  return null
+  const tipo = tipoQueDa(kind)
+  if (!tipo) return null
+  return places.find((p) => p.kind === tipo)?.name ?? null
 }
 
-async function recordar(
-  personId: string, player: { id: string }, what: string, tick: number,
-) {
+// `recordar()` —un recuerdo de un NPC sobre un JUGADOR— vive en `combate.ts` y
+// se importa arriba. **Siempre en tercera persona y con los dos nombres
+// puestos**, y no es estilo: un recuerdo VIAJA. La pasada 5 lo copia tal cual a
+// la cabeza del que lo escuchó y lo publica como `${contador} le contó a
+// ${oyente}: ${what}`. Con «me metí a defender a Pedro» en primera persona, el
+// salto producía dos mentiras encadenadas — «Sarn le contó a Marta: me metí a
+// defender a Pedro» dice que Sarn defendió a Pedro, y peor, la fila copiada
+// queda en la memoria de Sarn, así que `dialogo.ts` le hace decir a Sarn que él
+// lo defendió. Nadie lo defendió. Fue Ilde.
+//
+// En tercera persona el recuerdo sobrevive a cualquier cantidad de saltos:
+// «Ilde se metió a defender a Pedro» sigue siendo verdad lo cuente quien lo
+// cuente, que es justo lo que hace falta cuando el chusmerío es la interfaz
+// (DISENO §9.3). El comentario completo está en `combate.ts`, donde está la
+// función: hasta hoy la explicación también estaba escrita dos veces.
+
+/** Lo mismo, pero de un NPC sobre otro NPC — y **una sola vez**.
+ *
+ * Devuelve si el recuerdo es NUEVO, y quien llama usa eso para decidir si
+ * además hay evento. No es un detalle: la pasada 5 agarra cada recuerdo fresco
+ * y lo republica como `rumor`, así que un recuerdo que se reescribe todos los
+ * ticks —«Ilde no le dio hoja templada a Sarn», otra vez, y otra— es una
+ * fábrica de ruido con la firma del chusmerío. Escrito una vez, el valle lo
+ * comenta una vez y después es historia vieja: exactamente lo que uno quiere de
+ * un desaire.
+ *
+ * La deduplicación es por (quién se acuerda, de quién, qué), igual que la de la
+ * pasada 5, y `.limit(1)` por la misma razón que allá: `maybeSingle()` da error
+ * con más de una fila y entonces `data` viene null y no dedupea nada.
+ */
+async function recordarEntre(
+  personId: string, aboutId: string, what: string, tick: number,
+): Promise<boolean> {
+  const { data: ya } = await db.from('memories').select('id')
+    .eq('person_id', personId).eq('about_id', aboutId).eq('what', what)
+    .limit(1).maybeSingle()
+  if (ya) return false
   await db.from('memories').insert({
-    person_id: personId, about_kind: 'player', about_id: player.id, what, tick,
+    person_id: personId, about_kind: 'person', about_id: aboutId, what, tick,
   })
+  return true
+}
+
+/** El vínculo de un NPC hacia OTRO NPC. **Nunca emite un evento.**
+ *
+ * `tocarVinculo` es su hermano y mide otra cosa: cómo ve un NPC a un JUGADOR, y
+ * por eso avisa cuando cruza `UMBRAL_ENCARGO` o `UMBRAL_ENSENAR` — esos dos
+ * umbrales abren verbos del jugador y sin el aviso ganarse a alguien sería
+ * superstición. Entre dos NPCs no abren nada y no hay a quién avisarle: que a
+ * Bruno le caiga mejor Odila que ayer no es noticia ni con transición.
+ *
+ * La tabla ya lo soportaba (`bonds.toward_kind in ('person','player')`) y
+ * `dialogo.ts` ya lo lee para que la gente hable de otra gente; lo que faltaba
+ * era que alguien lo escribiera. Hasta hoy la mitad NPC↔NPC de `bonds` estaba
+ * vacía en las dos regiones.
+ *
+ * `tope` es para el trato de todos los días: convivir sube el aprecio hasta
+ * cierto punto y después hay que hacer algo. Es la misma forma que
+ * `UMBRAL_ENCARGO` → `UMBRAL_ENSENAR` del lado del jugador — primero te ubican,
+ * después te ganás lo demás — y es lo que evita que en trescientos ticks todos
+ * se quieran con todos por el solo hecho de compartir un cuarto.
+ */
+async function tocarVinculoEntre(
+  personId: string, towardId: string, valued: number, tope?: number,
+) {
+  const { data: actual } = await db.from('bonds').select('id, valued')
+    .eq('person_id', personId).eq('toward_kind', 'person').eq('toward_id', towardId)
+    .limit(1).maybeSingle()
+  const antes = actual?.valued ?? 0
+  if (tope !== undefined && antes >= tope) return
+  const ahora = Math.max(-100, Math.min(100, antes + valued))
+  if (ahora === antes) return
+  if (actual) {
+    await db.from('bonds').update({ valued: ahora }).eq('id', actual.id)
+  } else {
+    await db.from('bonds').insert({
+      person_id: personId, toward_kind: 'person', toward_id: towardId,
+      valued: ahora, feared: 0,
+    })
+  }
 }
 
 /** Mueve el vínculo y —esto es lo nuevo— avisa cuando cruzás un escalón.
@@ -1261,25 +4333,23 @@ async function tocarVinculo(
   delta: { valued?: number; feared?: number },
   ev?: (e: Omit<Ev, 'region_id' | 'tick'>) => void,
 ) {
-  const { data: actual } = await db
-    .from('bonds').select('id, valued, feared')
-    .eq('person_id', person.id).eq('toward_id', player.id).maybeSingle()
-  const clamp = (n: number) => Math.max(-100, Math.min(100, n))
-  const antes = actual?.valued ?? 0
-  const ahora = clamp(antes + (delta.valued ?? 0))
+  // La escritura es la de `combate.ts` y no una copia: es la única que toca
+  // `bonds` hacia un jugador, la use el golpe o la use el tick. Acá queda sólo
+  // lo que este archivo agrega, que es el aviso.
+  const { antes, ahora } = await escribirVinculo(person, player, delta)
+  avisarConfianza(person, player, antes, ahora, ev)
+}
 
-  if (actual) {
-    await db.from('bonds').update({
-      valued: ahora,
-      feared: clamp(actual.feared + (delta.feared ?? 0)),
-    }).eq('id', actual.id)
-  } else {
-    await db.from('bonds').insert({
-      person_id: person.id, toward_kind: 'player', toward_id: player.id,
-      valued: ahora, feared: clamp(delta.feared ?? 0),
-    })
-  }
-
+/** El aviso, separado de la escritura porque tiene dos llamadores: el
+ *  `tocarVinculo` de acá arriba y el golpe, que escribe el vínculo adentro de
+ *  `pelear()` y avisa desde el `case 'pelear'`. Escrito una vez, con los
+ *  umbrales donde viven, que es este archivo. */
+function avisarConfianza(
+  person: { id: string; name: string; place_id: string | null },
+  player: { id: string; name: string },
+  antes: number, ahora: number,
+  ev?: (e: Omit<Ev, 'region_id' | 'tick'>) => void,
+) {
   if (!ev) return
   const cruzo = (u: number) => antes < u && ahora >= u
   if (cruzo(UMBRAL_ENSENAR)) {

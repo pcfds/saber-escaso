@@ -10,6 +10,7 @@
     "tick": "tsx lib/world/tick.ts",
     "world": "tsx lib/world/run.ts",
     "look": "tsx lib/world/director.ts",
+    "autor": "tsx lib/world/autor.ts",
     "act": "tsx lib/world/actions.ts",
     "typecheck": "tsc --noEmit",
     "web": "tsx lib/web.ts",

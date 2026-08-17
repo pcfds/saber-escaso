@@ -2,7 +2,7 @@
  * Un golpe. La única cosa del mundo que no espera al tick.
  *
  * Todo lo demás es lento a propósito —un tick es un día y el cron corre uno
- * por hora— pero el combate no sobrevive a esa latencia: el jugador aprieta,
+ * cada seis horas— pero el combate no sobrevive a esa latencia: el jugador aprieta,
  * no pasa nada durante una hora, y vuelve a creer que los bichos son teatro
  * del cliente. Esa era exactamente la queja. Así que pelear se resuelve en el
  * momento, en el servidor, y deja su rastro en `events` como cualquier otra
@@ -10,8 +10,19 @@
  *
  * No rompe ningún invariante: los invariantes dicen que la simulación no usa
  * IA y que el director no escribe estado, no que toda acción tenga que pasar
- * por el tick. **Este archivo lo va a importar `tick.ts`, así que acá no entra
- * el SDK de Anthropic — ni directo ni de rebote.**
+ * por el tick. **Este archivo lo importa `tick.ts`, así que acá no entra
+ * el SDK de Anthropic — ni directo ni de rebote.** Por eso el único import de
+ * este archivo es `../db.js` y tiene que seguir siéndolo: el invariante 1 se
+ * rompe igual de rebote que de frente.
+ *
+ * **Y lo importa de verdad, desde el 17 de agosto.** Hasta ese día `tick.ts`
+ * tenía una reimplementación entera de `pelear()` en su `case 'pelear'` —
+ * mismo daño, mismas armas, los mismos `summary` copiados a mano— y el mismo
+ * golpe se resolvía con dos códigos distintos según viniera por el tick o por
+ * la web. No era deuda estética: un `summary` ambiguo hubo que arreglarlo dos
+ * veces, y el día que alguien tocara una sola de las dos copias el mismo hecho
+ * iba a producir eventos distintos. Eso es el invariante 3 erosionándose por
+ * duplicación, en silencio. Ahora hay una sola función y dos llamadores.
  */
 import { db } from '../db.js'
 
@@ -22,6 +33,16 @@ const roll = (max: number) => Math.floor(Math.random() * max)
  *  enseñarle a nadie, el valle vuelve a pelear a mano limpia para siempre. */
 const ARMAS = ['hoja templada', 'filo de agua']
 
+/** «al Hermano Mayor», no «a el Hermano Mayor».
+ *
+ * Salió al medir el summary de una pelea: los `kind` empiezan casi todos con
+ * «un» o «algo», así que la contracción no hizo falta hasta que los bichos
+ * tuvieron nombre propio —«el Hermano Mayor», de Los de la Ceniza—. Es una
+ * arruga chiquita y es exactamente el tipo de cosa que le avisa al lector que
+ * esto lo escribió una máquina. */
+export const conA = (nom: string) =>
+  /^el /i.test(nom) ? `al ${nom.slice(3)}` : `a ${nom}`
+
 export type EventoPelea = {
   kind: string
   place_id: string | null
@@ -31,19 +52,87 @@ export type EventoPelea = {
 
 export type Golpe =
   | { ok: false; porque: string }
-  | { ok: true; danio: number; health: number; muerta: boolean; arma: string | null }
+  | {
+      ok: true; danio: number; health: number; muerta: boolean
+      /** Con cuánta vida arrancó. El tick lo usa para saber **qué tan entera
+       *  quedó la cosa**: una salida contra algo que quedó en pie al 90% no se
+       *  paga igual que una contra algo que quedó hecho jirones, y eso tiene
+       *  que salir del estado del bicho y no de un número plano. */
+      maxHealth: number
+      arma: string | null
+      /** Contra qué. El tick lo necesita para el `outcome` de la acción
+       *  —«mató a la jauría»— y es lo único que le hacía falta del cuerpo de
+       *  esta función cuando tenía su propia copia. */
+      threat: string
+    }
 
 export async function pelear(args: {
   regionId: string
   tick: number
   player: { id: string; name: string; place_id: string | null }
+  /**
+   * Quién es el que pega. `'player'` es el caso de siempre y el que llaman
+   * `POST /pelear` y `case 'pelear'`; por eso es el default y por eso el
+   * parámetro sigue llamándose `player`, que es lo que ya escriben los dos
+   * llamadores viejos.
+   *
+   * `'person'` es un NPC, y entró con las salidas del tick: un NPC que baja a
+   * un lugar donde hay algo adentro se lo cruza, y **tiene que cruzárselo con
+   * las mismas reglas que vos** — el mismo daño, la misma lista de dos armas,
+   * el mismo `summary`. Escribir una segunda función para eso era exactamente
+   * lo que este archivo vino a terminar (ver el encabezado): dos códigos para
+   * el mismo golpe se separan solos el día que alguien toca uno.
+   *
+   * Cambia tres cosas y ninguna más: de qué inventario sale el arma
+   * (`objects.holder_kind`), con qué llave viaja el nombre en `detail` —los
+   * eventos de un NPC van marcados con `npc`, que es de lo que cuelga el
+   * descarte de eventos de un muerto en `tick.ts`— y qué se hace con los
+   * testigos, que para un NPC no puede ser `bonds` hacia un jugador.
+   */
+  quien?: 'player' | 'person'
   /** El uuid de la amenaza. Si no viene, la primera viva donde está parado. */
   threatId?: string | null
   /** Sumidero de eventos. El tick los junta y los inserta todos juntos al
    *  final; la web no tiene ese final, así que si no viene se escribe acá. */
-  ev?: (e: EventoPelea) => void
+  ev?: (e: EventoPelea) => void | Promise<void>
+  /**
+   * Qué hacer cuando el aprecio de un testigo se movió. Se llama una vez por
+   * testigo con el antes y el después, y **es la única diferencia real que
+   * había entre las dos copias de esta función**, así que queda acá a la vista
+   * en vez de escondida en un archivo duplicado.
+   *
+   * El tick pasa el suyo: cruzar `UMBRAL_ENCARGO` o `UMBRAL_ENSENAR` emite un
+   * evento `confianza` («Ilde empezó a confiar en Pedro»), que existe para que
+   * ganarse a alguien no sea superstición. `POST /pelear` en `web.ts` **no lo
+   * pasa**, así que hoy el mismo muerto avisa por el tick y no avisa por la
+   * web. No se unificó acá porque el que decide qué escribe `POST /pelear` es
+   * el dueño de `web.ts`: es una línea suya, no mía.
+   */
+  avisarVinculo?: (
+    testigo: { id: string; name: string; place_id: string | null },
+    antes: number, ahora: number,
+  ) => void | Promise<void>
+  /**
+   * Lo mismo que `avisarVinculo` pero para el otro lado del par: qué hacer con
+   * cada testigo cuando el que peleó fue un NPC. Existe porque `recordar()` y
+   * `tocarVinculo()` de acá abajo escriben hacia un JUGADOR
+   * (`memories.about_kind = 'player'`, `bonds.toward_kind = 'player'`) y meter
+   * un uuid de `people` en esas columnas ensucia el chusmerío en silencio: el
+   * rumor sale igual y apunta a alguien que no existe de ese lado.
+   *
+   * El par NPC↔NPC lo escribe `tick.ts`, que tiene `recordarEntre` y
+   * `tocarVinculoEntre` desde los verbos sociales. Acá sólo se dice quién vio
+   * qué; qué se hace con eso es de allá.
+   */
+  alVerNpc?: (
+    testigo: { id: string; name: string; place_id: string | null },
+    npc: { id: string; name: string }, mato: string,
+  ) => void | Promise<void>
 }): Promise<Golpe> {
   const { regionId, tick, player, threatId, ev } = args
+  const quien = args.quien ?? 'player'
+  /** Con qué llave viaja el nombre del que peleó. Ver `quien`. */
+  const suNombre = quien === 'player' ? 'player' : 'npc'
 
   // Sin id y sin lugar no hay a quién pegarle, y hay que cortar antes de la
   // query: mandarle '' a una columna uuid no devuelve vacío, revienta.
@@ -59,9 +148,22 @@ export async function pelear(args: {
   const { data: bicho } = await q.limit(1).maybeSingle()
   if (!bicho) return { ok: false, porque: 'no hay nada que pelear acá' }
 
+  /** Cómo se lo nombra en una frase.
+   *
+   * `kind` no es un nombre: a veces es un párrafo entero —«un grupo de figuras
+   * oscuras inmóviles entre los árboles quemados, con ramas crecidas sobre los
+   * hombros»— y hasta hoy se lo metía DOS VECES en la misma oración, así que
+   * el summary de una pelea eran cuarenta palabras de las cuales treinta y
+   * seis eran la misma descripción repetida. Eso no sólo se lee mal: es lo que
+   * el director tiene que leer, y le come la ventana de contexto con relleno.
+   * Los que tienen `nombre` son personas —«el Hermano Mayor», de Los de la
+   * Ceniza— y desde acá dejan de ser «un bicho».
+   */
+  const nom = bicho.nombre ?? bicho.kind
+
   const armas = (await db.from('objects')
     .select('kind, quality, made_by')
-    .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
+    .eq('holder_kind', quien).eq('holder_id', player.id)).data ?? []
   const arma = armas
     .filter((o) => ARMAS.includes(o.kind))
     .sort((a, b) => b.quality - a.quality)[0]
@@ -70,31 +172,47 @@ export async function pelear(args: {
   const restante = Math.max(0, bicho.health - danio)
 
   const emitir = async (e: EventoPelea) => {
-    if (ev) return ev(e)
+    if (ev) return void await ev(e)
     await db.from('events').insert({ region_id: regionId, tick, ...e })
   }
 
   if (restante > 0) {
     await db.from('threats').update({ health: restante }).eq('id', bicho.id)
+    // Decía «..., y sigue en pie» y no se sabía quién sigue en pie: el que
+    // pegó o el que aguantó. El director eligió —como siempre— la lectura más
+    // dramática. Un summary que se puede leer de dos maneras es un bug de la
+    // simulación, no del narrador: el sujeto se nombra. Esta frase estaba
+    // escrita dos veces —acá y en `tick.ts`— y hubo que arreglarla dos veces.
+    // Ahora está una sola vez y la leen los dos caminos.
     await emitir({
       kind: 'pelea', place_id: bicho.place_id,
+      // «y no lo tumbó» en vez de «pero X no cayó»: el sujeto sigue siendo el
+      // que pegó, así que la frase se entiende sin volver a nombrar al bicho.
+      // Eso resuelve la ambigüedad que motivó el comentario de arriba SIN
+      // pagar la descripción dos veces.
       summary: arma
-        ? `${player.name} le entró a ${bicho.kind} con ${arma.kind}, y sigue en pie.`
-        : `${player.name} le entró a ${bicho.kind} a mano limpia, y sigue en pie.`,
-      detail: { player: player.name, threat: bicho.kind, weapon: arma?.kind ?? null },
+        ? `${player.name} le entró ${conA(nom)} con ${arma.kind} y no lo tumbó.`
+        : `${player.name} le entró ${conA(nom)} a mano limpia y no lo tumbó.`,
+      detail: { [suNombre]: player.name, threat: nom, weapon: arma?.kind ?? null },
     })
-    return { ok: true, danio, health: restante, muerta: false, arma: arma?.kind ?? null }
+    return {
+      ok: true, danio, health: restante, muerta: false, maxHealth: bicho.max_health,
+      arma: arma?.kind ?? null, threat: nom,
+    }
   }
 
   await db.from('threats')
     .update({ alive: false, health: 0, killed_by: player.name, killed_tick: tick })
     .eq('id', bicho.id)
+  // «..., que había hecho Ilde» se podía colgar del bicho tanto como del arma:
+  // el relativo queda pegado al último sustantivo y el director leyó que Ilde
+  // había hecho al monstruo. Se corta en dos oraciones y se nombra el sujeto.
   await emitir({
     kind: 'amenaza_muerta', place_id: bicho.place_id,
     summary: arma
-      ? `${player.name} mató a ${bicho.kind} con ${arma.kind}${arma.made_by && arma.made_by !== player.name ? `, que había hecho ${arma.made_by}` : ''}.`
-      : `${player.name} mató a ${bicho.kind} sin nada en las manos.`,
-    detail: { player: player.name, threat: bicho.kind, weapon: arma?.kind ?? null },
+      ? `${player.name} mató ${conA(nom)} con ${arma.kind}.${arma.made_by && arma.made_by !== player.name ? ` El arma la había hecho ${arma.made_by}.` : ''}`
+      : `${player.name} mató ${conA(nom)} sin nada en las manos.`,
+    detail: { [suNombre]: player.name, threat: nom, weapon: arma?.kind ?? null },
   })
 
   // Lo ven, y no todos lo leen igual: al que te teme le sube el miedo, no el
@@ -102,14 +220,25 @@ export async function pelear(args: {
   // cayó el bicho, no donde está parado el jugador: pueden diferir si peleó
   // por id contra algo de otro lado.
   const testigos = (await db.from('people')
-    .select('id').eq('region_id', regionId).eq('alive', true)
+    .select('id, name, place_id').eq('region_id', regionId).eq('alive', true)
     .eq('place_id', bicho.place_id)).data ?? []
   for (const t of testigos) {
-    await recordar(t.id, player.id, `${player.name} mató a ${bicho.kind} acá`, tick)
-    await tocarVinculo(t.id, player.id, { valued: 8, feared: 5 })
+    // El que peleó no es testigo de sí mismo. Sólo puede pasar cuando pelea un
+    // NPC, que está parado en la misma lista.
+    if (t.id === player.id) continue
+    if (quien === 'person') {
+      if (args.alVerNpc) await args.alVerNpc(t, player, nom)
+      continue
+    }
+    await recordar(t.id, player, `${player.name} mató ${conA(nom)} acá`, tick)
+    const movio = await tocarVinculo(t, player, { valued: 8, feared: 5 })
+    if (args.avisarVinculo) await args.avisarVinculo(t, movio.antes, movio.ahora)
   }
 
-  return { ok: true, danio, health: 0, muerta: true, arma: arma?.kind ?? null }
+  return {
+    ok: true, danio, health: 0, muerta: true, maxHealth: bicho.max_health,
+    arma: arma?.kind ?? null, threat: nom,
+  }
 }
 
 /** El nombre del lugar, para que el summary diga dónde pasó. El director
@@ -137,6 +266,17 @@ export type Levantada = { ok: boolean; health: number; lugar: string }
  * porque si el cliente dijera cuánta le queda volvimos al teatro; el bicho
  * porque tiene que estar vivo y en el mundo para poder morderte. Nadie recibe
  * un golpe de algo que no existe.
+ *
+ * **Y la muerde todo el mundo, desde el 17 de agosto.** Hasta ese día la pasada
+ * 4b de `tick.ts` —«y muerden»— era una TERCERA implementación de esto, escrita
+ * a mano al lado de las otras dos, y difería en cuatro cosas: pegaba
+ * `6 + roll(10)` en vez de `8 + roll(8)`, decía «X lastimó a Y» en vez de «X le
+ * entró a Y, pero Y no cayó», no deduplicaba, y **no le bajaba el miedo a los
+ * testigos de la caída**. O sea que te mordían distinto según el golpe viniera
+ * del reloj del mundo o de tu propio cliente, y caerte delante de todo el
+ * pueblo no te costaba nada si el que te tumbó fue el tick. Es exactamente el
+ * modo de falla que la extracción de `pelear()` vino a cerrar, sobreviviendo en
+ * el único lugar donde había quedado abierto.
  */
 export async function recibirGolpe(args: {
   regionId: string
@@ -144,8 +284,19 @@ export async function recibirGolpe(args: {
   player: { id: string; name: string; place_id: string | null }
   /** El uuid de la amenaza. Si no viene, la primera viva donde está parado. */
   threatId?: string | null
+  /** Sumidero de eventos, igual que en `pelear()`. El tick junta los suyos y
+   *  los inserta todos juntos al final; la web no tiene ese final, así que si
+   *  no viene se escribe acá. */
+  ev?: (e: EventoPelea) => void | Promise<void>
+  /**
+   * ¿Ya se contó esta herida en este tick? Va de la mano de `ev`: el corte de
+   * ruido de abajo mira la tabla `events`, y lo que el que llama todavía tiene
+   * en un buffer sin insertar no está en la tabla. Quien buferea contesta esta
+   * pregunta; quien escribe directo no la pasa y alcanza con la consulta.
+   */
+  yaEnEsteTick?: (kind: string, playerName: string, threatKind: string) => boolean
 }): Promise<Herida> {
-  const { regionId, tick, player, threatId } = args
+  const { regionId, tick, player, threatId, ev } = args
 
   const { data: estado } = await db.from('players')
     .select('health, downed_at_tick').eq('id', player.id).maybeSingle()
@@ -165,11 +316,17 @@ export async function recibirGolpe(args: {
   if (!threatId && !player.place_id) return nada
 
   let q = db.from('threats')
-    .select('id, kind, place_id')
+    .select('id, kind, nombre, place_id')
     .eq('region_id', regionId).eq('alive', true)
   q = threatId ? q.eq('id', threatId) : q.eq('place_id', player.place_id!)
   const { data: bicho } = await q.limit(1).maybeSingle()
   if (!bicho) return nada
+
+  /** Igual que en `pelear()`, y por el mismo motivo. Acá pesa más todavía:
+   *  éste es el evento donde el bicho es el SUJETO de la frase, así que un
+   *  `kind` de treinta palabras arranca la oración y no se entiende quién
+   *  hizo qué hasta la mitad. */
+  const nom = bicho.nombre ?? bicho.kind
 
   // El mismo daño que pega el jugador a mano limpia. Que muerda parecido a
   // como pegás vos es lo que hace que un bicho sea un problema y no un
@@ -189,22 +346,33 @@ export async function recibirGolpe(args: {
   // vuelve una planilla. Lo que cambió es la vida —y esa sí se escribe golpe a
   // golpe en `players`, que es el estado del mundo—; la noticia es que algo lo
   // agarró en el sotobosque, y esa noticia es una sola.
-  const yaContado = caido ? null : (await db.from('events')
-    .select('id').eq('region_id', regionId).eq('tick', tick).eq('kind', 'herida')
-    .contains('detail', { player: player.name, threat: bicho.kind })
-    .limit(1).maybeSingle()).data
+  const yaContado = caido ? false
+    // `nom` y no `kind`: tiene que ser la MISMA clave que la del `detail` de
+    // acá abajo, o la deduplicación mira una cosa y escribe otra.
+    : (args.yaEnEsteTick?.('herida', player.name, nom) ?? false)
+      || !!(await db.from('events')
+        .select('id').eq('region_id', regionId).eq('tick', tick).eq('kind', 'herida')
+        .contains('detail', { player: player.name, threat: nom })
+        .limit(1).maybeSingle()).data
 
   if (!yaContado) {
     const lugar = await nombreDeLugar(bicho.place_id)
-    await db.from('events').insert({
-      region_id: regionId, tick,
+    const evento: EventoPelea = {
       kind: caido ? 'caida' : 'herida',
       place_id: bicho.place_id,
+      // Éste es el que se leyó al revés en producción (ticks 28 y 29): «Los del
+      // Sotobosque le entró a Prueba3D en El Sotobosque, y sigue en pie» —el
+      // que seguía en pie era Prueba3D, que aguantó, y el director lo narró
+      // como que la amenaza seguía en pie mientras en la misma crónica decía
+      // que al jugador lo habían tumbado. Se contradijo solo. El sujeto se
+      // nombra, con la misma fórmula que el golpe de ida.
       summary: caido
-        ? `${bicho.kind} tumbó a ${player.name}${lugar ? ` en ${lugar}` : ''}.`
-        : `${bicho.kind} le entró a ${player.name}${lugar ? ` en ${lugar}` : ''}, y sigue en pie.`,
-      detail: { player: player.name, threat: bicho.kind },
-    })
+        ? `${nom} tumbó a ${player.name}${lugar ? ` en ${lugar}` : ''}.`
+        : `${nom} le entró a ${player.name}${lugar ? ` en ${lugar}` : ''}, pero ${player.name} no cayó.`,
+      detail: { player: player.name, threat: nom },
+    }
+    if (ev) await ev(evento)
+    else await db.from('events').insert({ region_id: regionId, tick, ...evento })
   }
 
   // Caer delante de gente cuesta, y cuesta en el eje que corresponde. Matar un
@@ -215,11 +383,15 @@ export async function recibirGolpe(args: {
   // Sólo en la transición: la herida la ven y se olvida, la caída se cuenta.
   if (caido) {
     const testigos = (await db.from('people')
-      .select('id').eq('region_id', regionId).eq('alive', true)
+      .select('id, name, place_id').eq('region_id', regionId).eq('alive', true)
       .eq('place_id', bicho.place_id)).data ?? []
     for (const t of testigos) {
-      await recordar(t.id, player.id, `vi caer a ${player.name} acá, lo tumbó ${bicho.kind}`, tick)
-      await tocarVinculo(t.id, player.id, { feared: -6 })
+      // Tercera persona y con los dos nombres: decía «vi caer a Fulano acá» y
+      // esa fila la copia tal cual el chusmerío del tick a la cabeza de otro,
+      // que no estaba. Después dialogo.ts se la hace decir en primera persona
+      // y el testigo se multiplica solo. Ver el comentario de recordar().
+      await recordar(t.id, player, `${nom} tumbó a ${player.name} acá`, tick)
+      await tocarVinculo(t, player, { feared: -6 })
     }
   }
 
@@ -307,31 +479,59 @@ export async function levantarse(args: {
 }
 
 /** Los NPCs recuerdan lo que VIERON. Vive acá y no en tick.ts para que el
- *  combate inmediato deje la misma huella que el combate del tick. */
+ *  combate inmediato deje la misma huella que el combate del tick.
+ *
+ *  **Siempre en tercera persona y con los dos nombres puestos.** No es estilo:
+ *  un recuerdo VIAJA. El chusmerío del tick copia la fila tal cual a la cabeza
+ *  del que la escuchó, y `dialogo.ts` se la hace decir en primera persona. Con
+ *  «vi caer a Pedro acá» guardado, alguien que no estaba ahí queda de testigo
+ *  de algo que no vio. En tercera persona el recuerdo sobrevive a cualquier
+ *  cantidad de saltos: «Los del Sotobosque tumbó a Pedro» sigue siendo verdad
+ *  lo cuente quien lo cuente. **Es la única, y hasta hoy `tick.ts` tenía otra
+ *  igual con el mismo comentario al lado.** */
 export async function recordar(
-  personId: string, playerId: string, what: string, tick: number,
+  personId: string, player: { id: string }, what: string, tick: number,
 ) {
   await db.from('memories').insert({
-    person_id: personId, about_kind: 'player', about_id: playerId, what, tick,
+    person_id: personId, about_kind: 'player', about_id: player.id, what, tick,
   })
 }
 
+/**
+ * Mueve el vínculo de un NPC hacia un JUGADOR. La escritura y nada más.
+ *
+ * **Es la única que escribe `bonds` hacia un jugador en todo el servidor**, y
+ * eso también era una copia: `tick.ts` tenía la suya, idéntica salvo que le
+ * faltaba el `.limit(1)` de acá — sin él, `maybeSingle()` da error cuando hay
+ * más de una fila y el vínculo no se mueve en silencio, que es el mismo modo
+ * de falla que ya se pagó dos veces en este proyecto.
+ *
+ * Devuelve el antes y el después del aprecio porque quien llama a veces tiene
+ * algo que decir cuando se cruza un escalón —`tick.ts` emite ahí su evento
+ * `confianza`— y esa decisión no es de este archivo: acá se escribe el estado,
+ * no se narra.
+ */
 export async function tocarVinculo(
-  personId: string, playerId: string, delta: { valued?: number; feared?: number },
-) {
+  person: { id: string },
+  player: { id: string },
+  delta: { valued?: number; feared?: number },
+): Promise<{ antes: number; ahora: number }> {
   const { data: actual } = await db
     .from('bonds').select('id, valued, feared')
-    .eq('person_id', personId).eq('toward_id', playerId).limit(1).maybeSingle()
+    .eq('person_id', person.id).eq('toward_id', player.id).limit(1).maybeSingle()
   const clamp = (n: number) => Math.max(-100, Math.min(100, n))
+  const antes = actual?.valued ?? 0
+  const ahora = clamp(antes + (delta.valued ?? 0))
   if (actual) {
     await db.from('bonds').update({
-      valued: clamp(actual.valued + (delta.valued ?? 0)),
+      valued: ahora,
       feared: clamp(actual.feared + (delta.feared ?? 0)),
     }).eq('id', actual.id)
   } else {
     await db.from('bonds').insert({
-      person_id: personId, toward_kind: 'player', toward_id: playerId,
-      valued: clamp(delta.valued ?? 0), feared: clamp(delta.feared ?? 0),
+      person_id: person.id, toward_kind: 'player', toward_id: player.id,
+      valued: ahora, feared: clamp(delta.feared ?? 0),
     })
   }
+  return { antes, ahora }
 }

@@ -119,9 +119,16 @@ Ya nos mordió: el insert falla en silencio y la acción nunca existe.
   director lee `summary`. Bloquea el bilingüe; no bloquea la Fase 0.
 - **Un muerto puede tomar una agenda nueva** en el mismo tick en que muere.
   Se ve feo en la crónica.
-- **La auditoría es a nivel de id, no de afirmación.** El director puede citar
-  ids válidos y sobre-leerlos. Pasó una vez que sospeché eso y al chequear
-  contra la base resultó que había narrado bien — pero el agujero existe.
+- **La auditoría por ids no sirve para detectar lo que falla, y ya no es una
+  sospecha.** Este renglón decía que el agujero era teórico. **Es el
+  comportamiento normal.** El 17 de agosto se auditaron crónicas a mano contra
+  la base por primera vez: **tres crónicas mentirosas de producción pasaron el
+  chequeo automático con `inventados: []`** — dos jugadores llegaron a recibir
+  la muerte de una NPC que está viva. Las mentiras no usan ids: o citan uno
+  válido y lo sobre-leen, o sacan la afirmación del bloque de contexto.
+  El prompt ya se arregló y hay una señal nueva que sí lo ve
+  (`chronicles.unbacked_names`), pero **el chequeo por ids sigue sin servir para
+  esto y no hay que confiar en que dé limpio.**
 
 ## Cómo trabajar acá
 
@@ -136,3 +143,23 @@ corré el comando antes de escribir la conclusión.
 
 **El hook de typecheck corre solo** al tocar `lib/*.ts` (`.claude/settings.json`).
 Si falla, arreglalo antes de seguir — no lo desactives.
+
+**`grep` acá es `ugrep`, y ANTE UN ARCHIVO BINARIO NO DICE NADA: devuelve
+vacío, no un aviso.** Un `grep -c` de algo que existe puede darte cero líneas de
+salida y hacerte concluir que el código no está. Ya pasó, y casi cuesta que se
+reescribiera trabajo verificado.
+
+Lo que vuelve "binario" a un `.ts` es cualquier byte de control. El caso real:
+alguien escribió un **byte NUL literal** en un template literal
+—`` `${e.tick}<NUL>${e.summary}` ``, como separador de una clave— en vez de la
+secuencia de escape. TypeScript compila igual, el código anda igual, y el
+archivo entero **desaparece de toda búsqueda**.
+
+- Se escribe **`\x00`** (cuatro caracteres), nunca el byte.
+- Si un `grep` te da vacío y no te lo creés, comprobá con
+  `file archivo.ts` — si dice `data` en vez de `text`, ése es el problema — o
+  con `awk '/patrón/{print NR}'`, que sí lee binarios.
+- `grep -a` fuerza el modo texto y sirve para confirmarlo.
+
+**Y la lección de fondo, que es la de siempre: una herramienta que devuelve
+vacío no está diciendo "no hay". Puede estar diciendo "no miré".**

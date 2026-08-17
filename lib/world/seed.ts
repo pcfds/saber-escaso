@@ -99,15 +99,34 @@ const PROCEDENCIAS: Record<Origen, string> = {
 // Las voces se escriben una por una, nunca por oficio. Dos herreras del mismo
 // valle tienen que sonar distinto igual. Las procedencias, al revés: se
 // escriben por origen y se repiten a propósito.
+//
+// ── `place` y `home` son dos cosas distintas ───────────────────────────────
+//
+// `place` es dónde arranca —dónde la agarra el primer día— y `home` es **dónde
+// duerme**. Se separan porque casi nadie duerme donde trabaja: Marta se pasa la
+// vida en el Sotobosque y vive en la aldea, como cualquiera que entra al monte
+// y vuelve. Los dos que sí coinciden lo hacen porque su historia lo dice —Ilde
+// se quedó con la fragua el día que se murió el padre, Bruno llegó a esa fragua
+// a los quince— y Ren es la única que duerme en un lugar salvaje, que es la
+// mitad de lo que la hace Ren.
+//
+// El que no tenga `home` duerme parado donde lo dejó el día. El chequeo del
+// final lo revienta acá, que es donde se ve: una región sin casas salió mal,
+// igual que una región sin nadie que sepa nada.
+//
+// El HORARIO no está acá y es a propósito: sale de la tabla `horarios` por
+// oficio (ver la migración de la rutina) y se guarda resuelto en cada fila. Es
+// un hecho del oficio, no de la persona — la fragua abre temprano la atienda
+// quien la atienda — y el autor lo puede torcer después para uno solo.
 const PEOPLE = [
-  { name: 'Ilde', trade: 'herrera', place: 'fragua', teaches: true,
+  { name: 'Ilde', trade: 'herrera', place: 'fragua', home: 'fragua', teaches: true,
     disposition: 'Habla poco y trabaja de espaldas a la puerta. Enseña a quien se queda tres días sin pedir nada.',
     voice: 'Habla poco y va al grano: una frase corta, bien dicha, y se calla. No saluda ni se despide, y no repite lo que ya dijo. Contesta con el oficio — si algo se puede o no se puede, cuánto lleva, y qué hace falta para que salga bien. Nunca habla de lo que siente ni de gente que no está presente. Cuando algo le importa hace una pregunta corta, una sola. Tutea a todo el mundo, sin excepción. No usa signos de exclamación.',
     procedencia: 'valle',
     historia: 'Aprendió de su padre, que le pegaba, y se quedó con la fragua el día que él se murió. Tuvo un aprendiz antes de Bruno; se fue un invierno y no lo nombra. El yunque se le partió y lo tiene atado con fleje: todo lo que forja mientras tanto le sale peor de lo que ella sabe hacerlo, y eso la tiene de mal humor hace meses.',
     knows: ['forja-simple', 'temple-de-rio'],
     agenda: { goal: 'rehacer el yunque partido antes de que baje el frío', needs: 'forja-simple' } },
-  { name: 'Bruno', trade: 'aprendiz', place: 'fragua', teaches: false,
+  { name: 'Bruno', trade: 'aprendiz', place: 'fragua', home: 'fragua', teaches: false,
     disposition: 'Ansioso. Quiere el temple de río y todavía no se ganó el derecho a mirarlo.',
     // Sus tres muletillas eran "igual", "o sea" y "nada", y eran lo más
     // rioplatense que había en todo el valle. No se reemplazan por otras tres
@@ -120,7 +139,7 @@ const PEOPLE = [
     historia: 'Llegó a la fragua a los quince porque en su casa eran seis y no entraban. Le debe a Odila un frasco del invierno pasado y hace lo imposible por no cruzarla en la aldea. Está convencido de que si ve el temple de río una sola vez le sale, y ese es exactamente su problema.',
     knows: ['forja-simple'],
     agenda: { goal: 'que Ilde le muestre el temple de río', needs: 'temple-de-rio' } },
-  { name: 'Marta', trade: 'cazadora', place: 'bosque', teaches: true,
+  { name: 'Marta', trade: 'cazadora', place: 'bosque', home: 'aldea', teaches: true,
     disposition: 'Entra al Sotobosque sola y vuelve. Le molesta que se lo pregunten.',
     // "Frases sin adjetivos, en pasado" era el defecto de Ilde en otra forma:
     // prohibir una clase de palabra y fijar un tiempo verbal es gramática, no
@@ -133,7 +152,7 @@ const PEOPLE = [
     historia: 'Entró al Sotobosque con su hermano hace nueve años y volvió sola. Esa parte no la cuenta. Vio una vez un claro con luz que no venía de arriba y no lo volvió a encontrar; desde entonces entra igual, cada semana, y vuelve. Lee las sendas mejor que nadie del valle y eso la mantiene viva y sola.',
     knows: ['lectura-de-sendas'],
     agenda: { goal: 'encontrar el claro que vio una vez y no volvió a encontrar', needs: null } },
-  { name: 'Odila', trade: 'destiladora', place: 'aldea', teaches: true,
+  { name: 'Odila', trade: 'destiladora', place: 'aldea', home: 'aldea', teaches: true,
     disposition: 'Cobra por adelantado y se acuerda de quién no le pagó. Todos le deben algo.',
     // "Querido, mi amor, tesoro" era la otra herencia rioplatense. El registro
     // que se buscaba —dulzura que aprieta— no dependía de esas palabras: "hija"
@@ -144,7 +163,7 @@ const PEOPLE = [
     historia: 'Aprendió a destilar de una mujer que pasó por el valle un verano y se fue sin dejar el nombre. Vive de que todos le deban algo chico: es más seguro que cobrar de una vez. Bruno le debe desde el invierno pasado y lo va a mencionar cada vez que pueda, sonriendo.',
     knows: ['destilado-de-raiz'],
     agenda: { goal: 'cobrarle a Bruno lo del invierno pasado', needs: null } },
-  { name: 'Sarn', trade: 'guardia', place: 'aldea', teaches: false,
+  { name: 'Sarn', trade: 'guardia', place: 'aldea', home: 'aldea', teaches: false,
     disposition: 'Contratado, no leal. Cumple mientras le paguen y lo dice de frente.',
     // El usted de Sarn es su marca de procedencia más fuerte y por eso está en
     // la voz y no en el texto compartido: es la costumbre de un hombre pagado,
@@ -155,7 +174,7 @@ const PEOPLE = [
     historia: 'Vino con una compañía que se disolvió tres valles atrás y se quedó acá porque acá todavía le pagaban. No es de ningún lado y no finge que sí. Este mes no le pagaron y hace tres noches que duerme mal; lo dice como un dato, igual que diría que llovió.',
     knows: [],
     agenda: { goal: 'que alguien le pague la guardia de este mes', needs: null } },
-  { name: 'La vieja Ren', trade: 'nadie sabe', place: 'ruina', teaches: false,
+  { name: 'La vieja Ren', trade: 'nadie sabe', place: 'ruina', home: 'ruina', teaches: false,
     disposition: 'Vive en la Casa Quemada y no explica por qué. Es la única que sabe la runa de quietud.',
     // "Mide el tiempo en inviernos" salió de su voz y se fue a la procedencia:
     // no es un tic suyo, es de dónde viene. Es el ejemplo más limpio de para
@@ -165,7 +184,7 @@ const PEOPLE = [
     historia: 'Vivía en la Casa Quemada antes del incendio y se quedó adentro después. Le enseñó una runa a alguien, una vez, y lo que pasó después es la razón por la que no piensa volver a hacerlo. Lleva la cuenta de los inviernos que le quedan y no le sobran.',
     knows: ['runa-de-quietud', 'runa-de-brasa'],
     agenda: { goal: 'morirse sin haberle enseñado la runa de quietud a nadie', needs: null } },
-  { name: 'Tobio', trade: 'chico del camino', place: 'camino', teaches: false,
+  { name: 'Tobio', trade: 'chico del camino', place: 'camino', home: 'camino', teaches: false,
     disposition: 'Sabe quién entró y quién salió de la región. Lo cuenta gratis, que es peor.',
     // Una voz no puede pedir un tipo de frase que obligue a inventar hechos:
     // la primera versión de ésta decía "arranca con ayer o el otro día" y el
@@ -205,17 +224,33 @@ async function main() {
   if (knowledgeError || !knowledge) throw knowledgeError
   const knowledgeBySlug = new Map(knowledge.map((k) => [k.slug, k.id]))
 
+  // El horario de cada oficio. Una consulta para las siete personas: la tabla
+  // es catálogo del autor y es global, como `knowledge`. Lo que no figure se
+  // lleva el default de la columna, que es el día de cualquiera (6 a 22).
+  const horarios = new Map(((await db
+    .from('horarios').select('trade, desde, hasta')).data ?? [])
+    .map((h) => [h.trade as string, h]))
+
   for (const spec of PEOPLE) {
     // Un slug de origen mal escrito dejaría a esa persona sin procedencia y
     // hablando como nadie. Se revienta acá, que es donde se ve.
     const procedencia = PROCEDENCIAS[spec.procedencia as Origen]
     if (!procedencia) throw new Error(`${spec.name} apunta a un origen que no existe: ${spec.procedencia}`)
 
+    const casa = placeBySlug.get(spec.home)
+    if (!casa) throw new Error(`${spec.name} duerme en un lugar que no existe: ${spec.home}`)
+    const jornada = horarios.get(spec.trade)
+
     const { data: person, error } = await db
       .from('people')
       .insert({
         region_id: region.id,
         place_id: placeBySlug.get(spec.place),
+        // Dónde duerme, y a qué hora está en pie. Ver el comentario largo de
+        // arriba: `place` es dónde trabaja y `home` es dónde vuelve.
+        home_place_id: casa,
+        jornada_desde: jornada?.desde ?? 6,
+        jornada_hasta: jornada?.hasta ?? 22,
         name: spec.name,
         trade: spec.trade,
         disposition: spec.disposition,
@@ -267,6 +302,16 @@ async function main() {
     .select('id', { count: 'exact', head: true })
     .eq('holder_kind', 'person')
   if (!count) throw new Error('La región salió sin ningún saber. El generador está roto.')
+
+  // El otro chequeo del generador, y es el mismo criterio: una región donde
+  // alguien no tiene dónde dormir no es un lugar habitado, es un decorado con
+  // gente parada. Se revienta acá y no en el tick, porque en el tick se ve como
+  // una persona que nunca vuelve a ninguna parte y nadie sabe por qué.
+  const { count: sinCasa } = await db
+    .from('people')
+    .select('id', { count: 'exact', head: true })
+    .eq('region_id', region.id).is('home_place_id', null)
+  if (sinCasa) throw new Error(`${sinCasa} personas salieron sin casa. El generador está roto.`)
 
   console.log(`Sembrado: ${PEOPLE.length} personas, ${PLACES.length} lugares, ${count} saberes repartidos.`)
 }

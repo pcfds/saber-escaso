@@ -19,6 +19,15 @@
  * ⚠ Cada verbo de esta lista tiene que estar TAMBIÉN en el CHECK de
  *   `actions.verb`, en una migración. Si no está, el insert falla y la acción
  *   nunca existe — sin error visible del lado del jugador. Ya nos mordió.
+ *
+ * ⚠ **`preparar` y `lanzar` NO están acá y no hay que agregarlos.** Existen en
+ *   el CHECK de `actions.verb` —son once verbos, no nueve— pero son de la
+ *   magia y se resuelven en el momento, como `pelear` por la web: los escribe
+ *   `lib/world/magia.ts` con `resolved_tick` ya puesto, para dejar el registro
+ *   de lo que hiciste. `resolveAction()` del tick no los conoce, así que
+ *   encolarlos desde acá los dejaría pendientes para siempre y el tick los
+ *   contestaría "verbo desconocido". Un hechizo que tarda seis horas en salir
+ *   no es un hechizo.
  */
 import { db, getRegion } from '../db.js'
 
