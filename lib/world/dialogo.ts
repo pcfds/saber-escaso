@@ -1765,9 +1765,26 @@ export async function hablarCon(
       verbo: 'aprender',
       texto: `Pedirle que te enseñe`,
       posible: puedeEnsenarte,
+      // **El corte de este `porque` estaba en 10 y la puerta abre en 35.**
+      // Entre esos dos números te quedaba un botón apagado SIN NINGÚN MOTIVO
+      // al lado, que es exactamente el reclamo *"no entendés qué pasa"*.
+      //
+      // Se encontró jugando: le llevé a Marta la piedra que andaba buscando,
+      // el regalo le movió el aprecio, y la opción de que te enseñe quedó
+      // gris y muda. El jugador acaba de hacer lo correcto, ve que algo
+      // cambió, y la pantalla no le dice qué le falta.
+      //
+      // Ahora los dos escalones se nombran, y se nombran distinto a propósito:
+      // «todavía no te conoce» es "sos un desconocido"; «te tiene medido pero
+      // no te confiaría lo suyo» es "vas bien y falta". **La diferencia entre
+      // esos dos mensajes es la única forma que tiene el jugador de saber que
+      // está avanzando**, porque el número no se muestra nunca — y no se va a
+      // mostrar: un porcentaje de confianza rompe la ilusión de que son
+      // personas.
       porque: !npc.teaches ? `${npc.name} no le enseña lo suyo a nadie`
-        : v < 10 ? `${npc.name} todavía no confía en ti`
         : saberesNpc.every((s) => saberesJug.includes(s)) ? 'ya sabes todo lo que sabe'
+        : v < 10 ? `${npc.name} todavía no te conoce`
+        : v < UMBRAL_ENSENAR ? `${npc.name} te tiene medido, pero todavía no te confiaría lo suyo`
         : undefined,
     },
     {
