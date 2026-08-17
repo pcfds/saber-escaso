@@ -13,6 +13,43 @@ silencio y escribir otra cosa: así es como se pierde un diseño.
 
 ---
 
+## 0. Quién decidió qué. Leé esto antes que nada.
+
+**Este documento mezclaba dos cosas distintas con el mismo peso, y eso hizo
+perder tiempo de verdad.** Hay párrafos que son decisiones de la dirección del
+proyecto y párrafos que son inferencias de quien escribió el documento, y hasta
+hoy se leían igual. El resultado previsible: la dirección tuvo que venir a
+corregir cosas que nunca había decidido.
+
+El caso que lo dejó claro: acá decía *"la economía existe y no tiene plata, a
+propósito"*, escrito con la misma autoridad que todo lo demás. **Nadie lo había
+decidido — era una lectura de quien redactó.** La corrección fue: *"no, debe
+haber economía: vender, poder tener plata de distintos tipos"*. Y no fue la
+única: el sistema del saber escaso se estaba aplicando a comer, dormir y
+ordeñar, cuando **es para lo que no es simple de la vida** (§8.1).
+
+Entonces, de acá en adelante, **tres marcas y no se negocia**:
+
+> **DECIDIDO** — lo dijo la dirección. Se cita textual cuando se puede. No se
+> cambia sin que lo cambie ella.
+>
+> **INFERIDO** — lo dedujo quien escribe, de algo decidido. **Es una hipótesis
+> de trabajo, no una regla**, y cualquiera la puede discutir con evidencia. Si
+> te está bloqueando, preguntá en vez de obedecer.
+>
+> **MEDIDO** — sale de un número, y el número está al lado. Éstas son las más
+> fuertes de las tres, porque se pueden volver a comprobar.
+
+**La regla para el que escribe acá:** si vas a poner una regla que nadie
+decidió y nadie midió, marcala **INFERIDO** o no la pongas. Una inferencia
+disfrazada de decisión hace que otro la defienda, que un tercero construya
+encima, y que la dirección tenga que pelear contra su propio documento.
+
+Lo de arriba sin marca es anterior a esta convención y hay que ir marcándolo a
+medida que se toca. **Ante la duda, es INFERIDO.**
+
+---
+
 ## 1. La idea, en una frase
 
 **Es un juego sobre necesitar a alguien.**
