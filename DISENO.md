@@ -558,6 +558,46 @@ distintas** que todos los juegos mezclan.
   años. Eso es coleccionar, viajar, buscar maestros, que se te muera uno antes
   de enseñarte.
 
+#### Qué entra al saber escaso y qué no. Ésta es la corrección que faltaba.
+
+La dirección del proyecto lo dijo así, y corrige una lectura que se estaba
+aplicando de más:
+
+> *"Pensá en juegos normales. Lo del saber es para aprender cosas y transmitir
+> cosas **no simples de la vida**. A comer y a leer se aprende solo. Cosas
+> mágicas, o de trabajo especiales, o pociones raras."*
+
+Tiene razón, y el error era mío: **estaba metiendo todo adentro del sistema.**
+Si cada cosa que se puede hacer necesita que alguien te la enseñe primero, el
+mundo se siente cerrado con llave — llegás y no podés hacer NADA, ni lo obvio.
+Eso no es escasez, es una pared. Y encima es falso: nadie necesita un maestro
+para agacharse a juntar una raíz o para revolver una olla.
+
+Entonces el mundo tiene **dos niveles**, y sólo el segundo es el juego:
+
+**Lo corriente. Nadie lo enseña, todos lo pueden hacer.** Comer, dormir,
+caminar, juntar lo que crece, cargar cosas, cocinar algo simple, ordeñar,
+encender un fuego. **No lleva fila en `knows` y no se pierde nunca.** Es lo que
+hace que el valle se pueda habitar el primer día, y su función es exactamente
+ésa: que llegues sin nada y aun así tengas algo que hacer con las manos.
+
+**Lo escaso. Vive en una persona y se muere con ella.** La magia, los oficios
+de verdad y las cosas raras: templar un filo en agua corriente, las cuatro
+runas, un destilado que no es un caldo. Esto sí lleva fila en `knows`, sí
+necesita que alguien te lo enseñe, y sí desaparece del mundo con el último que
+lo sabía.
+
+**La prueba para saber de qué lado va algo:** *¿lo sabría hacer cualquiera que
+haya vivido acá un año?* Si la respuesta es sí, no entra al sistema. Si hace
+falta que alguien te lo muestre —y que quiera mostrártelo—, entra.
+
+> **Y hay algo que revisar con esto puesto: `Cuajado de leche` está del lado
+> equivocado.** Entró como un saber que enseña Sarn, y ordeñar una vaca es
+> justamente el ejemplo de lo corriente. Lo que sí puede ser escaso es lo que se
+> HACE con la leche, si alguna vez es algo más que un cuenco. Queda anotado para
+> la rama de economía; no se toca sin medir qué se lleva puesto, porque hoy es
+> lo único que hace que Sarn tenga algo que enseñar.
+
 ### 8.2 Las dos formas de conseguirlo, y son opuestas
 
 | | Aprender | Absorber |
