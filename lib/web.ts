@@ -20,7 +20,7 @@ import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta, loQueLleva, RUNAS }
 // decía "ya confía en vos, pedile que te enseñe" con 10 de aprecio, cuando el
 // umbral real había pasado a 35. O sea, el juego mandaba a hacer algo que iba
 // a fallar. Un tutorial que miente es peor que ninguno.
-import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe, rutinaDe } from './world/tick.js'
+import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe, rutinaDe, tomar, CUAJADA } from './world/tick.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -284,13 +284,17 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
   if (!found) return null
   const { region, player } = found
 
-  const [places, people, sabe, ultima] = await Promise.all([
+  const [places, people, sabe, ultima, lleva] = await Promise.all([
     db.from('places').select('id, slug, name').eq('region_id', region.id),
     db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
     db.from('knows').select('knowledge:knowledge_id (name)')
       .eq('holder_kind', 'player').eq('holder_id', player.id),
     db.from('chronicles').select('text, to_tick').eq('player_id', player.id)
       .order('to_tick', { ascending: false }).limit(1).maybeSingle(),
+    // Lo que lleva encima y se puede usar. Hoy es una sola cosa; el día que
+    // sean tres esto es un `in()` y el botón un `select`.
+    db.from('objects').select('kind, quality, made_by')
+      .eq('holder_kind', 'player').eq('holder_id', player.id).eq('kind', CUAJADA),
   ])
 
   const lugar = places.data?.find((p) => p.id === player.place_id)
@@ -363,6 +367,14 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
       aqui.map((p) => ({ v: p.name, t: p.name })))}</select>`) : ''}
     ${aqui.length && saberes.length ? accion('ensenar', 'Enseñarle a', `<select name="target">${opts(
       aqui.map((p) => ({ v: p.name, t: p.name })))}</select>`) : ''}
+    ${(lleva.data ?? []).length
+      // Se dice para qué sirve en el mismo botón. Un objeto que no explica qué
+      // hace es el reclamo de siempre —*"¿en el juego hace algo el destilado de
+      // raíz?"*— pero del lado del inventario en vez del de los saberes.
+      ? accion('tomar', `Tomarte el ${CUAJADA}`)
+        + `<p class="sub" style="margin:-6px 0 12px">De pie te cierra la herida donde estés.`
+        + ` Si estás en el suelo te pone en pie ahí mismo, en vez de amanecer en la aldea.</p>`
+      : ''}
     ${aqui.length === 0 ? '<p class="sub">No hay nadie acá.</p>' : ''}
 
     <div class="sec">Quién está acá</div>
@@ -824,6 +836,29 @@ export async function handler(
         }))
       }
 
+      // Tomarse algo de lo que llevás encima. Inmediato como el golpe y el
+      // trazo: una cuajada que tarda seis horas en hacer efecto no es una
+      // cuajada.
+      //
+      // Es la otra mitad de `/levantarse`, y el cliente tiene que ofrecer las
+      // dos en la pantalla de la caída: **levantarse te deja entero en la
+      // aldea; el cuenco te deja a medias donde caíste.** Sin las dos juntas,
+      // el jugador no ve que eligió nada.
+      if (req.method === 'POST' && parts[2] === 'tomar') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        const r = await tomar({
+          regionId: found.region.id, tick: found.region.tick + 1,
+          player: found.player, que: f.get('que'),
+        })
+        // Igual que el golpe: primero pasa la cosa, después cierra el día en
+        // el que pasó. Al revés el evento cae en un día ya cerrado y el que se
+        // levantó no se entera de que se levantó.
+        await latir(found.region)
+        return json(r)
+      }
+
       // Levantarse. No cuesta tiempo ni saber: cuesta la posición y la cara.
       if (req.method === 'POST' && parts[2] === 'levantarse') {
         const found = await byToken(token)
@@ -1092,6 +1127,20 @@ function pasos(m: {
           + ' Mantén pulsada R, elige el trazo y suelta sobre lo que quieras alcanzar.',
         donde: '',
       })
+  }
+
+  // 1c. Lo que llevás encima y no es para regalar.
+  //
+  // Está escrito como un HECHO y no como una orden a propósito: es cierto
+  // llevés el cuenco donde lo llevés, y sigue siendo cierto el día en que
+  // caigas. Un renglón que diga "pulsa X" antes de que exista la X es un
+  // tutorial que miente, que es peor que ninguno.
+  if (m.objetos.some((o) => o.kind === CUAJADA)) {
+    out.push({
+      texto: `Llevas un ${CUAJADA}. Es lo único que te pone en pie donde caíste,`
+        + ' en vez de amanecer en la aldea; y de pie te cierra la herida sin volver al pueblo.',
+      donde: '',
+    })
   }
 
   // 2. Si ya sabés hacer algo, hacelo — practicar es lo que mejora la mano.

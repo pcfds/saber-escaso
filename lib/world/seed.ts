@@ -29,6 +29,12 @@ const KNOWLEDGE = [
     description: 'Saber por dónde se sale del Sotobosque cuando las sendas cambian.' },
   { slug: 'destilado-de-raiz', name: 'Destilado de raíz', kind: 'receta',
     description: 'Un frasco que sostiene una atadura de más por una noche.' },
+  // Lo que se le saca a un animal manso sin matarlo. La vaca que te deja
+  // acercarte es la prueba de que alguien la tiene; desde acá hay un nombre.
+  // `makes`, `makes_at` y `para_que` los pone la migración, igual que para los
+  // cuatro de arriba: acá va lo que la región necesita para existir.
+  { slug: 'cuajado-de-leche', name: 'Cuajado de leche', kind: 'receta',
+    description: 'Ordeñar al amanecer y cuajar la leche antes de que se corte. Sale un cuenco espeso que aguanta el día. Lo sabe el que anduvo con animales de carga, no el que tuvo una vaca.' },
   { slug: 'runa-de-brasa', name: 'Runa de brasa', kind: 'magia',
     description: 'Tres trazos. Prende lo que ya estaba seco. Se aprende mirando, no leyendo.' },
   { slug: 'runa-de-quietud', name: 'Runa de quietud', kind: 'magia',
@@ -163,7 +169,11 @@ const PEOPLE = [
     historia: 'Aprendió a destilar de una mujer que pasó por el valle un verano y se fue sin dejar el nombre. Vive de que todos le deban algo chico: es más seguro que cobrar de una vez. Bruno le debe desde el invierno pasado y lo va a mencionar cada vez que pueda, sonriendo.',
     knows: ['destilado-de-raiz'],
     agenda: { goal: 'cobrarle a Bruno lo del invierno pasado', needs: null } },
-  { name: 'Sarn', trade: 'guardia', place: 'aldea', home: 'aldea', teaches: false,
+  // `teaches: true` desde el día que tuvo algo que enseñar, y no antes: estaba
+  // en false porque no sabía hacer nada. Dejarlo en false ahora sería fabricar
+  // una segunda pared como la de Ren, y **una sola persona del valle puede
+  // decidir que no.** Es ella, y es la mitad de lo que la hace Ren.
+  { name: 'Sarn', trade: 'guardia', place: 'aldea', home: 'aldea', teaches: true,
     disposition: 'Contratado, no leal. Cumple mientras le paguen y lo dice de frente.',
     // El usted de Sarn es su marca de procedencia más fuerte y por eso está en
     // la voz y no en el texto compartido: es la costumbre de un hombre pagado,
@@ -171,8 +181,8 @@ const PEOPLE = [
     // ella viene con dichos, el de él con condiciones.
     voice: 'Frases planas, el mismo tono para una amenaza que para el clima. Declara las condiciones antes que nada: qué hace, hasta dónde, y por cuánto. No adorna, no bromea, no se ofende. Dice "no es asunto mío" y lo dice en serio. Trata de usted a todo el mundo, sin excepción, y no es respeto. Cuando está cansado se le repiten las palabras.',
     procedencia: 'compania',
-    historia: 'Vino con una compañía que se disolvió tres valles atrás y se quedó acá porque acá todavía le pagaban. No es de ningún lado y no finge que sí. Este mes no le pagaron y hace tres noches que duerme mal; lo dice como un dato, igual que diría que llovió.',
-    knows: [],
+    historia: 'Vino con una compañía que se disolvió tres valles atrás y se quedó acá porque acá todavía le pagaban. No es de ningún lado y no finge que sí. Este mes no le pagaron y hace tres noches que duerme mal; lo dice como un dato, igual que diría que llovió. En la compañía le tocaban las bestias de la columna, y de ahí le quedó lo que sabe hacer con las manos: ordeña al amanecer, cuando se le termina la guardia, y cuaja la leche antes de que se corte.',
+    knows: ['cuajado-de-leche'],
     agenda: { goal: 'que alguien le pague la guardia de este mes', needs: null } },
   { name: 'La vieja Ren', trade: 'nadie sabe', place: 'ruina', home: 'ruina', teaches: false,
     disposition: 'Vive en la Casa Quemada y no explica por qué. Es la única que sabe la runa de quietud.',

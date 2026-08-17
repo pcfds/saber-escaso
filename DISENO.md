@@ -287,6 +287,37 @@ Y el criterio para sumar assets nuevos, que sale de lo mismo: **del mismo autor,
 CC0, y con la procedencia archivada** (`assets/PROCEDENCIA.md`, con URL y md5 de
 cada zip). Un pack de otro artista no es un atajo, es empezar de nuevo.
 
+#### La corrección del 18 de agosto: la regla del autor único es POR CATEGORÍA
+
+La frase de arriba se escribió cuando había un solo pack y hay que corregirla,
+porque tal cual está mandó a defender una casa que la dirección del proyecto ya
+había rechazado dos veces: ***"parece un mundo de Disney para mujeres"***.
+
+Lo que se descubrió al mirar el A/B en `escenas/prueba_casas.tscn` es que el
+problema de esa casa **no era el color** —la aduana de `paleta.gd` ya le había
+bajado los techos de luma 145 a 33— sino la geometría: **el muro del Fantasy
+Town Kit tiene la ventana pintada sobre una cara plana.** No hay hueco, no hay
+jamba, no hay espesor. Ninguna cantidad de paleta arregla un agujero dibujado, y
+sostener el pack por coherencia de autor era sostener el defecto.
+
+Así que **la arquitectura del valle se mudó al Medieval Village MegaKit de
+Quaternius** (CC0, misma procedencia archivada) y la regla queda dicha bien:
+
+> **Un solo autor POR CATEGORÍA, y adentro de cada categoría un solo kit.**
+> Arquitectura: Quaternius. Vegetación y enseres: Kenney. Bichos: Quaternius.
+> Lo que se lee como error no es que dos packs convivan en un mapa de 360
+> metros: es que dos packs compitan **en la misma pieza** —una rueda de molino
+> de un autor pegada a una pared del otro— o que convivan **con dos paletas**.
+> Lo segundo ya está resuelto y es lo que hace que esto se banque: los dos
+> autores pasan por `Paleta.domar_material()` y salen en la misma escalera de
+> valores y bajo el mismo techo de saturación.
+
+Y la regla que decide cuándo se cambia de kit, que es la que faltaba: **se
+cambia cuando la geometría no puede hacer el trabajo, nunca por gusto.** Kenney
+se queda con el bosque porque un pino suyo son 54 triángulos y el más barato del
+otro son 1.576, y con 2.500 árboles eso es la diferencia entre un valle y una
+presentación. Es aritmética en los dos casos, no preferencia.
+
 ### La ficha de identidad. Cinco reglas, y alcanzan.
 
 **Escrita el 18 de agosto de 2026**, porque hasta acá el criterio existía pero
@@ -359,6 +390,25 @@ atraviesa medio día del valle.
 - **No se inventa un color afuera de `paleta.gd`.** Ni en GDScript, ni en un
   `uniform` de shader, ni "sólo esta vez". Un color suelto es deuda, y el
   archivo tiene fábricas de material justamente para que nadie tenga excusa.
+
+#### Un corolario de la regla 1 que costó dos rondas: **una textura tampoco elige su peldaño**
+
+Cuando entra un pack CON textura, la tentación es darlo por bueno —"ya viene
+domado"— y es falso. Los siete trim sheets del MegaKit se hornearon a disco con
+la saturación al techo y **con el valor comprimido al mismo medio tono**:
+medidos sobre los PNG del repo, `T_Plaster` da V 0,574 y **`T_RoundTiles`, que
+es la TEJA, da V 0,585**. O sea que el techo entraba al valle en el peldaño de
+un muro, y una casa dejaba de ser *caja clara con tapa oscura* para ser una sola
+mancha del color del suelo. Medido en pantalla antes de corregirlo: techo 75
+contra muro 117, cuando Kenney daba 48 contra 131.
+
+Se arregla donde se arreglan los colores y no tocando el binario: `albedo_color`
+multiplica al trim sheet, así que **un multiplicador por material lleva la
+textura a su peldaño sin perderle el grano** (`Paleta.KIT_QUATERNIUS`). La regla
+general que sale de ahí:
+
+> **Una textura aporta la MATERIA. El peldaño lo sigue eligiendo `paleta.gd`.**
+> Un pack texturado no está domado hasta que alguien midió su valor medio.
 
 ### Control
 - La habilidad es del jugador con teclado y mouse. **No** veinte mil hechizos

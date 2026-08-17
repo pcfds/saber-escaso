@@ -3695,6 +3695,177 @@ async function abrirSiguienteMeta(
     } })
 }
 
+// ─────────────────────────────────────────────────────────────
+// TOMAR — usar lo que llevás encima
+// ─────────────────────────────────────────────────────────────
+//
+// Es el primer verbo que consume una cosa a pedido del jugador. El frasco de
+// raíz lo consume `preparar()` por dentro, sin que nadie lo pida; hasta hoy no
+// había manera de sacar algo del inventario que no fuera dárselo a otro.
+//
+// **Por qué existe la cuajada, en una frase:** hoy la única forma de curarse en
+// el valle es caerse. `players.health` baja con cada mordida y no sube nunca
+// sola — las dos subidas del código son `levantarse()`, que te deja entero pero
+// en la aldea, y la runa de vena, que necesita a otro que la sepa, la haya
+// colgado hoy y esté al lado. A un jugador con veinte de vida en el Sotobosque
+// le conviene quedarse quieto y dejar que lo maten: sale gratis y vuelve
+// entero. Un juego donde morirse es la cura barata está roto.
+//
+// Y lo que la cuajada compra NO es vida, es **posición**, que es una de las dos
+// únicas cosas que el diseño dice que cuesta caerse (§ del `levantarse()` de
+// `combate.ts`). La otra es la cara, y ésa no se compra: los que te vieron caer
+// ya te temen menos y van a seguir. Con distancias que se sienten, no tener que
+// volver es un premio de verdad — y por eso levantarse con un cuenco te devuelve
+// MENOS vida que levantarse en la aldea. Se paga con el cuerpo lo que se ahorra
+// en camino.
+//
+// Lo que NO es, y hay que mirarlo cada vez que alguien quiera tocar esto:
+// **comida como bono y nunca como impuesto** (DISENO §10.2, Monster Hunter y no
+// Valheim). No hay hambre, no hay barra y no tenerla te deja exactamente como
+// estabas ayer. No sube el techo: la vida máxima sigue siendo 100 y esto no
+// apila. El día que haga falta para pelear de igual a igual, inventamos el
+// grindeo y hay que sacarla.
+
+/** Lo único que hoy se puede tomar. Es una constante y no una columna
+ *  `knowledge.consumible` a propósito: **una tabla de consumibles es una tabla
+ *  de recetas con otro nombre**, y lo que se puede hacer vive en lo que alguien
+ *  sabe y se muere con esa persona. Cuando haya un segundo, esto es una lista
+ *  de dos, no un sistema. */
+export const CUAJADA = 'cuenco de cuajada'
+
+/** Cuánto repone un cuenco, y por qué depende de la calidad.
+ *
+ *  La destreza del que lo hizo es lo único que mueve este número, igual que una
+ *  hoja mejor pega más fuerte: la mano de otro se vuelve tu ventaja, y el que
+ *  la recibe ve de quién era. Un cuenco de la primera vez (calidad ~15) te
+ *  levanta con treinta; uno de alguien con la mano hecha (calidad ~90), con
+ *  cincuenta y cinco. */
+function repone(quality: number): number {
+  return 25 + Math.floor(quality / 3)
+}
+
+export type Tomada =
+  | { ok: false; porque: string }
+  | {
+    ok: true; health: number; caido: false
+    /** El slug de donde quedó parado. El cliente ubica por slug, igual que en
+     *  `levantarse()` — y acá es la mitad de la noticia: es el mismo lugar. */
+    lugar: string
+    objeto: string; hecho_por: string | null
+    /** Lo que se le muestra al jugador. */
+    cuenta: string
+  }
+
+/**
+ * Tomarse algo de lo que llevás encima.
+ *
+ * Inmediato, como `pelear()` y `lanzar()`: una cuajada que tarda seis horas en
+ * hacer efecto no es una cuajada. Por eso hay una ruta propia (`POST /tomar`)
+ * además del `case`, y por eso ninguno de los dos caminos deja una acción
+ * pendiente: el `case` la resuelve en el acto y la ruta no encola nada. Es el
+ * mismo reparto que `pelear()` — el camino que de verdad se usa es el cliente,
+ * que no tiene un cierre de día donde volcar nada.
+ *
+ * Las dos ramas son la misma idea y por eso es un solo verbo: **te deja seguir
+ * donde estás.** De pie te cierra la herida sin volver al pueblo; caído te pone
+ * en pie ahí mismo, que es lo que no se podía hacer de ninguna otra manera.
+ *
+ * No se consume si no hace falta. Un jugador entero que aprieta el botón por
+ * curiosidad no puede perder lo que otro tardó en hacerle.
+ */
+export async function tomar(args: {
+  regionId: string
+  tick: number
+  player: { id: string; name: string; place_id: string | null }
+  /** Qué quiere tomarse. Hoy hay una sola cosa tomable, así que sirve para
+   *  rechazar un pedido equivocado y no para elegir. */
+  que?: string | null
+  /** Sumidero de eventos, igual que en `pelear()`: el tick junta los suyos y
+   *  los inserta al final; la web no tiene ese final y escribe acá. */
+  ev?: (e: Omit<Ev, 'region_id' | 'tick'>) => void | Promise<void>
+}): Promise<Tomada> {
+  const { regionId, tick, player } = args
+
+  const pedido = args.que?.trim().toLowerCase()
+  if (pedido && !CUAJADA.includes(pedido) && !pedido.includes('cuajada')) {
+    return { ok: false, porque: `no hay forma de tomarse "${args.que}"` }
+  }
+
+  const { data: estado } = await db.from('players')
+    .select('health, downed_at_tick, place_id').eq('id', player.id).maybeSingle()
+  if (!estado) return { ok: false, porque: 'no existe' }
+
+  const caido = estado.downed_at_tick !== null || estado.health <= 0
+
+  // El mejor de los que lleve, igual que el regalo de `case 'dar'`: si estás en
+  // el piso no es momento de administrar el inventario.
+  const cuencos = (await db.from('objects')
+    .select('id, quality, made_by').eq('region_id', regionId)
+    .eq('holder_kind', 'player').eq('holder_id', player.id)
+    .eq('kind', CUAJADA)).data ?? []
+  const cuenco = cuencos.sort((a, b) => b.quality - a.quality)[0]
+  if (!cuenco) return { ok: false, porque: `no lleva ningún ${CUAJADA} encima` }
+
+  if (!caido && estado.health >= 100) {
+    return { ok: false, porque: 'está entero; no le hace falta' }
+  }
+
+  const gana = repone(cuenco.quality)
+  // Caído: te levanta con lo que el cuenco te da y nada más. De pie: se suma a
+  // lo que te quedaba. La diferencia es lo que hace que caerse siga costando.
+  const vida = caido ? Math.min(100, gana) : Math.min(100, estado.health + gana)
+
+  await db.from('players')
+    .update({ health: vida, ...(caido ? { downed_at_tick: null } : {}) })
+    .eq('id', player.id)
+  await db.from('objects').delete().eq('id', cuenco.id)
+
+  const { data: lugar } = estado.place_id
+    ? await db.from('places').select('slug, name').eq('id', estado.place_id).maybeSingle()
+    : { data: null }
+  const donde = lugar?.name ?? 'el valle'
+  // De quién era la mano. Es la mitad de por qué esto existe: el cuenco sigue
+  // diciendo quién lo hizo, y el que lo hizo se puede haber muerto.
+  const autoria = cuenco.made_by && cuenco.made_by !== player.name
+    ? ` Lo había hecho ${cuenco.made_by}.` : ''
+
+  const evento: Omit<Ev, 'region_id' | 'tick'> = caido
+    ? {
+      // El MISMO `kind` que `levantarse()`, y a propósito: para el mundo el
+      // hecho es que se puso en pie. Lo que cambia es dónde, que es todo.
+      kind: 'levantada', place_id: estado.place_id ?? null,
+      summary: `${player.name} estaba en el suelo en ${donde} y se puso en pie sin que nadie lo llevara al pueblo:`
+        + ` se tomó un ${CUAJADA}.${autoria}`,
+      detail: {
+        player: player.name, place: donde, object: CUAJADA,
+        quality: cuenco.quality, made_by: cuenco.made_by ?? null, en_el_lugar: true,
+      },
+    }
+    : {
+      kind: 'cura', place_id: estado.place_id ?? null,
+      summary: `${player.name} se cerró la herida en ${donde} con un ${CUAJADA}.${autoria}`,
+      detail: {
+        player: player.name, place: donde, object: CUAJADA,
+        quality: cuenco.quality, made_by: cuenco.made_by ?? null, en_el_lugar: false,
+      },
+    }
+  if (args.ev) await args.ev(evento)
+  else await db.from('events').insert({ region_id: regionId, tick, ...evento })
+
+  // El «de Sarn» sólo cuando la mano fue de otro, igual que en el evento: «se
+  // puso en pie con un cuenco de cuajada de Eco» dicho a Eco es una firma en su
+  // propia carta. Cuando es de otro, en cambio, es la mitad de la noticia.
+  const cuenta = caido
+    ? `se puso en pie en ${donde} con un ${CUAJADA}${autoria ? ` de ${cuenco.made_by}` : ''}`
+    : `se tomó un ${CUAJADA}${autoria ? ` de ${cuenco.made_by}` : ''} en ${donde}`
+  return {
+    ok: true, health: vida, caido: false,
+    lugar: lugar?.slug ?? '',
+    objeto: CUAJADA, hecho_por: cuenco.made_by ?? null,
+    cuenta,
+  }
+}
+
 async function resolveAction(
   regionId: string, tick: number,
   player: { id: string; name: string; place_id: string | null },
@@ -3834,7 +4005,34 @@ async function resolveAction(
         const c = (k as unknown as { knowledge: Receta | null }).knowledge
         return !!c?.makes && c.makes_at === lugar?.kind
       })
-      const elegido = pick(aplicables)
+
+      // **Y si el jugador dijo qué, manda el jugador.** Hasta hoy este caso
+      // ignoraba `target` y sorteaba entre lo aplicable, que con un solo saber
+      // por lugar no se notaba. Con dos ya se nota: en la fragua salían la hoja
+      // y el filo a cara o cruz, y desde hoy la aldea tiene el frasco y el
+      // cuenco. Que el servidor tire un dado por vos cuando dijiste cuál
+      // querías es peor que no dejarte elegir — es la misma regla que ya
+      // aplican `ensenar` y `dar`, escrita con las mismas palabras.
+      //
+      // Se busca por el nombre del saber Y por el de la cosa, porque el jugador
+      // piensa en la cosa: pide «cuajada», no «Cuajado de leche». Y si dijo algo
+      // que no sabe hacer acá se lo decimos, en vez de dejarlo caer en la rama
+      // de abajo y contarle que pasó el día trabajando: un botón que hace otra
+      // cosa sin avisar es peor que un botón que no anda.
+      const queStr = action.target?.trim().toLowerCase()
+      const pedidas = queStr
+        ? aplicables.filter((k) => {
+          const c = (k as unknown as { knowledge: Receta }).knowledge
+          return c.name.toLowerCase().includes(queStr)
+            || c.makes.toLowerCase().includes(queStr)
+        })
+        : aplicables
+      if (queStr && pedidas.length === 0) {
+        return aplicables.length > 0
+          ? `no sabe hacer "${action.target}" en ${lugar?.name ?? 'el valle'}`
+          : `no sabe hacer nada en ${lugar?.name ?? 'el valle'}`
+      }
+      const elegido = pick(pedidas)
       const receta = elegido
         ? (elegido as unknown as { knowledge: Receta }).knowledge
         : undefined
@@ -3908,8 +4106,24 @@ async function resolveAction(
     }
 
     case 'aprender': {
+      // El `target` puede venir como «<saber> de <alguien>» —el jugador eligió
+      // cuál quiere— o pelado, y ahí elige el servidor. Es la mitad que
+      // faltaba: `ensenar` deja elegir desde el primer día y `aprender` no,
+      // así que con un maestro que sabe dos cosas pedirle la que te importa era
+      // tirar el dado. Con la cuajada eso deja de ser teórico —Sarn puede haber
+      // aprendido a destilar de alguien— y volvés al valle tres días seguidos a
+      // ver si esta vez sale la que fuiste a buscar.
+      //
+      // Se parte por el ÚLTIMO " de ", igual que `ensenar` y `dar` parten por
+      // el último " a ", y acá el motivo es literal: **el nombre del saber
+      // tiene un " de " adentro** («Cuajado de leche», «Destilado de raíz») y el
+      // de una persona no.
+      const crudo = action.target ?? ''
+      const cortar = crudo.toLowerCase().lastIndexOf(' de ')
+      const queQuiere = cortar > 0 ? crudo.slice(0, cortar).trim().toLowerCase() : null
+      const aQuien = norm((cortar > 0 ? crudo.slice(cortar + 4) : crudo).trim())
       const maestro = people.find(
-        (p) => norm(p.name).includes(target) && aca(p))
+        (p) => norm(p.name).includes(aQuien) && aca(p))
       if (!maestro) return `no hay ningún ${action.target} acá`
       // Dormido no enseña nadie. No emite evento: que hayas golpeado la puerta
       // a deshora no es un hecho del valle, y un `negativa` por cada intento
@@ -3942,8 +4156,24 @@ async function resolveAction(
         .from('knows').select('knowledge_id')
         .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
       const tiene = new Set(ya.map((k) => k.knowledge_id))
-      const nuevo = pick(sabe.filter((k) => !tiene.has(k.knowledge_id)))
-      if (!nuevo) return `${maestro.name} ya no tiene nada nuevo que enseñarle`
+      const puede = sabe.filter((k) => !tiene.has(k.knowledge_id))
+      if (puede.length === 0) return `${maestro.name} ya no tiene nada nuevo que enseñarle`
+
+      // Si el jugador dijo cuál, manda el jugador. Si dijo una que el maestro
+      // no sabe —o que ya sabe él—, se lo decimos con esas palabras en vez de
+      // darle otra cosa: enseñarle algo distinto de lo que fue a pedir es
+      // exactamente el modo en que un sistema deja de sentirse como una
+      // conversación y pasa a sentirse como una máquina.
+      let elegido: (typeof puede)[number] | undefined
+      if (queQuiere) {
+        const nombres = (await db
+          .from('knowledge').select('id, name')
+          .in('id', puede.map((k) => k.knowledge_id))).data ?? []
+        const m = nombres.find((c) => c.name.toLowerCase().includes(queQuiere))
+        if (!m) return `${maestro.name} no sabe eso, o él ya lo sabe`
+        elegido = puede.find((k) => k.knowledge_id === m.id)
+      }
+      const nuevo = elegido ?? pick(puede)!
 
       const { data: info } = await db
         .from('knowledge').select('name').eq('id', nuevo.knowledge_id).single()
@@ -4291,6 +4521,19 @@ async function resolveAction(
         `${player.name} le trajo ${regalo.kind} a ${quien.name} cuando lo necesitaba`, tick)
       await tocarVinculo(quien, player, { valued: 25 + bonus }, ev)
       return `le cumplió a ${quien.name}: ${cumple.goal}`
+    }
+
+    // ── tomar ─────────────────────────────────────────────────
+    //
+    // No se resuelve acá: lo resuelve `tomar()`, que es la misma función que
+    // llama `POST /tomar`. Es el mismo reparto que `case 'pelear'` y por el
+    // mismo motivo — dos copias del mismo hecho se separan la primera vez que
+    // alguien toca una, y ahí el invariante 3 se pudre sin que se note.
+    case 'tomar': {
+      const r = await tomar({
+        regionId, tick, player, que: action.target, ev,
+      })
+      return r.ok ? r.cuenta : r.porque
     }
 
     default:
