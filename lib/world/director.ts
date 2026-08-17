@@ -202,6 +202,16 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
     .select('id, tick, kind, summary, place_id, detail')
     .eq('region_id', region.id)
     .gt('tick', player.last_seen_tick)
+    // Las conversaciones NO entran. Se midió: 111 en cinco días contra 4
+    // agendas cumplidas y 1 enseñanza. Como el corte son los 60 más viejos,
+    // la ventana del director se llenaba de "fulano habló con mengano" y lo
+    // que de verdad pasó quedaba afuera por peso, no por importancia.
+    //
+    // Y además es lo MENOS narrable que hay: el jugador estuvo ahí, leyó lo
+    // que le dijeron, y ya lo sabe. Lo que sale de una charla —que te
+    // enseñaron, que te encargaron algo, que te ganaste a alguien— tiene su
+    // propio tipo de evento y ése sí entra.
+    .neq('kind', 'conversacion')
     .order('tick', { ascending: true })
     .limit(60)).data ?? []
 

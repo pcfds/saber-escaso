@@ -126,6 +126,10 @@
  * matar. Es un rasgo de juego, no de voz, y no se cuela acá de contrabando.
  */
 import { db, getRegion } from '../db.js'
+// Los umbrales viven en tick.ts, que es quien los aplica. Importarlos y no
+// copiarlos: la copia que había en web.ts decía 10 cuando el real era 35, y el
+// juego mandaba a hacer algo que iba a fallar.
+import { UMBRAL_ENCARGO, UMBRAL_ENSENAR } from './tick.js'
 import { pedirJson } from '../modelo.js'
 
 // Acá no se declara ningún acento a propósito. Cuando el prompt decía "español
@@ -893,7 +897,34 @@ export async function hablarCon(
 
   // Las opciones no las inventa el modelo: salen del estado. Así una respuesta
   // nunca promete algo que el mundo no puede cumplir.
-  const puedeEnsenarte = npc.teaches && v >= 10 && saberesNpc.some((s) => !saberesJug.includes(s))
+  const puedeEnsenarte = npc.teaches && v >= UMBRAL_ENSENAR
+    && saberesNpc.some((s) => !saberesJug.includes(s))
+
+  // ¿Se puede uno encargar de lo suyo? Es el verbo que faltaba en la caja de
+  // diálogo, y sin él el jugador no tenía forma de tomar una misión desde el
+  // juego: existían en el mundo y sólo se podían agarrar por API.
+  const conObjeto = abiertas.find((a) =>
+    a.needs_object && (a.state === 'activa' || a.state === 'bloqueada'))
+  // Se busca por la meta y no por el id de la agenda: `Agenda` acá no trae el
+  // id, y pedirlo obligaría a tocar la consulta de arriba, que es de otro.
+  const yaEncargado = conObjeto
+    ? ((await db.from('encargos')
+        .select('id, agenda:agenda_id (goal, person_id)')
+        .eq('player_id', playerId).eq('state', 'activo')).data ?? [])
+        .some((e) => {
+          // PostgREST tipa el embed como array aunque la relación sea a uno.
+          const a = (e as unknown as { agenda: { goal: string; person_id: string } | null }).agenda
+          return a?.goal === conObjeto.goal && a?.person_id === npc.id
+        })
+    : false
+
+  // Y dar: sólo si lo que llevás encima es justo lo que le falta. No ofrecer
+  // "darle algo" en abstracto es a propósito — una opción que aparece siempre
+  // y casi nunca sirve es ruido.
+  const loQueFalta = abiertas
+    .filter((a) => a.state === 'activa' || a.state === 'bloqueada')
+    .map((a) => a.needs_object).filter(Boolean) as string[]
+  const puedoDarle = lleva.find((o) => loQueFalta.includes(o))
   const opciones: Dialogo['opciones'] = [
     {
       verbo: 'aprender',
@@ -910,6 +941,23 @@ export async function hablarCon(
       posible: saberesJug.some((s) => !saberesNpc.includes(s)),
       porque: !saberesJug.length ? 'todavía no sabes nada que enseñar'
         : 'ya sabe todo lo que sabes',
+    },
+    {
+      verbo: 'encargarse',
+      texto: conObjeto
+        ? `Ofrecerte a conseguirle ${conObjeto.needs_object}`
+        : 'Ofrecerte a darle una mano',
+      posible: !!conObjeto && !yaEncargado && v >= UMBRAL_ENCARGO,
+      porque: !conObjeto ? `${npc.name} no necesita nada que puedas traerle`
+        : yaEncargado ? 'ya te encargaste de eso'
+        : `${npc.name} todavía no te conoce lo suficiente`,
+    },
+    {
+      verbo: 'dar',
+      texto: puedoDarle ? `Darle ${puedoDarle}` : 'Darle algo de lo que llevas',
+      posible: !!puedoDarle,
+      porque: !lleva.length ? 'no llevas nada encima'
+        : `nada de lo que llevas le sirve a ${npc.name}`,
     },
     { verbo: 'trabajar', texto: 'Quedarte trabajando cerca', posible: true },
   ]
