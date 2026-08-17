@@ -210,6 +210,19 @@ Si una mazmorra sólo le sirve al que pelea, falta la mitad.
 - **Tercera persona lejana, isométrica o casi.** Stardew, Minecraft, Baldur's
   Gate. **Nunca primera persona.** Nunca ese 3D plano de asset store.
 - **3D con órbita restringida. Lejos por defecto, zoom con piso y techo.**
+- **El piso de zoom está decidido** (17 de agosto de 2026): la cámara se acerca
+  **hasta leer silueta, postura y ropa. Nunca hasta leer una expresión.**
+  > Es la decisión que fija el presupuesto de arte de todo el proyecto, así que
+  > conviene decir qué implica en voz alta: **no hacen falta caras modeladas ni
+  > animación facial.** Todo el presupuesto va a **silueta, valor y color**, que
+  > es lo que se lee a la distancia de la cámara. Un ojo humano a 27 metros mide
+  > dos píxeles: modelarlo es gastar en ruido.
+  >
+  > Estuvo abierta desde el principio y tenía una rama entera parada esperándola.
+  > Se cerró con la recomendación que ya estaba escrita acá, aplicando la regla
+  > de la casa: **lo que no se rechazó se da por aceptado.** Si en dos meses hay
+  > que moverla, es una constante y unas texturas — el costo de no decidir era
+  > más alto que el de decidir mal.
 - Los primeros planos son **un modo aparte**, no una posición libre de cámara.
 - La distancia lejana no es una preferencia estética: es lo que hace legible el
   trabajo del director y lo que mantiene viable mobile alguna vez.
@@ -1044,11 +1057,19 @@ encuadra y las pone donde las veas.
 Ninguna la resuelve un agente por su cuenta, y las tres bloquean trabajo que ya
 está empezado.
 
+Quedan dos. La tercera —**el piso de zoom**— se cerró el 17 de agosto y está
+en §6: silueta, postura y ropa, nunca la expresión. **No la reabras.**
+
 | # | Decisión | Por qué bloquea | Recomendación sobre la mesa |
 |---|---|---|---|
-| 1 | **Piso de zoom** | Define el presupuesto de arte de todo el proyecto: resolución de texturas, LODs, y si hacen falta rigs faciales. Cada modelo que se haga antes de esto se puede tener que rehacer. | Hasta leer silueta y ropa, no la cara. Los primeros planos se autoran aparte, como modo. |
-| 2 | **Control o teclado** | Cambia el sistema de magia **desde la raíz**. Dibujar runas con un stick es horrible. No es una opción de accesibilidad que se agrega después. | Si va control, la magia son **secuencias o radiales, nunca trazos**. |
-| 3 | **Dirección de arte: quién** | Ningún agente sostiene una dirección de arte: no es una tarea, es un criterio. **La coherencia es lo que se lee como "muy lindo", no la novedad.** | Una persona con gusto decide y no se suelta. la dirección del proyecto o alguien que contrate. |
+| 1 | **Control o teclado** | Cambia el sistema de magia **desde la raíz**. Dibujar runas con un stick es horrible. No es una opción de accesibilidad que se agrega después. | Si va control, la magia son **secuencias o radiales, nunca trazos**. |
+| 2 | **Dirección de arte: quién** | Ningún agente sostiene una dirección de arte: no es una tarea, es un criterio. **La coherencia es lo que se lee como "muy lindo", no la novedad.** | Una persona con gusto decide y no se suelta. la dirección del proyecto o alguien que contrate. |
+
+> **Lo que enseñó cerrar la del zoom.** Estuvo abierta meses porque nadie la
+> sentía urgente, y mientras tanto la rama de arte no podía arrancar: su propio
+> agente tenía escrito que no trabajaba sin eso. **Una decisión abierta no
+> cuesta cero: cuesta todo lo que está esperándola.** Cuando una de estas dos
+> tenga una rama parada atrás, se cierra con la recomendación de la tabla.
 
 ### Lo que se decide con evidencia, no ahora
 
@@ -1068,10 +1089,11 @@ llegue el momento.
   que se termina. Pocos y grandes, disparados por umbrales del mundo. **Nunca
   calendario fijo: eso los convierte en rutina.**
 
-*Dos preguntas que estuvieron años acá y ya están contestadas, para que nadie
-las reabra:* **"Friere" era Frieren** (§4), no Feist ni Paulo Freire. Y **la
+*Tres preguntas que estuvieron acá mucho tiempo y ya están contestadas, para que
+nadie las reabra:* **"Friere" era Frieren** (§4), no Feist ni Paulo Freire. **La
 progresión está resuelta** en §8.3: sin techo en lo que sabés, límite natural
-en lo que llevás, y mejora en lo que usás.
+en lo que llevás, y mejora en lo que usás. Y **el piso de zoom está decidido**
+en §6: silueta, postura y ropa; sin caras modeladas.
 
 ---
 

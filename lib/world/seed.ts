@@ -57,7 +57,7 @@ const PEOPLE = [
     agenda: { goal: 'rehacer el yunque partido antes de que baje el frío', needs: 'forja-simple' } },
   { name: 'Bruno', trade: 'aprendiz', place: 'fragua', teaches: false,
     disposition: 'Ansioso. Quiere el temple de río y todavía no se ganó el derecho a mirarlo.',
-    voice: 'Habla de más. Empieza una frase, la corta y arranca otra. Pregunta dos cosas seguidas sin esperar la respuesta de la primera. Se justifica antes de que nadie lo acuse. Tapa los silencios con "igual", "o sea", "nada". Nunca dice que no sabe algo: dice que todavía no se lo mostraron.',
+    voice: 'Habla de más, y siempre termina pidiendo algo: que le muestren, que lo dejen probar, que le den una mano. Empieza una frase, la corta y arranca otra. Se justifica antes de que nadie lo acuse. Tapa los silencios con "igual", "o sea", "nada" — una muletilla por respuesta, no cuatro. Nunca dice que no sabe algo: dice que todavía no se lo mostraron.',
     historia: 'Llegó a la fragua a los quince porque en su casa eran seis y no entraban. Le debe a Odila un frasco del invierno pasado y hace lo imposible por no cruzarla en la aldea. Está convencido de que si ve el temple de río una sola vez le sale, y ese es exactamente su problema.',
     knows: ['forja-simple'],
     agenda: { goal: 'que Ilde le muestre el temple de río', needs: 'temple-de-rio' } },
@@ -90,7 +90,7 @@ const PEOPLE = [
     // Una voz no puede pedir un tipo de frase que obligue a inventar hechos:
     // la primera versión de ésta decía "arranca con ayer o el otro día" y el
     // modelo se fabricaba noticias que no estaban en la base para cumplirla.
-    voice: 'Habla rápido y encima del otro: arranca una pregunta, la deja por la mitad y hace otra. Pregunta tres cosas seguidas y no espera ninguna respuesta. Se entusiasma con lo que no entiende y lo repite en voz alta. Cuando quiere algo lo pide de una, sin rodeo. Nunca inventa noticias: si no vio nada, pregunta.',
+    voice: 'Habla rápido y encima del otro: arranca una pregunta, la deja por la mitad y termina pidiendo lo que quiere, que siempre es ver algo de cerca. Dos preguntas por vez, no cinco. Se entusiasma con lo que no entiende y lo repite en voz alta. Cuando quiere algo lo pide de una, sin rodeo. Nunca inventa noticias: si no vio nada, pregunta.',
     historia: 'Tiene doce o trece, nadie llevó la cuenta, y vive en el Camino del Norte porque ahí pasa lo único que pasa. Vio a alguien trazar una runa una vez, de lejos, y no se lo pudo sacar más de la cabeza. Reparte gratis todo lo que sabe y todavía no se dio cuenta de que eso le va a costar caro.',
     knows: [],
     agenda: { goal: 'ver de cerca a alguien que sepa magia', needs: 'runa-de-brasa' } },

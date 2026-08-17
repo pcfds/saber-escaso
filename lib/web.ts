@@ -13,6 +13,7 @@ import { step } from './world/tick.js'
 import { narrate } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear, recibirGolpe, levantarse } from './world/combate.js'
+import { escalonDe, elegirSaludo } from './world/saludos.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -147,7 +148,11 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
       <form method="post" action="${base}/look">
         <button>${hayNovedades ? '¿Qué pasó?' : 'Volver a mirar'}</button>
       </form>
-      <a href="${base}/mapa"><button type="button" class="ghost">Ver el valle</button></a>
+      <!-- Iba a /mapa, que era el valle en el navegador y ya no existe. El
+           valle se ve bajando el juego, y de eso habla la portada: mando ahí
+           en vez de repetir acá el link de la descarga, que se mueve con cada
+           release. -->
+      <a href="/"><button type="button" class="ghost">Bajar el juego</button></a>
     </div>
     <p class="meta">${hayNovedades
       ? `pasó ${region.tick - player.last_seen_tick === 1 ? 'un día' : `${region.tick - player.last_seen_tick} días`} desde que miraste`
@@ -251,9 +256,15 @@ export async function handler(
         const found = await byToken(token)
         if (!found) return send(page('No existe', '<h1>No existe</h1>'), 404)
         const { region, player } = found
-        const [places, people, amenazas, objetos, saberes, vinculos] = await Promise.all([
+        // Estoy adentro. Se manda sin esperar la respuesta: es un update de una
+        // fila y no tiene por qué demorarle el mundo a nadie.
+        void db.from('players')
+          .update({ last_seen_at: new Date().toISOString() }).eq('id', player.id)
+          .then(() => undefined)
+
+        const [places, people, amenazas, objetos, saberes, vinculos, otros] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
-          db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
+          db.from('people').select('id, name, trade, place_id, teaches, saludos').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
           // ("mató a X"), pero el cliente no tiene que plantar el cadáver otra vez.
           db.from('threats').select('id, kind, nombre, people_id, health, max_health, place_id')
@@ -263,6 +274,12 @@ export async function handler(
           db.from('knows').select('knowledge:knowledge_id (name, makes, makes_at)')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
           db.from('bonds').select('person_id, valued, feared').eq('toward_id', player.id),
+          // Los otros jugadores. Sin esto no hay multijugador: hay gente
+          // compartiendo una base de datos. Va en la misma tanda que el resto
+          // porque el cliente pide `/mundo` cada pocos segundos y un
+          // round-trip suelto se paga en cada uno de esos pedidos.
+          db.from('players').select('id, name, place_id, health, last_seen_at')
+            .eq('region_id', region.id).neq('id', player.id),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -296,13 +313,39 @@ export async function handler(
             health: player.health ?? 100, max_health: 100,
             caido: (player.health ?? 100) <= 0,
           },
-          places: places.data ?? [], people: people.data ?? [],
+          places: places.data ?? [],
+          // Cada persona viene con cómo te trata. Es lo que contesta el
+          // reclamo de que ya saben que estás y no dicen nada: al pasar cerca
+          // levantan la vista y sueltan una línea.
+          //
+          // NO pasa por el modelo, a propósito. Tiene que aparecer en el mismo
+          // cuadro en que te acercás; una llamada de 700 ms llegaría cuando ya
+          // te fuiste, y saldría plata cada vez que alguien camina por la
+          // aldea. Sale del vínculo, que es lo que de verdad determina cómo te
+          // miran.
+          people: (people.data ?? []).map((q) => ({
+            ...q, saludos: undefined,
+            ...actitud(q, vinculos.data ?? [], (saberes.data ?? []).length, region.tick, player.name),
+          })),
           // Qué hacer ahora. Es la diferencia entre un mundo y una demo
           // técnica: llegás, no conocés a nadie, no sabés qué hay, y sin esto
           // el juego te deja parado en un campo. NO lo escribe un modelo —
           // sale del estado, así que nunca te manda a hacer algo imposible.
           primeros_pasos: pasos({
-            places: places.data ?? [], people: people.data ?? [],
+            places: places.data ?? [],
+          // Cada persona viene con cómo te trata. Es lo que contesta el
+          // reclamo de que ya saben que estás y no dicen nada: al pasar cerca
+          // levantan la vista y sueltan una línea.
+          //
+          // NO pasa por el modelo, a propósito. Tiene que aparecer en el mismo
+          // cuadro en que te acercás; una llamada de 700 ms llegaría cuando ya
+          // te fuiste, y saldría plata cada vez que alguien camina por la
+          // aldea. Sale del vínculo, que es lo que de verdad determina cómo te
+          // miran.
+          people: (people.data ?? []).map((q) => ({
+            ...q, saludos: undefined,
+            ...actitud(q, vinculos.data ?? [], (saberes.data ?? []).length, region.tick, player.name),
+          })),
             amenazas: amenazas.data ?? [], objetos: objetos.data ?? [],
             saberes: saberes.data ?? [], vinculos: vinculos.data ?? [],
             player,
@@ -315,6 +358,32 @@ export async function handler(
             health: a.health, max_health: a.max_health,
             place_slug: slugDe(a.place_id),
           })),
+          // Los otros, los de carne y hueso.
+          //
+          // La ventana es de un tick y eso no es "hace poco" en el sentido que
+          // uno querría: un tick son seis horas reales, y `last_seen_tick` se
+          // estampa con el tick del momento de la visita, así que `<= 1`
+          // agarra a quien pasó entre hace 6 y hace 12 horas. Es mucho para
+          // "está acá ahora", y se elige igual porque abajo de eso es peor:
+          // con `<= 0` toda la gente que estaba jugando junta desaparece de
+          // golpe cuando el cron cierra el tick, en la mitad de la sesión. La
+          // presencia no se puede medir con un contador que avanza cada seis
+          // horas; la arregla un `last_seen_at` de verdad (ver el informe).
+          //
+          // Lo que sí hace bien es sacar del valle al que no entra hace dos
+          // días: ése no es presencia, es una fila en una tabla.
+          // Noventa segundos: unos tres pings del cliente. Con el reloj de
+          // pared la presencia deja de depender del largo del tick, que ya se
+          // recalibró una vez y se va a volver a recalibrar.
+          jugadores: (otros.data ?? [])
+            .filter((p) => p.last_seen_at != null
+              && Date.now() - new Date(p.last_seen_at).getTime() < 90_000)
+            .map((p) => ({
+              name: p.name,
+              place_slug: slugDe(p.place_id),
+              health: p.health ?? 100,
+              caido: (p.health ?? 100) <= 0,
+            })),
           // `made_by` es el nombre y no el id a propósito: el que lo forjó se
           // muere y el objeto tiene que seguir diciendo quién fue.
           objetos: objetos.data ?? [],
@@ -468,10 +537,20 @@ export async function handler(
           : undefined)
       }
 
+      // El valle en el navegador ya no existe. Era un cliente Three.js de 600
+      // líneas que se descartó cuando el cliente pasó a ser Godot
+      // (`DISENO.md` §17). Servía un juego que ya no es el juego, y el que
+      // entraba por acá se llevaba esa idea. 410 y no 404: no es que la
+      // dirección esté mal escrita, es que eso se dio de baja a propósito.
       if (parts[2] === 'mapa') {
-        const found = await byToken(token)
-        if (!found) return send(page('No existe', '<h1>No existe</h1>'), 404)
-        return send(mapaHtml(token, found.player.name))
+        return send(page('El valle ya no se juega en el navegador', `
+          <h1>El valle ya no se juega en el navegador</h1>
+          <p class="sub">Esta vista era una prueba y quedó vieja. El juego ahora se
+          baja: es un programa que corre en tu máquina y se conecta a este mismo
+          valle, con tu mismo link.</p>
+          <p class="sub"><a href="/">Bajá la demo desde la portada</a> — y si querés
+          ver qué pasó sin abrir el juego, <a href="/j/${esc(token)}">volvé a tu página</a>.</p>
+        `), 410)
       }
 
       const html = await renderPlayer(
@@ -490,9 +569,6 @@ export async function handler(
     send(page('Se rompió', `<h1>Se rompió</h1><div class="warn">${esc((e as Error).message)}</div><p class="sub"><a href="/">Volver</a></p>`), 500)
   }
 }
-
-/** La vista 3D. Se define en mapa.ts para no ensuciar el ruteo. */
-import { mapaHtml } from './mapa.js'
 
 export default handler
 
@@ -580,4 +656,104 @@ function pasos(m: {
     })
   }
   return out.slice(0, 3)
+}
+
+/** Cómo te trata alguien cuando pasás al lado.
+ *
+ * Una línea corta, derivada del vínculo. No es diálogo: es que el mundo
+ * reconozca que estás. Quien lo jugó lo pidió así: *"si me acerco, ¿no
+ * deberían saludarme al menos? después poner hablar o no, pero ya saben que
+ * estoy"*.
+ *
+ * Nada de esto pasa por el modelo. Tiene que salir en el mismo cuadro en que
+ * te acercás, y además hay gente caminando todo el tiempo: una llamada por
+ * cruce sería lenta y cara para algo que el estado ya contesta solo.
+ *
+ * Las variantes existen para que no sea un cartel: la misma persona con el
+ * mismo vínculo tiene tres formas de mirarte, y cuál te toca depende de tu
+ * nombre y del suyo. Es determinista —el mismo par siempre da lo mismo— pero
+ * distinto entre personas, que es lo que hace que el valle no suene a coro.
+ */
+function actitud(
+  q: { id: string; name: string; trade: string; teaches: boolean
+       saludos?: Record<string, string[]> | null },
+  vinculos: { person_id: string; valued: number; feared: number }[],
+  saberesDelJugador: number,
+  tick: number,
+  nombreJugador: string,
+): { saludo: string; animo: string; ensena: boolean } {
+  const v = vinculos.find((b) => b.person_id === q.id)
+  const aprecio = v?.valued ?? 0
+  const miedo = v?.feared ?? 0
+
+  // Lo que escribió el modelo, si ya existe. Rota con el día y con quién sos,
+  // así que la misma persona te dice cosas distintas de un día para otro.
+  const escalon = escalonDe(aprecio, miedo)
+  const escrito = elegirSaludo(q.saludos ?? null, escalon, tick, nombreJugador)
+  if (escrito) {
+    return {
+      saludo: escrito,
+      animo: escalon === 'teme' ? 'hostil'
+        : escalon === 'bronca' ? 'seco'
+        : escalon === 'fe' ? 'calido' : 'neutral',
+      ensena: q.teaches && aprecio >= 35,
+    }
+  }
+  // Todavía no se generaron: las frases fijas son el piso, no el objetivo.
+
+  // Un hash chico y estable del nombre: la misma persona te mira siempre igual.
+  let h = 0
+  for (const c of q.name) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  const de = (xs: string[]) => xs[h % xs.length]!
+
+  if (miedo >= 25 && miedo > aprecio) {
+    return {
+      saludo: de([
+        `${q.name} te ve y baja la vista.`,
+        `${q.name} se queda muy quieta cuando pasás.`,
+        `${q.name} corta lo que estaba haciendo hasta que te alejás.`,
+      ]),
+      animo: 'hostil', ensena: false,
+    }
+  }
+  if (aprecio < 0) {
+    return {
+      saludo: de([
+        `${q.name} te ve y sigue en lo suyo.`,
+        `${q.name} hace como que no te vio.`,
+        `${q.name} te mira de costado y no dice nada.`,
+      ]),
+      animo: 'seco', ensena: false,
+    }
+  }
+  if (aprecio >= 40) {
+    return {
+      saludo: de([
+        `${q.name} levanta la mano apenas te ve.`,
+        `—Ah, sos vos. Justo pensaba en algo.`,
+        `${q.name} te hace lugar al lado.`,
+      ]),
+      animo: 'calido', ensena: q.teaches,
+    }
+  }
+  if (aprecio >= 12) {
+    return {
+      saludo: de([
+        `${q.name} levanta la vista y te saluda con la cabeza.`,
+        `—Volviste.`,
+        `${q.name} te ubica y sigue con lo suyo, más tranquila.`,
+      ]),
+      animo: 'neutral', ensena: q.teaches,
+    }
+  }
+  return {
+    saludo: de([
+      `${q.name} te mira sin saber bien quién sos.`,
+      `${q.name} levanta la vista un segundo.`,
+      saberesDelJugador === 0
+        ? `${q.name} te mira las manos antes que la cara.`
+        : `${q.name} te mira y vuelve a lo suyo.`,
+    ]),
+    animo: 'neutral', ensena: false,
+  }
 }

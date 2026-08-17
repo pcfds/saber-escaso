@@ -1,14 +1,38 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/api/tick", "destination": "/api/tick" },
-    { "source": "/(.*)", "destination": "/api/index" }
+    {
+      "source": "/api/tick",
+      "destination": "/api/tick"
+    },
+    {
+      "source": "/api/saludos",
+      "destination": "/api/saludos"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
   ],
   "crons": [
-    { "path": "/api/tick", "schedule": "0 */6 * * *" }
+    {
+      "path": "/api/tick",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/saludos",
+      "schedule": "20 */2 * * *"
+    }
   ],
   "functions": {
-    "api/index.ts": { "maxDuration": 60 },
-    "api/tick.ts": { "maxDuration": 60 }
+    "api/index.ts": {
+      "maxDuration": 60
+    },
+    "api/tick.ts": {
+      "maxDuration": 60
+    },
+    "api/saludos.ts": {
+      "maxDuration": 60
+    }
   }
 }
