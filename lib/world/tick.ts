@@ -296,6 +296,45 @@ export async function step() {
       (p) => p.place_id === a.place_id && region.tick - p.last_seen_tick <= 3)
     for (const p of presentes) {
       if (Math.random() > 0.5) continue
+
+      // ¿Alguien te defiende?
+      //
+      // Ésta es la recompensa de haberte ganado a la gente, y por eso mide
+      // aprecio y no miedo: al que temen lo dejan solo. Un valle donde nadie
+      // se mete cuando te muerden es un valle donde la reputación es un
+      // número en una tabla; que alguien salga a bancarte es lo que la vuelve
+      // una relación.
+      //
+      // Defiende quien te aprecia de verdad (40+) y está donde estás. No es
+      // automático: puede pasar o no, porque un rescate garantizado saca el
+      // riesgo y el miedo se va con él.
+      const cerca = people.filter((q) => q.place_id === a.place_id)
+      const leales = []
+      for (const q of cerca) {
+        const { data: v } = await db.from('bonds').select('valued')
+          .eq('person_id', q.id).eq('toward_id', p.id).maybeSingle()
+        if ((v?.valued ?? 0) >= 40) leales.push(q)
+      }
+      const defensor = leales.length && Math.random() < 0.65 ? pick(leales) : undefined
+      if (defensor) {
+        const golpe = 9 + roll(11)
+        const queda = Math.max(0, a.health - golpe)
+        await db.from('threats')
+          .update(queda > 0
+            ? { health: queda }
+            : { health: 0, alive: false, killed_by: defensor.name, killed_tick: nextTick })
+          .eq('id', a.id)
+        ev({ kind: queda > 0 ? 'defensa' : 'amenaza_muerta', place_id: a.place_id,
+          summary: queda > 0
+            ? `${defensor.name} se metió y le sacó a ${a.kind} de encima a ${p.name}.`
+            : `${defensor.name} mató a ${a.kind} para sacárselo de encima a ${p.name}.`,
+          detail: { person: defensor.name, player: p.name, threat: a.kind } })
+        // Que te salven crea una deuda, y la deuda es contenido: el que te
+        // bancó ahora tiene algo tuyo que cobrar.
+        await recordar(defensor.id, p, `me metí a defender a ${p.name}`, nextTick)
+        continue
+      }
+
       const { data: estado } = await db
         .from('players').select('health').eq('id', p.id).maybeSingle()
       const vida = Math.max(0, (estado?.health ?? 100) - (6 + roll(10)))

@@ -247,7 +247,7 @@ export async function handler(
         const found = await byToken(token)
         if (!found) return send(page('No existe', '<h1>No existe</h1>'), 404)
         const { region, player } = found
-        const [places, people, amenazas, objetos] = await Promise.all([
+        const [places, people, amenazas, objetos, saberes, vinculos] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -256,6 +256,9 @@ export async function handler(
             .eq('region_id', region.id).eq('alive', true),
           db.from('objects').select('kind, quality, made_by')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
+          db.from('knows').select('knowledge:knowledge_id (name, makes, makes_at)')
+            .eq('holder_kind', 'player').eq('holder_id', player.id),
+          db.from('bonds').select('person_id, valued, feared').eq('toward_id', player.id),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -276,6 +279,16 @@ export async function handler(
           },
           player: { name: player.name, place_id: player.place_id },
           places: places.data ?? [], people: people.data ?? [],
+          // Qué hacer ahora. Es la diferencia entre un mundo y una demo
+          // técnica: llegás, no conocés a nadie, no sabés qué hay, y sin esto
+          // el juego te deja parado en un campo. NO lo escribe un modelo —
+          // sale del estado, así que nunca te manda a hacer algo imposible.
+          primeros_pasos: pasos({
+            places: places.data ?? [], people: people.data ?? [],
+            amenazas: amenazas.data ?? [], objetos: objetos.data ?? [],
+            saberes: saberes.data ?? [], vinculos: vinculos.data ?? [],
+            player,
+          }),
           // `nombre` no es adorno: los que no son humanos no son mobs, son
           // pueblos, y matar a alguien con nombre pesa distinto que matar a
           // "un merodeador".
@@ -434,4 +447,84 @@ if (process.argv[1]?.endsWith('web.ts')) {
   createServer(handler).listen(PORT, () => {
     console.log(`Saber Escaso andando en http://localhost:${PORT}`)
   })
+}
+
+/** Qué hacer ahora, sacado del estado del mundo.
+ *
+ * Es lo que faltaba para que el juego tenga primer minuto. Llegás a un valle,
+ * no conocés a nadie, no sabés qué hay, y hasta acá te dejaba parado en un
+ * campo — que es exactamente la queja: *"¿qué es lo primero que hago cuando
+ * llego?"*.
+ *
+ * **No lo escribe un modelo.** Sale del estado, así que nunca te manda a hacer
+ * algo imposible: no te dice "pedile que te enseñe" a alguien que no enseña,
+ * ni "forjá" si no sabés forjar. Un tutorial que miente es peor que ninguno.
+ *
+ * Y no es una lista de tareas: es lo que un vecino te diría si le preguntaras
+ * por dónde empezar. Se ordena solo — lo primero es siempre lo que desbloquea
+ * lo demás.
+ */
+type Paso = { texto: string; donde: string }
+function pasos(m: {
+  places: { id: string; slug: string; name: string; kind: string }[]
+  people: { id: string; name: string; trade: string; place_id: string | null }[]
+  amenazas: { kind: string; nombre: string | null; place_id: string | null }[]
+  objetos: { kind: string }[]
+  saberes: unknown[]
+  vinculos: { person_id: string; valued: number; feared: number }[]
+  player: { name: string; place_id: string | null }
+}): Paso[] {
+  const out: Paso[] = []
+  const slug = (id: string | null) => m.places.find((p) => p.id === id)?.slug ?? ''
+  const nombre = (id: string | null) => m.places.find((p) => p.id === id)?.name ?? 'el valle'
+  const recetas = m.saberes
+    .map((k) => (k as { knowledge: { name: string; makes: string | null; makes_at: string | null } | null }).knowledge)
+    .filter((k): k is { name: string; makes: string; makes_at: string } => !!k?.makes)
+  const aprecio = (id: string) => m.vinculos.find((v) => v.person_id === id)?.valued ?? 0
+
+  // 1. Sin saberes no hay juego: todo lo demás sale de que alguien te enseñe.
+  if (recetas.length === 0) {
+    // Al que mejor te conoce, que es el que más cerca está de enseñarte.
+    const candidatos = [...m.people].sort((a, b) => aprecio(b.id) - aprecio(a.id))
+    const quien = candidatos[0]
+    if (quien) {
+      const v = aprecio(quien.id)
+      out.push({
+        texto: v >= 10
+          ? `${quien.name} ya confía en vos. Pedile que te enseñe su oficio.`
+          : `Nadie te enseña nada todavía. Buscá a ${quien.name}, ${quien.trade}, y ganátelo: quedate trabajando cerca y hablale.`,
+        donde: slug(quien.place_id),
+      })
+    }
+  }
+
+  // 2. Si ya sabés hacer algo, hacelo — practicar es lo que mejora la mano.
+  for (const r of recetas.slice(0, 1)) {
+    const lugar = m.places.find((p) => p.kind === r.makes_at)
+    out.push({
+      texto: `Sabés ${r.name}. Andá a ${lugar?.name ?? 'donde se hace'} y ponete a trabajar: te sale ${r.makes}, y cuanto más lo hacés, mejor.`,
+      donde: lugar?.slug ?? '',
+    })
+  }
+
+  // 3. Lo que hiciste sirve para algo, y para alguien.
+  const bicho = m.amenazas[0]
+  const llevo = m.objetos[0]
+  if (bicho) {
+    out.push({
+      texto: llevo
+        ? `Llevás ${llevo.kind}. ${bicho.nombre ?? bicho.kind} anda por ${nombre(bicho.place_id)}.`
+        : `${bicho.nombre ?? bicho.kind} anda por ${nombre(bicho.place_id)}. Sin nada en las manos vas a pegar poco.`,
+      donde: slug(bicho.place_id),
+    })
+  }
+
+  // 4. Que el saber circula es el juego entero. Se dice al final y una vez.
+  if (recetas.length > 0) {
+    out.push({
+      texto: 'Lo que sabés se lo podés enseñar a alguien. Es lo que más confianza te gana — y lo único que hace que no se pierda cuando te mueras.',
+      donde: '',
+    })
+  }
+  return out.slice(0, 3)
 }

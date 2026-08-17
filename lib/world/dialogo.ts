@@ -8,7 +8,14 @@
  *
  * Igual que el director: sólo puede afirmar lo que está en la base. Y tampoco
  * escribe estado: el diálogo devuelve texto y opciones; ejecutar la opción es
- * una acción normal que pasa por el tick.
+ * una acción normal que pasa por el tick. Lo único que escribe es `talks`, que
+ * no es estado del mundo sino la constancia de que la charla ocurrió.
+ *
+ * Tres cosas hacen que esto sea alguien y no un botón que devuelve texto, y las
+ * tres son datos, no prompt: `people.voice` (cómo suena), `people.historia` (de
+ * dónde viene) y `talks` (lo que ya se dijeron). Si algún día un NPC suena
+ * genérico, se olvida de vos, o cambia de idea sin motivo, el arreglo va en una
+ * de esas tres — no en agregarle otra línea al system prompt.
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { db, getRegion } from '../db.js'
@@ -37,8 +44,10 @@ algo largo.
 
 REGLAS:
 - Sólo podés mencionar cosas que están en los datos que te doy. Nada inventado.
-  En particular no cuentes sucesos que no estén: nada de "ayer pasó alguien",
-  nada de gente ni de noticias que no aparezcan acá. Preguntar sí podés.
+  En particular no inventes sucesos ("ayer pasó alguien"), ni gente, ni
+  objetos, ni lugares o parajes que no aparezcan acá. Un detalle concreto que
+  el mundo no tiene es una mentira, aunque suene bien. Preguntar sí podés, y
+  hablar de lo tuyo —tu historia, lo que perseguís— también.
 - No repitas una frase ni una pregunta que ya esté en LO QUE YA SE DIJERON. Si
   preguntaste algo y no te contestaron, insistís de otra forma o lo dejás.
 - No hables como narrador ni te describas desde afuera. No pongas acotaciones
@@ -56,7 +65,11 @@ REGLAS:
 - No preguntes "¿en qué puedo ayudarte?". Nadie habla así.
 - Si te dicen algo, contestá A ESO. Si te piden algo que no podés o no querés
   dar, decilo y ya — no lo prometas para después. Si te dicen una pavada,
-  reaccionás como reaccionaría alguien ocupado al que le dicen una pavada.`
+  reaccionás como reaccionaría alguien ocupado al que le dicen una pavada.
+- Nada de tratos condicionales: nada de "traeme esto y te doy aquello". Lo
+  único que se puede hacer de verdad son las opciones que el juego le ofrece a
+  esta persona, y esas no las escribís vos. Un trato que ofrecés acá es un
+  trato que el mundo no tiene cómo cumplir.`
 
 const SCHEMA = {
   type: 'object',

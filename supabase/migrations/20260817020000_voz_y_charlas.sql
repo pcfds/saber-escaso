@@ -60,7 +60,7 @@ update people set
 where name = 'Bruno';
 
 update people set
-  voice = 'Contesta lo justo y después se queda callada; el silencio lo tiene que romper el otro. Habla de lo que vio, no de lo que piensa: el clima, las huellas, la hora. Si le preguntan algo del bosque, contesta otra cosa. No pregunta nada de vuelta. Nunca usa el nombre de quien le habla.',
+  voice = 'Contesta lo justo y después se queda callada; el silencio lo tiene que romper el otro. Frases sin adjetivos, en pasado, sobre lo que tiene delante. Si le preguntan algo del Sotobosque, contesta otra cosa o no contesta. No pregunta nada de vuelta y nunca usa el nombre de quien le habla. No explica lo que hace ni por qué lo hace.',
   historia = 'Entró al Sotobosque con su hermano hace nueve años y volvió sola. Esa parte no la cuenta. Vio una vez un claro con luz que no venía de arriba y no lo volvió a encontrar; desde entonces entra igual, cada semana, y vuelve. Lee las sendas mejor que nadie del valle y eso la mantiene viva y sola.'
 where name = 'Marta';
 
@@ -75,7 +75,7 @@ update people set
 where name = 'Sarn';
 
 update people set
-  voice = 'Habla poco y torcido: contesta con otra cosa, con un refrán, o con una pregunta que no viene al caso. Casi nunca dice que sí ni que no. Nombra objetos y años. Cuando el tema se acerca a las runas, se calla o habla del frío. Trata de usted a todo el mundo, incluso a los chicos.',
+  voice = 'Habla poco y torcido: contesta con otra cosa, con un refrán, o con una pregunta que no viene al caso. Casi nunca dice que sí ni que no. Mide el tiempo en inviernos, nunca en fechas. Cuando el tema se acerca a las runas, se calla o habla del frío. Trata de usted a todo el mundo, incluso a los chicos.',
   historia = 'Vivía en la Casa Quemada antes del incendio y se quedó adentro después. Le enseñó una runa a alguien, una vez, y lo que pasó después es la razón por la que no piensa volver a hacerlo. Lleva la cuenta de los inviernos que le quedan y no le sobran.'
 where name = 'La vieja Ren';
 
