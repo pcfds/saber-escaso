@@ -624,6 +624,19 @@ const VIDA_PERSONA = 100
  *  decisión aparte, tomada después de ver que se iba. */
 const HUIR_BAJO_EL = 0.5
 
+/** Y debajo de ésta, pide que pares.
+ *
+ * **Tiene que ser MÁS ALTO que el de huir, y eso salió del banco.** Con los dos
+ * en 0,5, el pedido no salió nunca en ocho golpes seguidos: la persona cruzaba
+ * el umbral y huía en el mismo golpe, así que la frase de la huida se comía
+ * siempre a la del pedido. O sea que el único aviso que da el mundo antes de
+ * que esto sea irreversible —§9.3c, regla 3— era código muerto, y la prueba
+ * habría pasado igual si no lo hubiera mirado renglón por renglón.
+ *
+ * A 0,75 el pedido cae en el segundo golpe y la huida en el cuarto: pedir,
+ * irse, y recién después morir son tres momentos distintos. */
+const PEDIR_BAJO_EL = 0.75
+
 /** Lo que le cuesta al que pega, en los dos ejes y con los dos sujetos.
  *
  *  El que recibe se acuerda mucho más que el que mira, y el aprecio cae más de
@@ -741,8 +754,9 @@ export async function golpearPersona(args: {
   // ── SIGUE EN PIE ─────────────────────────────────────────────────────────
   if (restante > 0) {
     let huyo: { id: string; name: string } | null = null
-    const flojo = restante < maxima * HUIR_BAJO_EL
-    if (flojo && args.adondeHuir) huyo = await args.adondeHuir(victima)
+    const escapa = restante < maxima * HUIR_BAJO_EL
+    const pide = restante < maxima * PEDIR_BAJO_EL
+    if (escapa && args.adondeHuir) huyo = await args.adondeHuir(victima)
 
     await db.from('people').update({
       health: restante,
@@ -755,7 +769,7 @@ export async function golpearPersona(args: {
     // de leerlos justo antes del que importaba.
     const summary = huyo
       ? `${player.name} le pegó a ${victima.name}${con}. ${victima.name} se fue a ${huyo.name} sin devolver el golpe.`
-      : flojo
+      : pide
         ? `${player.name} le pegó a ${victima.name}${con}. ${victima.name} le pidió que pare.`
         : `${player.name} le pegó a ${victima.name}${con}.`
     await emitir({
