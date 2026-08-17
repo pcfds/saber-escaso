@@ -122,9 +122,25 @@ que la habrían disparado.
 > son mejores; pero no eran la causa, y arreglarlas solas habría dejado el
 > problema entero en pie con la sensación de haberlo cerrado.
 >
-> **Lo que queda de esto:** borrar del prompt la contra-instrucción del voseo,
-> que ya no tiene contra qué defender —el único "acá" del flujo de hechos ahora
-> dice "aquí"—. Es `lib/world/director.ts`, línea ~398.
+> **Y una segunda corrección, a algo que escribí acá mismo hace diez minutos:**
+> dije que ahora se podía borrar del prompt la contra-instrucción del voseo,
+> porque el único "acá" del flujo de hechos ya dice "aquí". **Lo medí y es
+> falso: borrarla sería peor.**
+>
+> - **349 hechos de producción, 0 con voseo o "acá".** Y tampoco los otros
+>   insumos del prompt: `people.voice`, `people.historia`, `places.description`
+>   — 0 de 12.
+> - Con la contra-instrucción todavía puesta, una crónica de producción
+>   recién generada dice *«no cayó, pero **vos** sí»* y *«Odila sabe de
+>   Destilado de raíz como **vos**»*, mezclado con «tienes» y «te metiste» en
+>   los mismos tres párrafos.
+>
+> O sea: **el emisor está limpio y el voseo lo pone el modelo solo.** La
+> contra-instrucción no sobra — es insuficiente, que es lo contrario. Lo que
+> hace falta es una señal que lo mida, del estilo de `unbacked_names`: hoy el
+> registro se parte a la mitad de una crónica y nada lo cuenta. El cambio de
+> "acá" a "aquí" se queda igual, porque quitarle munición al modelo sigue
+> estando bien; simplemente no era de donde venía.
 
 `lib/world/tick.ts` — **bloqueado**, lo tiene 02.6.
 **Es lo único que falta para poder correr el test de siete días.**
