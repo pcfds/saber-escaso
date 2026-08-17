@@ -456,7 +456,7 @@ export async function handler(
           .then(() => undefined)
 
         const [places, people, amenazas, objetos, saberes, vinculos, otros,
-               marcas, colgadas] = await Promise.all([
+               marcas, colgadas, hechosMios] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -484,6 +484,12 @@ export async function handler(
           // tarda de 1,1 a 1,7 s contra producción.
           marcasDe(region.id, region.tick + 1),
           loQueLleva({ kind: 'player', id: player.id }),
+          // Lo que hiciste, para saber cómo te llama el valle. Sólo los tipos
+          // que pueden dar nombre: leer los 350 hechos de la región para
+          // contar cuatro sería pagar la región entera en cada latido.
+          db.from('events').select('kind, detail')
+            .eq('region_id', region.id).gte('tick', 0)
+            .in('kind', ['ensenanza', 'amenaza_muerta', 'regalo', 'caida', 'fabricacion']),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -549,6 +555,9 @@ export async function handler(
           // que el jugador no puede ver es un sistema que no existe.
           vos: {
             nombre: player.name,
+            // Cómo te llama el valle: null hasta que hagas algo. Ver
+            // `comoTeLlaman`.
+            llaman: comoTeLlaman(hechosMios.data ?? [], player.name),
             saberes: (saberes.data ?? []).map((k) => {
               const c = (k as unknown as {
                 knowledge: { name: string; kind: string; para_que: string | null } | null
@@ -1219,6 +1228,63 @@ function actitud(
  * `mejora()` en tick.ts, donde las primeras veces suben mucho y de 80 para
  * arriba cada punto cuesta.
  */
+/**
+ * Cómo te llama el valle.
+ *
+ * El reclamo era *"no hay stats, no hay evolución"*, y la respuesta fácil sería
+ * un nivel. Un nivel es un número que sube porque pasó el tiempo; esto es un
+ * nombre que te ganaste porque hiciste algo, y **sale de `events`**, o sea de
+ * lo que de verdad pasó y quedó escrito. No lo escribe un modelo y no hay una
+ * tabla de títulos: si el hecho no está, el nombre no existe.
+ *
+ * El orden es una declaración de qué vale en este mundo, y por eso **enseñar
+ * gana sobre matar**. La tesis del juego está en `DISENO.md` §8: el saber vive
+ * en gente mortal, y aprender es la única operación donde al terminar saben
+ * dos. Un valle que te llama "el que mató al Hermano Mayor" antes que "el que
+ * enseña" es otro juego. Matar algo con nombre viene después, y sólo si tiene
+ * nombre: los que lo tienen son personas de un pueblo, no bichos.
+ *
+ * Y el caso vacío importa tanto como los otros: **al que no hizo nada no se lo
+ * llama de ninguna manera.** Un título de bienvenida no se gana, y regalarlo
+ * arruina los que sí.
+ */
+function comoTeLlaman(
+  eventos: { kind: string; detail: unknown }[],
+  yo: string,
+): string | null {
+  const mios = eventos
+    .map((e) => (e.detail ?? {}) as Record<string, unknown>)
+    .map((d, i) => ({ d, kind: eventos[i]!.kind }))
+    .filter(({ d }) => d['player'] === yo || d['from'] === yo)
+  const de = (k: string) => mios.filter((m) => m.kind === k)
+
+  const ensenadas = de('ensenanza')
+  if (ensenadas.length > 0) {
+    // Se nombra a QUIÉN, no cuántas veces. «el que le enseñó a Tobio» es una
+    // persona; «el que enseñó 4 veces» es una planilla.
+    const aQuien = [...new Set(ensenadas.map((m) => String(m.d['to'] ?? '')).filter(Boolean))]
+    return aQuien.length === 1 ? `el que le enseñó a ${aQuien[0]}` : 'el que enseña lo suyo'
+  }
+
+  const matadas = de('amenaza_muerta')
+  const conNombre = matadas.map((m) => String(m.d['threat'] ?? ''))
+    // Los que tienen nombre propio son gente de un pueblo. Un «merodeador» no
+    // te hace conocido; el Hermano Mayor sí.
+    .filter((n) => n && !/^(un|una|algo|el que|lo que)\b/i.test(n))
+  if (conNombre.length > 0) return `el que mató a ${conNombre[conNombre.length - 1]}`
+  if (matadas.length >= 3) return 'el que baja al Sotobosque'
+
+  if (de('regalo').length >= 3) return 'el que trae cosas'
+  const caidas = de('caida').length
+  if (caidas >= 3) return 'el que se levanta'
+  const hechas = de('fabricacion')
+  if (hechas.length > 0) {
+    const que = String(hechas[hechas.length - 1]!.d['object'] ?? '').trim()
+    if (que) return `el que hace ${que}`
+  }
+  return null
+}
+
 function mano(destreza: number): string {
   if (destreza < 12) return 'recién empiezas'
   if (destreza < 30) return 'te sale, con esfuerzo'
