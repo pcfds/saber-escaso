@@ -527,7 +527,7 @@ export async function handler(
           .then(() => undefined)
 
         const [places, people, amenazas, objetos, saberes, vinculos, otros,
-               marcas, colgadas, hechosMios, suelo, plata, puestos] = await Promise.all([
+               marcas, colgadas, hechosMios, suelo, plata, puestos, pueblos] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -599,6 +599,11 @@ export async function handler(
           // malla, y un mostrador que no se ve no existe.
           db.from('mostradores')
             .select('place_id, person_id, moneda, abre, cierra, monedas (singular, plural)')
+            .eq('region_id', region.id),
+          // Los que no son humanos. Va último y dentro de la misma tanda: son
+          // dos filas y no vale un round-trip aparte en la ruta que el cliente
+          // pega cada cinco segundos.
+          db.from('peoples').select('name, aprecio, temor, agravio')
             .eq('region_id', region.id),
         ])
 
@@ -698,6 +703,25 @@ export async function handler(
           // por un claro que sigue ardiendo y saber quién lo prendió, aunque
           // esa persona ya no esté.
           marcas,
+          // Cómo te miran los que no son humanos. **Hasta hoy esto era
+          // invisible**: `peoples.aprecio` no lo movía nada y el jugador no
+          // tenía forma de enterarse de que matar a los suyos le estaba
+          // cerrando la única puerta que hay a templar con ceniza de hueso o
+          // a la lengua del Sotobosque.
+          //
+          // En palabras y nunca en números, igual que el aprecio de una
+          // persona: un porcentaje de odio rompe la ilusión de que son
+          // pueblos.
+          pueblos: (pueblos.data ?? []).map((p) => ({
+            nombre: p.name,
+            agravio: p.agravio,
+            comoTeMiran: p.aprecio <= -60 ? 'te quieren fuera de su tierra'
+              : p.aprecio <= -25 ? 'te tienen por enemigo'
+              : p.aprecio < 0 ? 'desconfían de ti'
+              : p.aprecio < 25 ? 'te toleran'
+              : 'te tratan como a uno más',
+            teTemen: (p.temor ?? 0) >= 25,
+          })),
           primeros_pasos: pasos({
             places: places.data ?? [],
           // Cada persona viene con cómo te trata. Es lo que contesta el

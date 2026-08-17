@@ -999,6 +999,13 @@ export async function step() {
     .select('id, name, trade, place_id, teaches, home_place_id, jornada_desde, jornada_hasta, durmio_fuera_desde')
     .eq('region_id', region.id).eq('alive', true)).data ?? []
 
+  // Los que no son humanos. Se leen acá porque **cuentan como portadores de
+  // un saber**: la lengua del Sotobosque y el temple de ceniza los tienen
+  // ellos, están vivos, y hasta hoy el código los daba por muertos.
+  const pueblos = (await db
+    .from('peoples').select('id, name, aprecio, temor')
+    .eq('region_id', region.id)).data ?? []
+
   const places = (await db
     .from('places').select('id, name, slug, kind, ultimo_dia_abierto')
     .eq('region_id', region.id)).data ?? []
@@ -1437,6 +1444,7 @@ export async function step() {
       // línea que ya mató a una NPC viva una vez. La meta va en `detail`, que
       // es dato y no prosa.
       await seMuere({
+        pueblos,
         tick: nextTick, muerto: m, donde: donde.id, people, players, ev,
         evento: {
           kind: 'no_volvio', place_id: donde.id,
@@ -2029,7 +2037,12 @@ export async function step() {
       if (siguenAcá.length === 0) {
         await db.from('agendas').update({ state: 'bloqueada' }).eq('id', agenda.id)
         ev({ kind: 'agenda_bloqueada', place_id: who.place_id,
-          summary: `${who.name} dejó de intentar ${agenda.goal}: ya no queda nadie que sepa lo que necesita.`,
+          // **No dice "nadie lo sabe", dice "nadie de acá se lo puede
+          // enseñar"**, y la diferencia es real: el temple de ceniza lo sabe
+          // un pueblo entero que está vivo del otro lado del valle. Lo que no
+          // hay es un humano que se lo muestre — y ésa es una puerta cerrada,
+          // no un saber perdido.
+          summary: `${who.name} dejó de intentar ${agenda.goal}: no queda nadie del valle que pueda enseñárselo.`,
           detail: { npc: who.name, person: who.name, goal: agenda.goal } })
         continue
       }
@@ -2244,6 +2257,7 @@ export async function step() {
       // es lo único que cambia**: si `perdida_de_saber` se escribiera dos
       // veces, el evento del que cuelga la tesis del juego tendría dos dueños.
       await seMuere({
+        pueblos,
         tick: nextTick, muerto, donde: muerto.place_id, people, players, ev,
         evento: {
           kind: 'muerte', place_id: muerto.place_id,
@@ -2767,6 +2781,7 @@ export async function step() {
     const hueco = (cupo - people.length) / Math.max(1, cupo - PISO_DEL_VALLE)
     if (Math.random() < P_NACIMIENTO * hueco) {
       await llegaAlguien({
+        pueblos,
         regionId: region.id, tick: nextTick, people, players, places, ev,
       })
     }
@@ -3116,6 +3131,10 @@ async function seMuere(args: {
   /** La lista viva del tick. **Se modifica**: ver el paso 1. */
   people: { id: string }[]
   players: { id: string }[]
+  /** Los que no son humanos. Cuentan como portadores: si la lengua del
+   *  Sotobosque la sigue teniendo el Sotobosque, no se perdió porque se
+   *  muriera un humano. */
+  pueblos?: { id: string }[]
   ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
   /** Cómo se cuenta esta muerte. Es lo único que difiere entre las dos formas
    *  de irse, y por eso lo trae quien llama en vez de decidirse acá. */
@@ -3139,7 +3158,9 @@ async function seMuere(args: {
       .from('knows').select('holder_id, holder_kind')
       .eq('knowledge_id', k.knowledge_id)
       .neq('holder_id', muerto.id)).data ?? []
-    if (siguenEnElValle(otros, people, players).length > 0) continue
+    // Con los pueblos: si la lengua del Sotobosque la sigue teniendo el
+    // Sotobosque, no se perdió porque se muriera un humano.
+    if (siguenEnElValle(otros, people, players, undefined, args.pueblos ?? []).length > 0) continue
     const { data: info } = await db
       .from('knowledge').select('name').eq('id', k.knowledge_id).single()
     ev({ kind: 'perdida_de_saber',
@@ -3341,6 +3362,7 @@ async function llegaAlguien(args: {
    *  hoy. Ver por qué esto va último en el bloque 7 de `step()`. */
   people: { id: string; name: string; place_id: string | null; teaches: boolean }[]
   players: { id: string }[]
+  pueblos?: { id: string }[]
   places: { id: string; name: string; kind: string }[]
   ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
 }): Promise<boolean> {
@@ -3394,7 +3416,9 @@ async function llegaAlguien(args: {
     .map((k) => k.knowledge_id))
   // Lo que sigue en pie sale del predicado de siempre, que es el que filtra por
   // región Y por vivo. No hay una cuarta forma de contar portadores.
-  const enPie = new Set(siguenEnElValle(knows, people, players).map((k) => k.knowledge_id))
+  const enPie = new Set(
+    siguenEnElValle(knows, people, players, undefined, args.pueblos ?? [])
+      .map((k) => k.knowledge_id))
 
   //
   // **Entre la mitad y el todo, y el piso de la mitad no es cosmético.** La
@@ -3708,16 +3732,44 @@ function yLista(xs: string[]): string {
  * `excluir` es para el caso de la muerte: `people` se leyó antes de matarlo,
  * así que el muerto todavía figura en esa lista.
  */
+/**
+ * Quiénes de estos portadores siguen en el valle.
+ *
+ * **Los pueblos cuentan, y esto es el arreglo de un bug que hacía inalcanzable
+ * el mejor contenido que tiene el valle.** El predicado preguntaba «¿es un
+ * jugador? entonces buscalo entre los jugadores; si no, entre las personas», y
+ * un `holder_kind = 'people'` —un PUEBLO— caía en la segunda rama, no aparecía,
+ * y quedaba afuera.
+ *
+ * Medido en producción: `Temple de ceniza` lo saben Los de la Ceniza, que están
+ * vivos, y esta función contaba **cero portadores**. Lo mismo la lengua del
+ * Sotobosque. O sea que los dos saberes que no se parecen a nada más del juego
+ * estaban dados por muertos, y con ellos:
+ *
+ *   · `perdida_de_saber` disparaba sobre algo que nadie había perdido;
+ *   · el peso ×3 del último portador se calculaba mal;
+ *   · y la intro le decía al jugador *"hoy nadie en el valle sabe hacer ese
+ *     temple"*, que es falso.
+ *
+ * **Que cuenten como portadores NO los vuelve maestros.** Un pueblo no tiene
+ * fila en `people`, así que nadie puede ir a aprender de él por el camino
+ * normal — y eso está bien: aprender lo suyo tiene que pasar por su agravio,
+ * que es lo que `peoples.agravio` viene pidiendo desde que se escribió. Lo que
+ * esta función arregla es una sola cosa: **el saber existe.**
+ */
 export function siguenEnElValle<T extends { holder_kind: string; holder_id: string }>(
   holders: T[],
   people: { id: string }[],
   players: { id: string }[],
   excluir?: string,
+  pueblos: { id: string }[] = [],
 ): T[] {
   return holders.filter((h) => h.holder_id !== excluir && (
     h.holder_kind === 'player'
       ? players.some((q) => q.id === h.holder_id)
-      : people.some((q) => q.id === h.holder_id)))
+      : h.holder_kind === 'people'
+        ? pueblos.some((q) => q.id === h.holder_id)
+        : people.some((q) => q.id === h.holder_id)))
 }
 
 const EN_LETRAS = ['nadie', 'uno', 'dos', 'tres', 'cuatro', 'cinco',

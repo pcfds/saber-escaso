@@ -215,6 +215,41 @@ export async function pelear(args: {
     detail: { [suNombre]: player.name, threat: nom, weapon: arma?.kind ?? null },
   })
 
+  // ── Y si era de un pueblo, el pueblo se entera ────────────────────────
+  //
+  // `threats.people_id` existía desde que se escribió la tabla y **no lo
+  // miraba nadie al matar**. O sea que los que no son humanos veían morir a
+  // los suyos y el mundo no registraba nada: en producción ya habían matado a
+  // Kerrak y a Nua, de Los de la Ceniza, y el aprecio del pueblo seguía en el
+  // −20 con el que nace.
+  //
+  // `peoples.aprecio` y `peoples.temor` llevan escritos desde el primer día
+  // con este comentario: *"igual que con la gente, pero el pueblo entero se
+  // acuerda de lo que le hiciste a cualquiera de los suyos"*. Esto es la
+  // primera cosa que lo escribe.
+  //
+  // **Por qué importa más que un número que baja:** los dos saberes más
+  // distintos del valle —templar con ceniza de hueso, la lengua del
+  // Sotobosque— sólo los tienen ellos. Matar a los suyos es cerrarse la única
+  // puerta que hay a eso. Y el que mata sin saberlo se entera después, que es
+  // exactamente como funciona una ofensa.
+  //
+  // No hay evento nuevo: el `amenaza_muerta` ya salió y agregar otro por la
+  // misma muerte sería contar dos veces lo mismo en la ventana del director.
+  if (bicho.people_id) {
+    const { data: pueblo } = await db.from('peoples')
+      .select('id, name, aprecio, temor').eq('id', bicho.people_id).maybeSingle()
+    if (pueblo) {
+      await db.from('peoples').update({
+        // Baja fuerte y sube el miedo: los dos ejes se mueven en direcciones
+        // distintas, igual que con una persona. Un pueblo que te teme no te
+        // quiere cerca, pero tampoco te ataca de frente.
+        aprecio: Math.max(-100, pueblo.aprecio - 14),
+        temor: Math.min(100, pueblo.temor + 9),
+      }).eq('id', pueblo.id)
+    }
+  }
+
   // Lo ven, y no todos lo leen igual: al que te teme le sube el miedo, no el
   // aprecio. Dos ejes, no una barra. Los testigos son los del lugar donde
   // cayó el bicho, no donde está parado el jugador: pueden diferir si peleó
