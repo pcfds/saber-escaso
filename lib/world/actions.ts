@@ -11,7 +11,7 @@
  */
 import { db, getRegion } from '../db.js'
 
-const VERBOS = ['ir', 'hablar', 'trabajar', 'aprender', 'ensenar'] as const
+const VERBOS = ['ir', 'hablar', 'trabajar', 'aprender', 'ensenar', 'pelear'] as const
 
 async function main() {
   const [name, verb, ...rest] = process.argv.slice(2)

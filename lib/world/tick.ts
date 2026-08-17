@@ -22,6 +22,11 @@ type Ev = {
 const roll = (max: number) => Math.floor(Math.random() * max)
 const pick = <T>(xs: T[]): T | undefined => xs[roll(xs.length)]
 
+/** Un saber que produce algo, y dónde. Vive en `knowledge`, no en una tabla
+ *  de recetas: la receta no es un objeto que se pueda robar ni copiar — es
+ *  parte de lo que alguien sabe, y se muere con esa persona. */
+type Receta = { name: string; makes: string; makes_at: string }
+
 export async function step() {
   const region = await getRegion()
   const nextTick = region.tick + 1
@@ -44,7 +49,7 @@ export async function step() {
     .eq('region_id', region.id).eq('alive', true)).data ?? []
 
   const places = (await db
-    .from('places').select('id, name, slug').eq('region_id', region.id)).data ?? []
+    .from('places').select('id, name, slug, kind').eq('region_id', region.id)).data ?? []
   const placeName = (id: string | null | undefined) =>
     places.find((p) => p.id === id)?.name ?? 'algún lado'
 
@@ -237,26 +242,80 @@ export async function step() {
     }
   }
 
+  // ── 4b. Las amenazas ──────────────────────────────────────
+  // Antes los monstruos vivían en la máquina de cada jugador: los matabas y
+  // el mundo no se enteraba. Ahora viven acá, los ve todo el mundo, y matar
+  // uno deja un evento que el director puede contar.
+  const amenazas = (await db
+    .from('threats').select('id, place_id, kind, health, max_health')
+    .eq('region_id', region.id).eq('alive', true)).data ?? []
+
+  // Aparecen donde tiene sentido que aparezcan, y de a poco. Un valle lleno de
+  // bichos deja de dar miedo: se vuelve una cola de tareas.
+  const salvaje = places.filter((p) => p.kind === 'bosque' || p.kind === 'ruina')
+  if (amenazas.length < 3 && Math.random() < 0.35 * pace) {
+    const donde = pick(salvaje)
+    const que = pick(['una jauría de sombra', 'algo que baja del Sotobosque', 'un merodeador'])!
+    if (donde) {
+      const vida = 30 + roll(40)
+      await db.from('threats').insert({
+        region_id: region.id, place_id: donde.id, kind: que,
+        health: vida, max_health: vida, spawned_tick: nextTick,
+      })
+      ev({ kind: 'amenaza', place_id: donde.id,
+        summary: `Vieron ${que} rondando ${donde.name}.`,
+        detail: { threat: que, place: donde.name } })
+    }
+  }
+
+  // Y muerden. Estar en el lugar equivocado tiene que costar algo, o el mapa
+  // es decorado.
+  for (const a of amenazas) {
+    const presentes = players.filter(
+      (p) => p.place_id === a.place_id && region.tick - p.last_seen_tick <= 3)
+    for (const p of presentes) {
+      if (Math.random() > 0.5) continue
+      const { data: estado } = await db
+        .from('players').select('health').eq('id', p.id).maybeSingle()
+      const vida = Math.max(0, (estado?.health ?? 100) - (6 + roll(10)))
+      await db.from('players')
+        .update({ health: vida, ...(vida === 0 ? { downed_at_tick: nextTick } : {}) })
+        .eq('id', p.id)
+      ev({ kind: vida === 0 ? 'caida' : 'herida', place_id: a.place_id,
+        summary: vida === 0
+          ? `${a.kind} tumbó a ${p.name} en ${placeName(a.place_id)}.`
+          : `${a.kind} lastimó a ${p.name} en ${placeName(a.place_id)}.`,
+        detail: { player: p.name, threat: a.kind } })
+    }
+  }
+
   // ── 5. El chusmerío mueve la reputación ───────────────────
   // La gente se cuenta lo que vio. Así viaja la fama — mal y despacio.
   const recientes = (await db
     .from('memories').select('id, person_id, about_kind, about_id, what, tick')
     .gte('tick', Math.max(0, region.tick - 2))).data ?? []
+  let rumores = 0
   for (const m of recientes) {
+    if (rumores >= 3) break
     if (Math.random() > 0.4) continue
     const contador = people.find((p) => p.id === m.person_id)
     const oyente = pick(people.filter(
       (p) => p.id !== m.person_id && p.place_id === contador?.place_id))
     if (!contador || !oyente) continue
+    // .limit(1) no es cosmético: maybeSingle() DEVUELVE ERROR si matchea más
+    // de una fila, y entonces `data` viene null y la deduplicación no dedupea
+    // nada. Se vio en el tick 42 de valle-pruebas: catorce veces la misma
+    // frase, y el director cobrando tokens por leer catorce veces lo mismo.
     const { data: yaSabe } = await db
       .from('memories').select('id')
       .eq('person_id', oyente.id)
-      .eq('about_id', m.about_id).eq('what', m.what).maybeSingle()
+      .eq('about_id', m.about_id).eq('what', m.what).limit(1).maybeSingle()
     if (yaSabe) continue
     await db.from('memories').insert({
       person_id: oyente.id, about_kind: m.about_kind, about_id: m.about_id,
       what: m.what, heard_from: contador.id, tick: nextTick,
     })
+    rumores++
     ev({ kind: 'rumor', place_id: contador.place_id,
       summary: `${contador.name} le contó a ${oyente.name}: ${m.what}`,
       detail: { from: contador.name, to: oyente.name } })
@@ -286,7 +345,7 @@ async function resolveAction(
   action: { verb: string; target: string | null },
   ctx: {
     people: { id: string; name: string; trade: string; place_id: string | null; teaches: boolean }[]
-    places: { id: string; name: string; slug: string }[]
+    places: { id: string; name: string; slug: string; kind: string }[]
     ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
   },
 ): Promise<string> {
@@ -317,15 +376,93 @@ async function resolveAction(
     }
 
     case 'trabajar': {
-      ev({ kind: 'trabajo', place_id: player.place_id,
-        summary: `${player.name} pasó el día trabajando en ${places.find((p) => p.id === player.place_id)?.name ?? 'el valle'}.`,
-        detail: { player: player.name } })
+      const lugar = places.find((p) => p.id === player.place_id)
       const testigos = people.filter((p) => p.place_id === player.place_id)
+
+      // Trabajar produce algo sólo si SABÉS hacer algo y estás donde se hace.
+      // No hay recetas escritas en ningún lado, no hay tienda y no hay drops:
+      // un objeto del valle existe porque alguien vivo supo hacerlo. Ésa es la
+      // regla entera, y es la que hace que un muerto se lleve cosas del mundo.
+      const saberes = (await db
+        .from('knows').select('knowledge:knowledge_id (name, makes, makes_at)')
+        .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
+      const recetas = saberes
+        .map((k) => (k as unknown as { knowledge: Receta | null }).knowledge)
+        .filter((k): k is Receta => !!k?.makes && k.makes_at === lugar?.kind)
+      const receta = pick(recetas)
+
+      if (receta) {
+        const calidad = 35 + roll(45)
+        await db.from('objects').insert({
+          region_id: regionId, kind: receta.makes, quality: calidad,
+          made_by: player.name, made_tick: tick,
+          holder_kind: 'player', holder_id: player.id,
+        })
+        ev({ kind: 'fabricacion', place_id: player.place_id,
+          summary: `${player.name} hizo ${receta.makes} en ${lugar?.name ?? 'el valle'}.`,
+          detail: { player: player.name, object: receta.makes, quality: calidad } })
+        for (const t of testigos) {
+          await recordar(t.id, player, `${player.name} sabe hacer ${receta.makes}`, tick)
+          await tocarVinculo(t.id, player.id, { valued: 6 })
+        }
+        return `hizo ${receta.makes}`
+      }
+
+      ev({ kind: 'trabajo', place_id: player.place_id,
+        summary: `${player.name} pasó el día trabajando en ${lugar?.name ?? 'el valle'}.`,
+        detail: { player: player.name } })
       for (const t of testigos) {
         await recordar(t.id, player, `${player.name} trabaja sin que se lo pidan`, tick)
         await tocarVinculo(t.id, player.id, { valued: 4 })
       }
       return 'trabajó'
+    }
+
+    case 'pelear': {
+      const { data: bicho } = await db
+        .from('threats').select('id, kind, health, max_health')
+        .eq('region_id', regionId).eq('place_id', player.place_id ?? '')
+        .eq('alive', true).limit(1).maybeSingle()
+      if (!bicho) return 'no hay nada que pelear acá'
+
+      // Acá es donde los objetos dejan de ser una lista y pesan: con qué le
+      // pegás cambia el resultado, y con qué le pegás depende de que alguien
+      // haya sabido hacerlo.
+      const { data: armas } = await db
+        .from('objects').select('kind, quality, made_by')
+        .eq('holder_kind', 'player').eq('holder_id', player.id)
+      const arma = (armas ?? [])
+        .filter((o) => o.kind === 'hoja templada' || o.kind === 'filo de agua')
+        .sort((a, b) => b.quality - a.quality)[0]
+      const danio = 8 + roll(8) + Math.floor((arma?.quality ?? 0) / 6)
+      const restante = Math.max(0, bicho.health - danio)
+
+      if (restante > 0) {
+        await db.from('threats').update({ health: restante }).eq('id', bicho.id)
+        ev({ kind: 'pelea', place_id: player.place_id,
+          summary: arma
+            ? `${player.name} le entró a ${bicho.kind} con ${arma.kind}, y sigue en pie.`
+            : `${player.name} le entró a ${bicho.kind} a mano limpia, y sigue en pie.`,
+          detail: { player: player.name, threat: bicho.kind, weapon: arma?.kind ?? null } })
+        return `lastimó a ${bicho.kind}`
+      }
+
+      await db.from('threats')
+        .update({ alive: false, health: 0, killed_by: player.name, killed_tick: tick })
+        .eq('id', bicho.id)
+      ev({ kind: 'amenaza_muerta', place_id: player.place_id,
+        summary: arma
+          ? `${player.name} mató a ${bicho.kind} con ${arma.kind}${arma.made_by && arma.made_by !== player.name ? `, que había hecho ${arma.made_by}` : ''}.`
+          : `${player.name} mató a ${bicho.kind} sin nada en las manos.`,
+        detail: { player: player.name, threat: bicho.kind, weapon: arma?.kind ?? null } })
+
+      // Lo ven, y no todos lo leen igual: al que te teme le sube el miedo, no
+      // el aprecio. Dos ejes, no una barra.
+      for (const t of people.filter((p) => p.place_id === player.place_id)) {
+        await recordar(t.id, player, `${player.name} mató a ${bicho.kind} acá`, tick)
+        await tocarVinculo(t.id, player.id, { valued: 8, feared: 5 })
+      }
+      return `mató a ${bicho.kind}`
     }
 
     case 'aprender': {
