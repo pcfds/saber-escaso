@@ -19,9 +19,42 @@ verificado, en `ROADMAP.md`.
 | **P.2d** · la aldea no se separa del suelo: rango de valor y el kit fuera de la paleta | `arte` | `scripts/paleta.gd`, `scripts/ambiente.gd` |
 | **02.6** · nacimientos: que el saber deje de ser una función decreciente | `simulacion` | `lib/world/tick.ts`, migración `20260817140000_` |
 | **P.2d** · cablear la aduana en el kit + rehacer la medición contra la escena de ahora | `arte` | `scripts/kit.gd`, `scripts/paleta.gd` |
+| **J.1** · interiores: que se pueda entrar a los edificios | `arquitectura` | `scripts/interiores.gd`, `detalles.gd`, `valle.gd`, `kit.gd`, `prueba_casas.gd` |
+| **J.3** · escala, edad y cielo: que el valle deje de leerse como juguete | `escena` | `scripts/hitos.gd`, `ambiente.gd`, `cielo.gd`, `vegetacion.gd`, `paleta.gd`, `dibujado.gd`, `parpadeo.gd`, `rendimiento.gd` |
+| **N.1** · que los NPCs tomen iniciativa | `npc-voz` | `lib/world/dialogo.ts`, `tick.ts`, `saludos.ts`, migración `20260817190000_` |
 
 Todo lo demás está libre. Antes de despachar, actualizá esta tabla: si se
 desactualiza, dos agentes se pisan y se pierde media hora.
+
+## Cables sueltos: código escrito que no lo llama nadie
+
+**Esto no es backlog común, es la deuda característica de este proyecto**, y
+tiene nombre desde que se dijo en voz alta: *construimos más rápido de lo que
+enchufamos*. Cada renglón de acá es trabajo TERMINADO Y VERIFICADO que no llega
+a la pantalla porque falta una línea en un archivo que en ese momento tenía otro
+dueño. Ya pasó en grande: `Interfaz.quiere_juntar` se emitía y no lo escuchaba
+nadie, y `Figura.juntar()` —el personaje agachándose a recoger— estaba escrita y
+**nunca corrió**, que era exactamente el reclamo *"apretás B y dice buscando,
+¿el personaje hace algo?"*.
+
+Todos estos esperan a que se libere `scripts/valle.gd`:
+
+- **Los gestos sociales.** `figura.gd` tiene `dar()`, `recibir_regalo()`,
+  `ensenar()` y `conversar(bool, yaw_local)`, y no las llama nadie. Van colgadas
+  de los eventos que el servidor ya manda: `regalo` → el que da y el que recibe;
+  `ensenanza` → el maestro; `conversacion` → los dos, con
+  `yaw_local = atan2(d.x, d.z) - figura.rotation.y` acotado a ±1,2 rad. Y cuando
+  el jugador regala, `jugador.figura.dar()`.
+- **El cartel del bicho.** `interfaz.gd` no puede saber dónde hay un monstruo
+  —viven en `valle.gd:_monstruos`—, así que falta un
+  `interfaz.mostrar_amenaza(nombre, nodo)` al lado del `mostrar_cercano` que ya
+  está en `_process()`, con el vivo más cercano dentro de ~10 m. Con eso el
+  tercer verbo deja de vivir en una esquina: *"clic — pegarle a Kerrak el que
+  quedó"*, sobre el bicho.
+- **El sondeo está dimensionado para el lag viejo.** `_refrescar_cada_tanto()`
+  se eligió cuando `/mundo` tardaba 1,1–1,7 s. Ahora tarda 0,25–0,41 s (la
+  función corría en Washington con la base en São Paulo; ver `CLAUDE.md`). El
+  intervalo se puede apretar y el mundo se va a sentir más vivo gratis.
 
 > **Los agentes se caen, y hay que saber leer en qué estado dejaron el árbol.**
 > Pasó dos veces el 17 de agosto y **los dos casos son distintos**:
