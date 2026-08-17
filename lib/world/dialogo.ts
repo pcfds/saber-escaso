@@ -480,6 +480,28 @@ const unLugar = (fila: unknown) =>
 const unPueblo = (fila: unknown) =>
   embebido<{ name: string; lengua: string }>(fila, 'pueblo')
 
+/** Hace cuánto, en días del valle y en palabras.
+ *
+ * **La unidad importa más de lo que parece.** Sin esto, lo único que el prompt
+ * tenía para medir el tiempo eran los `inviernos` del pasado antiguo, y el
+ * modelo los usaba para todo: le preguntaron a Odila hace cuánto murió Ilde y
+ * contestó *"hace cuarenta inviernos"* por una muerte de hace seis meses.
+ *
+ * Los inviernos son para lo que pasó antes de que el mundo empezara a contar.
+ * Lo que pasó jugando se mide en días, semanas y meses — que es como habla la
+ * gente de algo que vivió.
+ */
+function haceCuanto(dias: number): string {
+  if (dias <= 0) return 'hoy'
+  if (dias === 1) return 'ayer'
+  if (dias < 7) return `hace ${dias} días`
+  if (dias < 14) return 'hace una semana'
+  if (dias < 31) return `hace ${Math.round(dias / 7)} semanas`
+  if (dias < 60) return 'hace un mes'
+  if (dias < 350) return `hace ${Math.round(dias / 30)} meses`
+  return `hace ${Math.round(dias / 365)} años`
+}
+
 export type Dialogo = {
   saludo: string
   animo: string
@@ -608,7 +630,7 @@ export async function hablarCon(
   }
 
   const [
-    agendas, sabeNpc, sabeJug, vinculo, memorias, charlas, sucesos, saberes, llevaJug, cuantas,
+    agendas, sabeNpc, sabeJug, vinculo, memorias, charlas, sucesos, noOlvida, saberes, llevaJug, cuantas,
     vinculosOtros, gente, pasado, pueblos, encargosMios, noticias, arranques,
   ] = await Promise.all([
     // `select('*')` y no la lista de columnas: `agendas.needs_object` entra con
@@ -638,6 +660,29 @@ export async function hablarCon(
     db.from('events').select('summary, tick, kind').eq('region_id', region.id)
       .or(`detail->>person.eq."${npc.name}",detail->>from.eq."${npc.name}",detail->>to.eq."${npc.name}"`)
       .order('tick', { ascending: false }).limit(4),
+    // ── LO QUE EL VALLE NO OLVIDA ──────────────────────────────────────
+    //
+    // Las muertes y los saberes perdidos, de TODA la historia del valle. Es el
+    // agujero más grande que tenía este archivo y se encontró jugando la
+    // secuencia entera de punta a punta.
+    //
+    // Le pregunté a Odila hace cuánto había muerto Ilde, la herrera del valle,
+    // y contestó **"hace dos inviernos"** y **"se fue del valle"**. Ni la
+    // fecha ni el hecho: Ilde murió el día 101 de un valle que va por el 292,
+    // o sea hace ciento noventa y un días, y murió, no se fue.
+    //
+    // No estaba mintiendo: **no tenía cómo saberlo.** Los sucesos que ve un
+    // NPC son los últimos CUATRO que lo nombran a ÉL, y el pasado que sembró
+    // el autor vive en tick negativo. Entre esas dos cosas hay un agujero que
+    // cubre toda la historia jugada del valle — y ahí adentro está justamente
+    // lo único que a esta gente le importaría recordar: quién se murió y qué
+    // se llevó puesto.
+    //
+    // Un valle donde nadie se acuerda de que murió la herrera no es un valle
+    // sobre necesitar a alguien: es un valle con amnesia.
+    db.from('events').select('summary, tick, kind').eq('region_id', region.id)
+      .in('kind', ['muerte', 'perdida_de_saber'])
+      .gte('tick', 0).order('tick', { ascending: false }).limit(6),
     // El catálogo entero de saberes son ocho filas. Se trae completo para poder
     // ponerle NOMBRE a lo que le falta a una agenda: "te falta el temple de
     // río" es una gana; "needs_id: 5cbe74c9" no es nada.
@@ -1507,6 +1552,19 @@ export async function hablarCon(
     // de decir.
     deDonde ? `DE DÓNDE ERES Y CÓMO SE TE NOTA: ${deDonde}` : null,
     npc.historia ? `LO QUE TE PASÓ: ${npc.historia}` : null,
+    // Lo que el valle no olvida. Va acá arriba, con quién es y de dónde viene,
+    // porque **no es material para contar: es lo que esta persona SABE**, y la
+    // diferencia se nota. Abajo, entre el estado, el modelo lo leía como una
+    // lista de temas; acá lo trata como memoria.
+    //
+    // Y va con la fecha en días, semanas o meses. Los `inviernos` son del
+    // pasado antiguo y prestárselos a una muerte de hace seis meses es
+    // exactamente el error que esto viene a arreglar.
+    ((noOlvida.data ?? []) as { summary: string; tick: number }[]).length
+      ? 'LO QUE EL VALLE NO OLVIDA (lo sabe todo el mundo aquí, y es verdad):\n'
+        + (noOlvida.data as { summary: string; tick: number }[])
+          .map((e) => `  · ${haceCuanto(region.tick - e.tick)}: ${e.summary}`).join('\n')
+      : null,
     `Te habla: ${playerName}.`,
     `Con ${playerName}: ${confianza}${f > 20 ? ', y te da un poco de miedo' : ''}.`,
     saberesNpc.length ? `Sabes: ${saberesNpc.join(', ')}.` : 'No tienes ningún oficio registrado.',
