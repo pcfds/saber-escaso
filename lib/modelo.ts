@@ -44,6 +44,18 @@ const PRECIOS: Record<string, Record<string, [number, number]>> = {
     'claude-sonnet-5': [3, 15],
     'claude-haiku-4-5': [1, 5],
   },
+  // Los que hablan el protocolo de OpenAI. Es una sola fila por modelo y no
+  // un proveedor por empresa, porque desde el código son el mismo: cambia la
+  // URL base y la clave. Los precios están al 17 de agosto de 2026 y **hay
+  // que volver a mirarlos antes de decidir con ellos**: en este segmento
+  // cambian seguido y para abajo.
+  compatible: {
+    'deepseek-chat': [0.27, 1.10],
+    'deepseek-reasoner': [0.55, 2.19],
+    'qwen-plus': [0.40, 1.20],
+    'qwen-turbo': [0.05, 0.20],
+    'llama-3.3-70b-versatile': [0.59, 0.79],
+  },
 }
 
 /**
@@ -92,6 +104,69 @@ type Cruda = { texto: string | null; inTokens: number; outTokens: number }
 // el día que el director corra con otro proveedor, arrancar el servidor no
 // tiene por qué exigir una ANTHROPIC_API_KEY que ya no hace falta.
 let anthropic: Anthropic | null = null
+
+/**
+ * Cualquier proveedor que hable el protocolo de OpenAI.
+ *
+ * Existe por un pedido concreto de la dirección del proyecto, y la distinción
+ * que hizo importa: **Claude se queda para DESARROLLAR —los agentes, este
+ * repo, todo esto— y lo que corre en vivo para los NPCs tiene que ser lo más
+ * barato que aguante.** El costo de la IA escala con la cantidad de jugadores
+ * y es el riesgo de plata número uno del proyecto: una charla cuesta lo mismo
+ * la juegue quien la juegue, así que mil jugadores son mil veces el número.
+ *
+ * Un solo proveedor cubre a casi todos los candidatos —DeepSeek, Qwen, Groq,
+ * OpenRouter, together— porque todos exponen el mismo endpoint. Lo que cambia
+ * entre ellos son dos variables de entorno:
+ *
+ *     PROVEEDOR_IA=compatible
+ *     IA_BASE_URL=https://api.deepseek.com/v1
+ *     IA_API_KEY=...
+ *     DIALOGO_MODEL=deepseek-chat
+ *
+ * **La diferencia que hay que mirar al medir no es el precio: es el esquema.**
+ * Anthropic garantiza la forma de la respuesta con `json_schema`; acá se pide
+ * `response_format: json_object`, que garantiza que sea JSON válido pero **no
+ * que tenga los campos que pediste**. Por eso el esquema se le manda además
+ * escrito en el prompt, y por eso el que compare tiene que contar cuántas
+ * respuestas vinieron incompletas — no sólo cuánto salieron.
+ */
+async function llamarCompatible(p: PedidoJson<unknown>): Promise<Cruda> {
+  const base = process.env.IA_BASE_URL
+  const clave = process.env.IA_API_KEY
+  if (!base || !clave) {
+    throw new Error(
+      'PROVEEDOR_IA="compatible" necesita IA_BASE_URL y IA_API_KEY en .env.local.',
+    )
+  }
+  const res = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${clave}` },
+    body: JSON.stringify({
+      model: p.modelo,
+      max_tokens: p.maxTokens,
+      response_format: { type: 'json_object' },
+      messages: [
+        // El esquema va en el sistema y no en un parámetro: es lo único que
+        // tiene este protocolo para pedir una forma. Si el modelo la ignora,
+        // el parseo de abajo lo va a ver y el respaldo lo va a cubrir — que es
+        // exactamente el dato que hay que medir antes de mover producción.
+        { role: 'system', content: `${p.system}\n\nRespondes SÓLO un objeto JSON que cumpla este esquema, sin texto alrededor:\n${JSON.stringify(p.schema)}` },
+        { role: 'user', content: p.prompt },
+      ],
+    }),
+  })
+  if (!res.ok) throw new Error(`${p.modelo} contestó ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  const d = await res.json() as {
+    choices?: { message?: { content?: string } }[]
+    usage?: { prompt_tokens?: number; completion_tokens?: number }
+  }
+  return {
+    texto: d.choices?.[0]?.message?.content ?? null,
+    inTokens: d.usage?.prompt_tokens ?? 0,
+    outTokens: d.usage?.completion_tokens ?? 0,
+  }
+}
 
 async function llamarAnthropic(p: PedidoJson<unknown>): Promise<Cruda> {
   anthropic ??= new Anthropic()
@@ -147,13 +222,15 @@ export async function pedirJson<T>(p: PedidoJson<T>): Promise<RespuestaJson<T>> 
     // en PRECIOS bajo su nombre y el costo se sigue calculando abajo, una
     // sola vez, para todos.
     //
-    // case 'loquesea':
-    //   cruda = await llamarLoQueSea(p)
-    //   break
+    case 'compatible':
+      cruda = await llamarCompatible(p)
+      break
 
     default:
       throw new Error(
-        `PROVEEDOR_IA="${proveedor}" no existe. Hoy el único implementado es "anthropic".`,
+        `PROVEEDOR_IA="${proveedor}" no existe. Hoy están "anthropic" y `
+        + '"compatible" (cualquiera que hable el protocolo de OpenAI: DeepSeek, '
+        + 'Qwen, Groq, OpenRouter — se elige con IA_BASE_URL e IA_API_KEY).',
       )
   }
 

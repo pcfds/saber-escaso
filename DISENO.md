@@ -663,6 +663,56 @@ mundo, y que el motor quede abajo haciendo su trabajo. El día que la ficha diga
 *"Odila te enseñó a destilar el invierno pasado"* en vez de *"sabes Destilado
 de raíz — te lo enseñó Odila"*, esta sección está cumplida.
 
+### 8.2c Lo que llevás puesto
+
+Pedido de la dirección del proyecto, textual:
+
+> *"El inventario debería abrir y ver lo que llevo, lo que lleva mi personaje,
+> agregarle cosas: protección, armadura, vestimentas, guantes, cascos, todo.
+> Atributos. Falta todo y estamos lejanos."*
+
+Hoy no existe **nada** de eso: todo lo fabricable del mundo es un arma, un
+frasco, un cuenco o un mapa, y no hay una sola cosa que se pueda llevar puesta.
+Es un hueco real. Pero hay una forma de llenarlo que encaja con este juego y
+varias que lo rompen, así que va escrito antes de que alguien lo construya.
+
+**1. Una pieza de armadura existe sólo si alguien vivo sabe hacerla.** Es la
+misma regla que sostiene todo lo demás y no tiene excepción: no hay cascos que
+aparezcan, ni cofres con botín, ni un vendedor. Alguien tiene que saber curtir,
+tejer o forjar, y **si el último que sabía se muere sin enseñar, en este valle
+no se fabrica una coraza nunca más y las que quedan son las que hay.** Eso
+convierte cada pieza vieja en un objeto con historia y con el nombre de su
+autor puesto — que es exactamente lo que ya hace `objects.made_by`.
+
+**2. La ropa es el canal visual que esta cámara SÍ puede mostrar.** §6 dice que
+el piso de zoom lee *silueta, postura y ropa, nunca la expresión*. O sea que lo
+que llevás puesto no es un número escondido en un menú: **es lo único de tu
+personaje que se ve a cuarenta metros.** Una coraza cambia tu silueta y la
+gente te reconoce distinto de lejos. Si una pieza no cambia la silueta, está
+mal hecha.
+
+**3. Los atributos no son un nivel.** §8.3 ya lo dice para la progresión y vale
+igual acá: no hay puntos que subir. Lo que tenés sale de dos cosas que ya
+existen — **la destreza que practicaste** y **lo que llevás encima** — y las dos
+se ganan haciendo, no eligiendo en una pantalla.
+
+**4. Y la prueba de §8.2b se aplica pieza por pieza: ¿qué te deja hacer que
+antes no podías?** Un casco que da "+3 de defensa" está mal: sube un número.
+Un casco que te deja bajar al Sotobosque de noche y volver, o aguantar el
+segundo zarpazo del que hoy te mata en dos, está bien. **Si la respuesta a esa
+pregunta es un número, la pieza no está terminada.**
+
+**5. Pocas ranuras.** La tentación es cabeza, torso, manos, pies, cintura, dos
+anillos y una capa. Este juego se ve de lejos y se juega en sesiones cortas:
+más ranuras es más planilla y menos decisión. Empezá por lo que cambia la
+silueta y lo que cambia lo que podés hacer, y agregá una sólo cuando haya algo
+concreto que no entre.
+
+Lo que hoy bloquea todo esto y hay que resolver antes: **no existe ninguna
+forma de que un objeto llegue a tu mano si no lo hiciste o lo juntaste vos.**
+`dar` es sólo jugador → NPC. Sin eso, una armadura hecha por otro no puede
+llegarte, y la mitad de la gracia se pierde.
+
 ### 8.3 La progresión, en tres reglas
 
 Esta parte estuvo mal explicada mucho tiempo, con vocabulario de RPG que no
@@ -905,6 +955,64 @@ trabajo narrativo a la topología, que hasta ahora era sólo geografía.
 Si entrás y estás en una celda esperando, el juego te castigó por conectarte.
 Estar capturado tiene que ser jugable — negociar, escaparte, o que te rescaten
 tus amigos. **Se sale por contenido, nunca por temporizador.**
+
+### 9.3b Economía, ley y costumbre — qué hay y qué no
+
+Pedido de la dirección del proyecto, textual:
+
+> *"Todavía no hay sistema de economía, políticas, reglas, sociales, etc. Cómo
+> se deben comportar, si vas preso o no, hay cárceles, hay oficios, etc."*
+
+Es un hueco real y hay que llenarlo. Pero la trampa acá es más peligrosa que en
+otras partes, porque cada una de esas palabras arrastra un sistema entero de
+otro juego: "economía" arrastra monedas y precios, "ley" arrastra guardias y
+una celda, "políticas" arrastra facciones. **Si se importan esos sistemas, este
+juego se convierte en un MMO genérico con un motor raro adentro.** Lo que sigue
+es lo que encaja.
+
+**1. La economía existe y no tiene plata, a propósito.** Este valle no tiene
+monedas ni precios, y por eso mismo la rama de arte se negó a poner puestos de
+mercado: *"un puesto miente sobre lo que el mundo tiene"*. Lo que hay en su
+lugar ya está construido y es más interesante: **deuda y obligación**. Te
+encargás de algo y no volvés, y te lo cobran. Alguien se mete a defenderte y
+ahora tiene algo tuyo que cobrar. Le regalás algo a quien lo necesitaba y te
+gana la voluntad. **La moneda de este valle es que la gente se acuerda.**
+
+Lo que le falta a esa economía no es dinero: es **que pueda ir en las dos
+direcciones**. Hoy `dar` es sólo jugador → NPC, así que nadie te puede dar
+nada. Un economía donde sólo se puede regalar y nunca recibir es media
+economía.
+
+**2. Los oficios existen y son la mitad del juego.** `people.trade` decide qué
+sabe cada uno, qué persigue, a qué hora trabaja, cómo va vestido y qué hay
+adentro de su casa. Lo que falta no es un sistema de oficios: es que **el valle
+crezca en oficios**, que es otra cosa y está pedida —*"pueblos reales que van
+creciendo con oficios"*—. El mecanismo ya está: el que llega por el Camino del
+Norte trae un oficio y ninguna receta, y aprende del valle.
+
+**3. La ley: el castigo no puede ser una celda.** §9.3 ya lo dice para la
+captura y vale para todo — *"si entrás y estás en una celda esperando, el juego
+te castigó por conectarte"*. Y hay algo más fuerte: **este valle ya tiene un
+sistema de justicia y es la reputación de dos ejes.** `bonds` guarda `valued` y
+`feared` por persona, y los umbrales deciden quién te encarga algo y quién te
+enseña lo suyo.
+
+O sea que la pena por robar no es la cárcel: es que **el que te vio deja de
+enseñarte**, y como el saber vive en gente mortal, perder maestros es lo más
+caro que hay en este mundo. Eso no hay que construirlo — hay que **conectarlo**:
+que las cosas que hoy no tienen consecuencia social la tengan.
+
+**4. Qué es un delito acá, y hoy ninguno es posible todavía.** La lista corta:
+llevarte algo que otro dejó, matar a alguien del valle, romper un encargo que
+tomaste. **Ninguna de las tres se puede hacer hoy**, y la primera está a punto
+de poder hacerse — el día que un objeto pueda quedar tirado en el suelo, robar
+existe. Ése es el momento de conectar la consecuencia, no antes.
+
+**5. Y la costumbre, que es lo que hace que un lugar tenga cultura.** Los dos
+pueblos que no son humanos tienen lengua propia y un agravio concreto; el valle
+tiene un incendio con dos versiones irreconciliables y algo de lo que no se
+habla. Eso ya es política: **es gente que no está de acuerdo sobre qué pasó.**
+Lo que falta es que tomar partido cueste algo.
 
 ### 9.4 El diálogo — lo que NO se hace
 
