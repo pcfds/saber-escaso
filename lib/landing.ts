@@ -282,7 +282,20 @@ export function landing(): string {
     <b>cuanto más lo hacés, mejor te sale</b>: tu primera hoja es un fierro
     torcido.</li>
     <li>Pelear con lo que ronda el bosque, con lo que hayas forjado — y que se
-    metan a defenderte los que te aprecian de verdad.</li>
+    metan a defenderte los que te aprecian de verdad. Lo que te ataca
+    <b>se encabrita antes de pegarte</b>, y si te apartás a tiempo no te pega.
+    Y tiene nombre propio: no es «un bicho», es el Hermano Mayor, de Los de la
+    Ceniza.</li>
+    <li><b>Entrar a las casas.</b> Al anochecer la gente se vuelve a la suya, y
+    si entrás está ahí adentro. Cada cuarto tiene el puesto del oficio del que
+    vive en él — el yunque, la olla, la piedra de afilar— y es donde el oficio
+    pasa.</li>
+    <li><b>Trazar magia.</b> Cuatro runas y una gramática: cada una es materia
+    cuando va primera y operador cuando va detrás, así que el orden cambia el
+    hechizo. Te colgás tres a la mañana y la frase se va armando mientras
+    elegís. El grimorio guarda sólo lo que te salió a vos.</li>
+    <li>Que <b>te hablen ellos</b>: si te encargaste de algo y no volviste, te
+    lo cobran; si les falta algo y confían en vos, te lo piden.</li>
     <li><b>Cruzarte con los otros jugadores</b> que estén en el valle en ese
     momento.</li>
     <li>Leer la crónica de lo que pasó mientras no estabas.</li>
@@ -308,12 +321,19 @@ export function landing(): string {
     <li><b>Tomar las metas de los NPCs como quests tuyas.</b> Existe en el
     mundo —Odila anda buscando raíz del Sotobosque hace días— pero todavía no
     se puede agarrar desde el juego.</li>
-    <li>Que los NPCs caminen. Persiguen sus metas, pero no se mueven del lugar
-    donde están.</li>
+    <li>Que los NPCs caminen de un lugar a otro. Se mueven dentro del suyo y se
+    vuelven a su casa de noche, pero el viaje en sí todavía no se ve.</li>
     <li>Hablar la lengua de los pueblos que te atacan.</li>
-    <li>Entrar a las casas.</li>
+    <li>Mover, agarrar o construir cosas adentro de las casas: se entra y se
+    mira, no se toca.</li>
+    <li>Que los animales del valle sean animales. Hoy son decorado.</li>
     <li>Cuentas: por ahora el link de jugador se saca a mano.</li>
     <li>Inglés.</li>
+  </ul>
+  <p>Y una que no es una función que falta sino una decisión que todavía no
+  está tomada: <b>el aspecto</b>. El valle se lee, tiene hora y tiene silueta,
+  pero no tiene todavía una identidad visual de la que estemos convencidos. Es
+  el reclamo más viejo del proyecto y sigue abierto.
   </ul>
 </section>
 
@@ -327,7 +347,9 @@ export function landing(): string {
     <li>Pegá el link la primera vez. Después entra solo.</li>
   </ol>
   <p class="bajo-boton" style="margin-top:1.3rem">WASD para caminar · espacio para
-  saltar · E para hablar · clic para pegar · botón derecho para girar la cámara ·
+  saltar · E para hablar o trabajar · clic para pegar · Q para esquivar ·
+  P, R y G para la magia · botón derecho <b>arrastrando</b> para girar la cámara
+  y mirar el cielo ·
   rueda para acercar.</p>
   <div class="bajar"><a class="boton" href="${DESCARGA}">Bajar la demo</a></div>
 </section>
