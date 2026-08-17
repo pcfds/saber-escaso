@@ -1217,7 +1217,7 @@ export async function step() {
     await tocarVinculoEntre(quien.id, aca.id, 20)
     const cuantos = await cuantosLoSaben(knowledgeId, region.id, people)
     ev({ kind: 'ensenanza', place_id: aca.place_id,
-      summary: `${aca.name} le enseñó ${k?.name} a ${quien.name}.`
+      summary: `${quien.name} aprendió ${k?.name}. Se lo enseñó ${aca.name}.`
         + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
       detail: {
         npc: quien.name, from: aca.name, to: quien.name,
@@ -2160,7 +2160,7 @@ export async function step() {
           await tocarVinculoEntre(alumno.id, maestro.id, 20)
           const cuantos = await cuantosLoSaben(candidato.knowledge_id, region.id, people)
           ev({ kind: 'ensenanza', place_id: maestro.place_id,
-            summary: `${maestro.name} le enseñó ${k?.name} a ${alumno.name}.`
+            summary: `${alumno.name} aprendió ${k?.name}. Se lo enseñó ${maestro.name}.`
               + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
             detail: {
               from: maestro.name, to: alumno.name, knowledge: k?.name,
@@ -3479,7 +3479,12 @@ async function llegaAlguien(args: {
   ev({ kind: 'llegada_al_valle', place_id: donde.id,
     summary: `Llegó ${quien.llega} por ${donde.name} y se quedó: ${nuevo.name}, ${nuevo.trade}.`
       + (testigo ? ` ${testigo.name} estaba ahí cuando llegó.` : '')
-      + ' No sabe hacer nada de lo que se hace acá.',
+      // «aquí» y no «acá», y es un carácter que borra un párrafo del prompt:
+      // éste era **el único "acá" de todo el flujo de hechos**, el director lo
+      // copiaba, y se le metía voseo en 4 crónicas de 27 hasta que hubo que
+      // agregarle una contra-instrucción para que no lo hiciera. El emisor
+      // habla el idioma del lector y la contra-instrucción sobra.
+      + ' No sabe hacer nada de lo que se hace aquí.',
     detail: {
       person: nuevo.name, place: donde.name, trade: nuevo.trade,
       visto_por: testigo?.name ?? null, goal: meta, saberes: 0,
@@ -3673,7 +3678,13 @@ async function abrirSiguienteMeta(
     needs_id: needsId,
   })
   ev({ kind: 'agenda_nueva', place_id: who.place_id,
-    summary: `${who.name} se puso a ${nueva.goal}.`,
+    // «se propuso», no «se puso a». Éste es un evento de deseo —recién
+    // empieza— y «se puso a» se lee como cumplido: el director sacó de acá
+    // *«Sarn al fin logró dormir una noche entera»* cuando el hecho decía que
+    // se PUSO a dormir. Mismo bug que «y sigue en pie»: si un summary se puede
+    // leer de dos maneras, el modelo elige la más dramática, y eso es un
+    // defecto del emisor y no del narrador.
+    summary: `${who.name} se propuso ${nueva.goal}.`,
     detail: {
       person: who.name, goal: nueva.goal, object: nueva.obj ?? null,
       saber: nueva.saber ?? null,
@@ -3868,9 +3879,9 @@ async function resolveAction(
         how: 'aprendido', learned_tick: tick, destreza: 0, veces: 0,
       })
       ev({ kind: 'ensenanza', place_id: maestro.place_id,
-        summary: `${maestro.name} le enseñó ${info?.name} a ${player.name}.`,
+        summary: `${player.name} aprendió ${info?.name}. Se lo enseñó ${maestro.name}.`,
         detail: { from: maestro.name, to: player.name, knowledge: info?.name } })
-      await recordar(maestro.id, player, `${maestro.name} le enseñó ${info?.name} a ${player.name}`, tick)
+      await recordar(maestro.id, player, `${player.name} aprendió ${info?.name} de ${maestro.name}`, tick)
       return `aprendió ${info?.name}`
     }
 
@@ -3933,14 +3944,14 @@ async function resolveAction(
       })
       const cuantos = await cuantosLoSaben(nuevo.knowledge_id, regionId, people)
       ev({ kind: 'ensenanza', place_id: alumno.place_id,
-        summary: `${player.name} le enseñó ${info?.name} a ${alumno.name}.`
+        summary: `${alumno.name} aprendió ${info?.name}. Se lo enseñó ${player.name}.`
           + (cuantos > 1 ? ` Ahora lo saben ${enLetras(cuantos)}.` : ''),
         detail: {
           from: player.name, to: alumno.name, knowledge: info?.name,
           lo_saben: cuantos,
         } })
       await recordar(alumno.id, player,
-        `${player.name} le enseñó ${info?.name} a ${alumno.name}`, tick)
+        `${alumno.name} aprendió ${info?.name} de ${player.name}`, tick)
       await tocarVinculo(alumno, player, { valued: 20 }, ev)
 
       // Y si eso era lo que le faltaba, la agenda se cierra ACÁ y con tu

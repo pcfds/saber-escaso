@@ -85,6 +85,47 @@ que la habrían disparado.
 ---
 
 ## El tercer hueco: la relación se lee al revés `simulacion`
+
+> ### HECHO — y el diagnóstico de abajo estaba equivocado. Leé esto primero.
+>
+> **Las tres redacciones se aplicaron, y la que arregló el problema fue otra
+> cosa: el `effort` del director.** Se midió con un A/B sobre los MISMOS hechos
+> en `valle-pruebas`, con `dryRun`, tres crónicas por brazo:
+>
+> | | relación de enseñanza | el `negativa` |
+> |---|---|---|
+> | redacción vieja, `effort: low` | 3 de 3 bien | — |
+> | redacción nueva, `effort: low` | **2 de 3** — *"Maga aprendió de Tobio"*, y fue Maga la que le enseñó a él | **invertido** |
+> | redacción nueva, `effort: high` | **3 de 3 bien** | **bien** |
+>
+> O sea que **reescribir los `summary` no movió la aguja**, y el brazo viejo
+> salió igual o mejor que el nuevo. Lo que rompe la hipótesis entera es el
+> `negativa`, que nadie tocó y que **no se puede leer de dos maneras**:
+>
+> - Hecho: *«Nera iba a El Sotobosque y le pidió a Tobio que fuera también.
+>   Tobio dijo que no.»*
+> - Crónica con `low`: *«Tobio le pidió a Nera que fuera con él al Sotobosque
+>   y se negó.»*
+>
+> Esa frase no es ambigua. **El modelo invierte relaciones con `effort: low`,
+> y no porque el emisor se lo permita.** Con `high`, la misma frase salió
+> *«Tobio le dijo que no a Nera cuando le pidió que fuera con ella»*.
+>
+> Cuesta 1,6 s más (7,1 → 8,7) y la crónica sale **más corta** (1.177 → 924
+> caracteres, 15 hechos usados en vez de 24). La crónica se genera cuando un
+> jugador vuelve, no por tick, así que el costo está acotado por logins.
+> Ya está puesto en producción como `DIRECTOR_EFFORT=high`, que es una variable
+> de entorno y no una línea de `director.ts` — el archivo lo tenía otro agente.
+>
+> **La lección, que es la de siempre acá: la explicación obvia era falsa.** Un
+> `summary` ambiguo es un bug de verdad y las tres redacciones se quedan porque
+> son mejores; pero no eran la causa, y arreglarlas solas habría dejado el
+> problema entero en pie con la sensación de haberlo cerrado.
+>
+> **Lo que queda de esto:** borrar del prompt la contra-instrucción del voseo,
+> que ya no tiene contra qué defender —el único "acá" del flujo de hechos ahora
+> dice "aquí"—. Es `lib/world/director.ts`, línea ~398.
+
 `lib/world/tick.ts` — **bloqueado**, lo tiene 02.6.
 **Es lo único que falta para poder correr el test de siete días.**
 
