@@ -1,0 +1,39 @@
+-- `last_seen_tick` servía para dos cosas y las dos se pisaban.
+--
+-- Servía como CURSOR DE NARRACIÓN: el director trae los hechos con
+-- `.gt('tick', last_seen_tick)` y después lo deja en `region.tick`. O sea
+-- "hasta acá te conté".
+--
+-- Y servía como PRESENCIA: el tick lo usaba para decidir si la región está
+-- poblada y para saber a quién le puede morder una amenaza.
+--
+-- El choque: `tick.ts` lo adelantaba cada vez que resolvía una acción de un
+-- jugador, así que **cada acción que mandabas te borraba la ventana de hechos
+-- de tu propia crónica**. Un jugador de producción quedó con la ventana vacía
+-- cuatro minutos después de que lo lastimaran dos veces — y la ventana vacía
+-- es justo la condición que hace que el director narre el bloque de contexto
+-- como si fueran noticias (auditoría del 17 de agosto: seis afirmaciones
+-- inventadas de siete).
+--
+-- Se parten en dos columnas con dueños distintos:
+--
+--   · `last_seen_tick`  → HASTA DÓNDE LE NARRÉ. Lo escribe **sólo**
+--     `director.ts`, cuando de verdad escribió una crónica. Nadie más.
+--   · `last_action_tick` → EL ÚLTIMO TICK EN QUE HIZO ALGO. Lo escribe
+--     `tick.ts` al resolverle una acción. No toca la crónica de nadie.
+--
+-- Para "¿está adentro AHORA?" no se usa ninguna de las dos: se usa
+-- `last_seen_at`, que es reloj de pared y no depende de cuánto dure un tick
+-- (ver 20260817080000_presencia.sql). Un tick pasó de 1 hora a 6 y todo lo
+-- que estaba medido en ticks se volvió seis veces más largo sin que nadie lo
+-- pidiera.
+--
+-- Aditiva y hacia adelante: no se reescribe estado. El backfill copia
+-- `last_seen_tick`, que hasta hoy era el máximo entre las dos cosas — es la
+-- mejor aproximación que existe de "cuándo actuó" y peca de generosa, que
+-- para presencia es el lado seguro (a lo sumo el mundo corre a paso normal un
+-- rato de más; nadie recibe un mordisco por esto, porque la mordida ahora
+-- mira el reloj de pared).
+alter table players add column if not exists last_action_tick integer not null default 0;
+
+update players set last_action_tick = last_seen_tick where last_action_tick = 0;

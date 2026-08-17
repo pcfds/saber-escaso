@@ -9,7 +9,7 @@
  */
 import { createServer } from 'node:http'
 import { db, getRegion } from './db.js'
-import { step } from './world/tick.js'
+import { step, resolverAcciones } from './world/tick.js'
 import { narrate, type Cronica } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear, recibirGolpe, levantarse } from './world/combate.js'
@@ -23,6 +23,112 @@ import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe } from './world/tick.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
+
+/**
+ * Una vuelta del sol: seis horas reales, un día del valle.
+ *
+ * Es **una** constante para dos cosas que no pueden separarse: la hora que ve
+ * el cliente (`momento_del_dia`) y cuándo se cierra el día (`latir()`). Si el
+ * sol da una vuelta cada seis horas y el contador de días avanza a otro ritmo,
+ * el valle tiene cuatro amaneceres por día o cuatro días por amanecer, y la
+ * fase de la luna —que según `DISENO.md` §7.3 es cómo sabés qué día va el
+ * valle sin abrir un menú— deja de querer decir nada. El cliente tiene su
+ * copia (`DIA_REAL := 21600.0` en `ciclo.gd`); ésta es la del servidor, y ya
+ * cambió una vez de 1 hora a 6.
+ */
+const DIA_REAL_MS = 21_600_000
+
+/** En qué vuelta del sol cae un instante. Cuenta desde la época Unix, que
+ *  empieza a medianoche UTC, así que los bordes caen a las 00, 06, 12 y 18
+ *  UTC — exactamente donde dispara el cron de `vercel.json`. */
+const bloqueDelSol = (ms: number) => Math.floor(ms / DIA_REAL_MS)
+
+/** Bloques ya cubiertos, por región, en este proceso.
+ *
+ *  Es memoria de proceso y por eso sólo sirve para **no** latir: en Vercel hay
+ *  varias lambdas y ninguna ve la de al lado, así que un caché que habilitara
+ *  ticks sería un desastre. Que suprima de más no cuesta nada (el cron sigue
+ *  ahí) y evita una consulta por golpe de espada. */
+const bloqueCubierto = new Map<string, number>()
+
+/**
+ * El latido del mundo cuando lo empuja alguien jugando.
+ *
+ * EL PROBLEMA
+ *
+ * Había un solo `await step()` en todo este archivo y estaba en `POST /act`.
+ * El cliente 3D pelea y camina; casi no usa `/act`. Una sesión entera podía no
+ * generar un solo tick, y el que limpiaba las tres amenazas del valle se
+ * quedaba sin nada que pelear aunque la probabilidad de reposición se hubiera
+ * subido a 60 % por vacante. La recalibración del ritmo era invisible justo
+ * para el que juega.
+ *
+ * POR QUÉ NO ES UN `step()` POR ACCIÓN
+ *
+ * Porque eso es la idea muerta de `DISENO.md` §17 —*"tiempo 4× más rápido para
+ * el conectado"*— entrando por la puerta de atrás: si cada golpe corre un día
+ * del valle, jugar más **es** más tiempo de mundo, y el que se sienta a
+ * machacar envejece el valle de los demás. No es hipotético: medido el 17 de
+ * agosto, `valle-primero` corrió sus **28 ticks en 4 h 21 min**, con pares de
+ * ticks a menos de un minuto uno del otro. Veintiocho días de valle en una
+ * tarde de desarrollo, y el cron sólo podía explicar uno.
+ *
+ * LO QUE HACE, ENTONCES
+ *
+ * El mundo avanza **un día por vuelta del sol y nada más**, lo pida quien lo
+ * pida. La condición no es "pasaron seis horas desde el último tick" sino
+ * "estamos en un bloque de sol posterior al del último tick": así el tick que
+ * dispara un jugador cae en el mismo instante en que habría caído el del cron,
+ * el contador de días no se despega del cielo, y cron y jugador no pueden
+ * sumar dos ticks en el mismo día.
+ *
+ * CONTRA §7.3, QUE PIDE DOS RELOJES
+ *
+ * Son exactamente los dos: el del mundo pasa a depender **sólo del tiempo real
+ * transcurrido** (esta función), y cuánto se simula adentro de cada tick sigue
+ * dependiendo de si hay alguien (el `pace` de `tick.ts`, que baja las agendas a
+ * un cuarto en un valle vacío). Estar conectado cambia **qué** pasa en el día,
+ * no **cuántos** días pasan. Nadie gana por estar sentado ahí, que es la frase
+ * textual de §7.3.
+ *
+ * Y lo que sí queda sin resolver, dicho para que no se lo tome por resuelto:
+ * el valle sigue tardando hasta seis horas en reponer una amenaza. Eso no lo
+ * arregla latir más seguido —lo arregla que la reposición mire el reloj de
+ * pared en vez del contador de ticks—, y eso vive en `tick.ts`.
+ */
+async function latir(region: { id: string; tick: number }): Promise<boolean> {
+  const bloque = bloqueDelSol(Date.now())
+  if (bloqueCubierto.get(region.id) === bloque) return false
+
+  const { data: ultimo } = await db.from('ticks')
+    .select('at').eq('region_id', region.id)
+    .order('tick', { ascending: false }).limit(1).maybeSingle()
+  if (ultimo && bloqueDelSol(new Date(ultimo.at).getTime()) >= bloque) {
+    bloqueCubierto.set(region.id, bloque)
+    return false
+  }
+
+  // El reclamo va ANTES de correr el tick y es lo que lo vuelve atómico: la
+  // clave primaria de `ticks` es (region_id, tick), así que de dos lambdas que
+  // quieran el mismo día una sola se lo lleva y la otra se entera acá, no
+  // después de haber corrido un tick de más. Y de paso deja anotado el origen
+  // sin una segunda escritura: el trigger de la base anota 'cron' para todo lo
+  // que nadie reclamó, y esta fila ya está.
+  const { data: mio } = await db.from('ticks')
+    .upsert({ region_id: region.id, tick: region.tick + 1, origin: 'jugador' },
+      { onConflict: 'region_id,tick', ignoreDuplicates: true })
+    .select('tick')
+  bloqueCubierto.set(region.id, bloque)
+  if (!mio?.length) return false
+
+  // Se espera, no se dispara y se olvida: en serverless lo que queda corriendo
+  // después de la respuesta se muere a mitad de camino, y un `step()` cortado
+  // deja acciones resueltas sin los eventos que las cuentan. Cuesta un tirón de
+  // un par de segundos una vez cada seis horas.
+  await step()
+  return true
+}
+
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 
@@ -189,10 +295,10 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
     </div>
     <p class="meta">${hayNovedades
       ? `pasó ${region.tick - player.last_seen_tick === 1 ? 'un día' : `${region.tick - player.last_seen_tick} días`} desde que miraste`
-      : 'nada nuevo · en el valle pasa un día por hora'}</p>
+      : 'nada nuevo · en el valle pasa un día cada seis horas'}</p>
 
     <div class="sec">Qué hacés</div>
-    <p class="sub" style="margin:-4px 0 14px">Elegís una cosa y se resuelve. El valle avanza solo, estés o no.</p>
+    <p class="sub" style="margin:-4px 0 14px">Elegís una cosa y se resuelve cuando cierra el día del valle. Avanza solo, estés o no.</p>
     ${accion('ir', 'Ir', `<select name="target">${opts(
       (places.data ?? []).filter((p) => p.id !== player.place_id).map((p) => ({ v: p.slug, t: p.name })))}</select>`)}
     ${accion('trabajar', 'Trabajar acá')}
@@ -326,15 +432,18 @@ export async function handler(
             name: region.name, tick: region.tick,
             // La hora del valle, en segundos dentro del día del valle.
             //
-            // Un tick es un día y el cron corre uno cada SEIS horas, así que
-            // la hora del valle es cuánto va corrido el bloque de seis horas
-            // en curso. El módulo cae justo porque el cron dispara a las
-            // 00, 06, 12 y 18 UTC y la época Unix arranca a medianoche UTC.
+            // Un tick es un día y el mundo late una vez por vuelta del sol,
+            // así que la hora del valle es cuánto va corrido el bloque en
+            // curso. El módulo cae justo porque los bordes son las 00, 06, 12
+            // y 18 UTC y la época Unix arranca a medianoche UTC.
+            //
+            // Es la MISMA constante que usa `latir()`: el cielo y el contador
+            // de días no pueden ir cada uno por su lado.
             //
             // Sale de acá y no del reloj de cada máquina a propósito: dos
             // personas conectadas al mismo tiempo tienen que ver el mismo
             // atardecer.
-            momento_del_dia: (Date.now() % 21_600_000) / 1000,
+            momento_del_dia: (Date.now() % DIA_REAL_MS) / 1000,
           },
           // La vida viaja. Antes el cliente llevaba su propia `vida_jugador`
           // local que bajaba en tiempo real y se reseteaba sola: vos les
@@ -431,8 +540,47 @@ export async function handler(
           player_id: found.player.id, verb: f.get('verb'),
           target: f.get('target'), submitted_tick: found.region.tick,
         })
-        await step()
-        return back(token)
+        // Acá había un `step()` sin condición, y era el agujero: una acción,
+        // un día del valle. Apretar «Trabajar acá» seis veces envejecía el
+        // valle seis días. El arreglo fue encolar y esperar al tick, y frenó
+        // de más: la acción pasaba a tardar **hasta seis horas reales**, que
+        // es lo que le pasaba al combate antes de sacarlo del tick (ver el
+        // encabezado de `world/combate.ts`).
+        //
+        // Son dos cosas distintas y ahora se llaman por separado, que es lo
+        // que pide `DISENO.md` §7.3:
+        //
+        //   · `resolverAcciones()` — SIEMPRE. Lo que el jugador hizo, pasa ya.
+        //     No incrementa `regions.tick` ni corre agendas ni muerte.
+        //   · `latir()` — sólo si cambió la vuelta del sol. El día del valle
+        //     lo mueve el sol y nada más.
+        //
+        // El orden importa y es el mismo de `/pelear`: primero pasa la cosa,
+        // después cierra el día en el que pasó. Al revés, el evento caería en
+        // un día ya cerrado y el jugador no se enteraría de lo que hizo.
+        //
+        // `last_seen_at` se estampa porque este pedido ES la prueba de que
+        // está adentro. Antes lo contestaba la acción sin resolver, y desde
+        // que se resuelven en el acto ya no queda ninguna: sin esta línea, el
+        // que juega por la web desaparecería de la presencia del tick.
+        await db.from('players')
+          .update({ last_seen_at: new Date().toISOString() }).eq('id', found.player.id)
+        const resueltas = await resolverAcciones({
+          region: found.region,
+          // El último día CERRADO es `region.tick`; esto pasa durante el día
+          // en curso, que cierra el próximo. Igual que `/pelear`, y por lo
+          // mismo: con el tick actual el evento cae en un agujero de la
+          // ventana del director y nunca se cuenta.
+          tick: found.region.tick + 1,
+          soloJugador: found.player.id,
+        })
+        await latir(found.region)
+        // Un botón que no dice nada parece roto, y ahora sí hay algo que
+        // decir: lo que pasó. Si el reclamo se lo llevó un tick que corría al
+        // mismo tiempo, no hay outcome acá y el aviso lo dice sin mentir.
+        return back(token, resueltas.length > 0
+          ? resueltas.map((r) => r.outcome).join('; ')
+          : 'Lo mandaste. Se resuelve cuando cierre el día del valle.')
       }
 
       // El golpe no se encola: se resuelve acá y devuelve el resultado. Ver
@@ -455,6 +603,12 @@ export async function handler(
           regionId: found.region.id, tick: found.region.tick + 1,
           player: found.player, threatId: f.get('id'),
         })
+        // Y acá el mundo late, si le toca. Va DESPUÉS del golpe a propósito:
+        // el golpe se escribe con `region.tick + 1` y el tick cierra ese
+        // mismo día, así que primero pasa la cosa y después cierra el día en
+        // el que pasó. Al revés, el evento caería en un día ya cerrado y el
+        // que mató al bicho no se enteraría de que lo mató.
+        await latir(found.region)
         return json(r)
       }
 
@@ -503,6 +657,13 @@ export async function handler(
           summary: `${found.player.name} llegó a ${destino.name}.`,
           detail: { player: found.player.name, place: destino.name },
         })
+        // Caminar de un lugar a otro también empuja el mundo. Está acá y no en
+        // el `/mundo` que el cliente pide cada pocos segundos porque esto pasa
+        // cuando el jugador decide algo, no cuando el cliente respira: el
+        // latido es barato pero no gratis, y `/estoy` llega unas pocas veces
+        // por sesión. Con `/pelear` alcanza para que una sesión de 3D no pueda
+        // pasar sin cerrar el día que le toque.
+        await latir(found.region)
         return json({ ok: true, lugar: destino.name })
       }
 
@@ -798,7 +959,7 @@ function actitud(
     return {
       saludo: de([
         `${q.name} levanta la mano apenas te ve.`,
-        `—Ah, sos vos. Justo pensaba en algo.`,
+        `—Ah, eres tú. Justo pensaba en algo.`,
         `${q.name} te hace lugar al lado.`,
       ]),
       animo: 'calido', ensena: q.teaches,

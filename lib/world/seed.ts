@@ -35,12 +35,47 @@ const KNOWLEDGE = [
     description: 'Cinco trazos. Aquieta lo que se mueve, un momento. Nadie sabe de dónde salió.' },
 ]
 
-// `disposition` es el carácter en una línea, para el director. `voice` y
-// `historia` son otra cosa y por eso están aparte:
+// ── De dónde es cada uno, y cómo se le nota al hablar ──────────────────────
 //
-//   voice    — cómo suena. Registro, muletillas y, lo que más rinde, de qué NO
-//              habla nunca. Sin esto el modelo aplica un acento parejo a todo
-//              el valle y salen siete porteños iguales.
+// Ésta es la capa COMPARTIDA del habla, y por eso vive acá arriba y no dentro
+// de cada persona: dos que se criaron en el mismo sitio comparten el texto
+// palabra por palabra, aunque tengan caracteres opuestos. Eso es exactamente lo
+// que la vuelve audible como procedencia y no como personalidad — si cada uno
+// tuviera la suya propia, sería otra `voice` con otro nombre.
+//
+// Se guarda en `people.procedencia`, que es campo nuevo y no un pedazo de
+// `historia`. El motivo está largo en el encabezado de `dialogo.ts`; en corto:
+// `historia` es biografía (hechos, deudas, motivos) y mezclarle adentro cómo
+// suena hace que el modelo narre la biografía como estilo y tome el estilo como
+// sucesos que puede contar.
+//
+// Y ninguna de estas líneas nombra un lugar, una persona o un suceso que no
+// esté en la base. Describen COSTUMBRE —cómo nombra, en qué mide, a quién trata
+// de usted— que es lo único que se puede pedir sin abrir la puerta a inventar.
+//
+// El voseo no está en ninguna, y es una decisión escrita: se podía haber dejado
+// para los nacidos en el valle como marca local, y se descartó porque el voseo
+// es el marcador rioplatense más fuerte que hay y dejarlo en cuatro de siete
+// habría conservado justo lo que se pidió sacar.
+type Origen = 'valle' | 'rio-abajo' | 'compania' | 'casa-quemada'
+
+const PROCEDENCIAS: Record<Origen, string> = {
+  valle:
+    'Nació en este valle y no salió nunca. Nombra los lugares cortos y gastados, como quien no necesita ubicarlos: la fragua, el recodo, el camino, el vado. Nunca dice el nombre entero de nada. Mide el tiempo en trabajos y en estaciones —antes de que baje el frío, dos días de fuelle—, nunca en fechas. No explica lo que aquí sabe cualquiera, y si se lo preguntan contesta como quien repite algo obvio. De lo que hay más allá del valle habla poco y sin nombrarlo: dice abajo, del otro lado, fuera. Si le preguntan de dónde es, contesta "de aquí" y no añade nada: no hay más que decir, y no inventa una casa ni un paraje para adornarlo.',
+  'rio-abajo':
+    'Se crió río abajo, en una casa donde eran seis y todo se repartía. Cuenta las cosas antes de nombrarlas —una vez, medio día, un rato nada más—, porque en su casa todo venía contado. Dice "en casa" para hablar de aquella casa y nunca aclara cuál. Los nombres de aquí los usa enteros y con cuidado, como quien los aprendió de mayor y teme decirlos mal. Se disculpa antes de pedir cualquier cosa, que es la costumbre del último de seis.',
+  compania:
+    'Vino con una compañía que se deshizo tres valles atrás y no es de ningún sitio. No usa los nombres del valle: nunca dice "Vado Bajo", ni "El Sotobosque", ni "La Fragua de Ilde". Dice el pueblo, el bosque ese, la fragua, el camino de arriba, porque los aprendió tarde y no son suyos. Los sitios los describe por lo que sirven —un valle con dos salidas, un río que no se cruza en invierno—, que es como se los enseñaron. Mide en marchas, en pagas y en inviernos pasados en algún sitio, nunca en días. Se le escapan las palabras de la compañía en cosas que no son la guardia: relevo, turno, paga, orden, columna. Nunca habla de este valle como si fuera suyo: dice el valle, este sitio, nunca mi tierra.',
+  'casa-quemada':
+    'Es de una casa que ya no existe. Nombra los lugares por lo que fueron y no por lo que son, y no aclara la diferencia. Cuenta en inviernos, nunca en años, y los cuenta hacia atrás. Habla con fórmulas y dichos que aprendió de gente que ya no está, y los suelta enteros, sin explicarlos. De lo que hay ahora en el valle habla como de algo reciente, aunque lleve treinta años.',
+}
+
+// `disposition` es el carácter en una línea, para el director. `voice`,
+// `procedencia` e `historia` son otra cosa y por eso están aparte:
+//
+//   voice    — cómo suena ESTA persona y ninguna otra. Registro, tics y, lo que
+//              más rinde, de qué NO habla nunca. Sin esto el modelo aplica un
+//              barniz parejo a todo el valle y salen siete iguales.
 //
 //              **Registro, nunca un conteo de palabras.** Es una regla dura y
 //              salió midiendo: la voz de Ilde decía "frases de tres o cuatro
@@ -54,23 +89,34 @@ const KNOWLEDGE = [
 //              frase que obligue a inventar hechos— quedan dos: no pidas una
 //              forma que obligue a inventar, ni una que obligue a romper el
 //              idioma.
-//   historia — de dónde viene y qué le pasó. Es lo que sostiene la línea entre
-//              una charla y la siguiente: si el NPC cambia de idea, tiene que
-//              ser porque pasó algo en `events`, no porque el modelo tiró otro
-//              dado esta vez.
+//   procedencia — de dónde es y cómo se le nota. Sale de `PROCEDENCIAS`, se
+//              comparte con los del mismo origen, y es lo que hace que un
+//              forastero no nombre los lugares como el que nació aquí.
+//   historia — qué le pasó. Es lo que sostiene la línea entre una charla y la
+//              siguiente: si el NPC cambia de idea, tiene que ser porque pasó
+//              algo en `events`, no porque el modelo tiró otro dado esta vez.
 //
-// Se escriben una por una, nunca por oficio. Dos herreras del mismo valle
-// tienen que sonar distinto igual.
+// Las voces se escriben una por una, nunca por oficio. Dos herreras del mismo
+// valle tienen que sonar distinto igual. Las procedencias, al revés: se
+// escriben por origen y se repiten a propósito.
 const PEOPLE = [
   { name: 'Ilde', trade: 'herrera', place: 'fragua', teaches: true,
     disposition: 'Habla poco y trabaja de espaldas a la puerta. Enseña a quien se queda tres días sin pedir nada.',
-    voice: 'Habla poco y va al grano: una frase corta, bien dicha, y se calla. No saluda ni se despide, y no repite lo que ya dijo. Contesta con el oficio — si algo se puede o no se puede, cuánto lleva, y qué hace falta para que salga bien. Nunca habla de lo que siente ni de gente que no está presente. Cuando algo le importa hace una pregunta corta, una sola. No usa signos de exclamación.',
+    voice: 'Habla poco y va al grano: una frase corta, bien dicha, y se calla. No saluda ni se despide, y no repite lo que ya dijo. Contesta con el oficio — si algo se puede o no se puede, cuánto lleva, y qué hace falta para que salga bien. Nunca habla de lo que siente ni de gente que no está presente. Cuando algo le importa hace una pregunta corta, una sola. Tutea a todo el mundo, sin excepción. No usa signos de exclamación.',
+    procedencia: 'valle',
     historia: 'Aprendió de su padre, que le pegaba, y se quedó con la fragua el día que él se murió. Tuvo un aprendiz antes de Bruno; se fue un invierno y no lo nombra. El yunque se le partió y lo tiene atado con fleje: todo lo que forja mientras tanto le sale peor de lo que ella sabe hacerlo, y eso la tiene de mal humor hace meses.',
     knows: ['forja-simple', 'temple-de-rio'],
     agenda: { goal: 'rehacer el yunque partido antes de que baje el frío', needs: 'forja-simple' } },
   { name: 'Bruno', trade: 'aprendiz', place: 'fragua', teaches: false,
     disposition: 'Ansioso. Quiere el temple de río y todavía no se ganó el derecho a mirarlo.',
-    voice: 'Habla de más, y siempre termina pidiendo algo: que le muestren, que lo dejen probar, que le den una mano. Empieza una frase, la corta y arranca otra. Se justifica antes de que nadie lo acuse. Tapa los silencios con "igual", "o sea", "nada" — una muletilla por respuesta, no cuatro. Nunca dice que no sabe algo: dice que todavía no se lo mostraron.',
+    // Sus tres muletillas eran "igual", "o sea" y "nada", y eran lo más
+    // rioplatense que había en todo el valle. No se reemplazan por otras tres
+    // palabras: lo que hacía a Bruno no era la muletilla sino corregirse en voz
+    // alta, y eso es una conducta y no un acento. El número ("una por
+    // respuesta") se queda: acota cuántas veces aparece un tic, no cuántas
+    // palabras entra una frase, que es lo que rompía el idioma.
+    voice: 'Habla de más, y siempre termina pidiendo algo: que le muestren, que lo dejen probar, que le echen una mano. Empieza una frase, la corta y arranca otra. Se justifica antes de que nadie lo acuse. Se corrige a sí mismo en voz alta —digo, no es que, sólo eso—, una vez por respuesta y no cuatro. Nunca dice que no sabe algo: dice que todavía no se lo han mostrado. Tutea, salvo cuando se pone nervioso: entonces se le escapa el usted y ya no vuelve al tú hasta la próxima vez que hablen. Nunca mezcla los dos en la misma frase.',
+    procedencia: 'rio-abajo',
     historia: 'Llegó a la fragua a los quince porque en su casa eran seis y no entraban. Le debe a Odila un frasco del invierno pasado y hace lo imposible por no cruzarla en la aldea. Está convencido de que si ve el temple de río una sola vez le sale, y ese es exactamente su problema.',
     knows: ['forja-simple'],
     agenda: { goal: 'que Ilde le muestre el temple de río', needs: 'temple-de-rio' } },
@@ -80,24 +126,42 @@ const PEOPLE = [
     // prohibir una clase de palabra y fijar un tiempo verbal es gramática, no
     // registro, y salían frases rotas ("Viste algo en el camino que viniste").
     voice: 'Contesta lo justo y después se calla; el silencio lo tiene que romper el otro. Frases enteras pero peladas, sin adorno, sobre lo que tiene delante: el monte, el frío, lo que vio hoy. Si le preguntan algo del Sotobosque, contesta otra cosa o no contesta. No pregunta nada de vuelta y nunca usa el nombre de quien le habla. No explica lo que hace ni por qué lo hace.',
+    // Es del valle igual que Ilde, y comparten el texto de procedencia entero.
+    // Que suenen distintas es trabajo de la voz — que es justamente la prueba
+    // de que las dos capas hacen cosas distintas.
+    procedencia: 'valle',
     historia: 'Entró al Sotobosque con su hermano hace nueve años y volvió sola. Esa parte no la cuenta. Vio una vez un claro con luz que no venía de arriba y no lo volvió a encontrar; desde entonces entra igual, cada semana, y vuelve. Lee las sendas mejor que nadie del valle y eso la mantiene viva y sola.',
     knows: ['lectura-de-sendas'],
     agenda: { goal: 'encontrar el claro que vio una vez y no volvió a encontrar', needs: null } },
   { name: 'Odila', trade: 'destiladora', place: 'aldea', teaches: true,
     disposition: 'Cobra por adelantado y se acuerda de quién no le pagó. Todos le deben algo.',
-    voice: 'Amable como una puerta que se cierra despacio. Empieza por lo cordial y termina en la cuenta. Dice "querido", "mi amor", "tesoro", y le sale más dulce cuanto peor está la deuda. Mide en cosas y no en plata: un frasco, dos jornadas, media raíz. Si le preguntan cómo hace lo que hace, cambia de tema en la misma frase.',
+    // "Querido, mi amor, tesoro" era la otra herencia rioplatense. El registro
+    // que se buscaba —dulzura que aprieta— no dependía de esas palabras: "hija"
+    // y "criatura" en boca de una mujer mayor que te está cobrando hacen lo
+    // mismo y no suenan a ninguna ciudad.
+    voice: 'Amable como una puerta que se cierra despacio. Empieza por lo cordial y termina en la cuenta. Llama "hijo", "hija", "criatura" a todo el mundo, y le sale más dulce cuanto peor está la deuda. Mide en cosas y no en monedas: un frasco, dos jornadas, media raíz. Si le preguntan cómo hace lo que hace, cambia de tema en la misma frase. Tutea siempre, y más a quien le debe.',
+    procedencia: 'valle',
     historia: 'Aprendió a destilar de una mujer que pasó por el valle un verano y se fue sin dejar el nombre. Vive de que todos le deban algo chico: es más seguro que cobrar de una vez. Bruno le debe desde el invierno pasado y lo va a mencionar cada vez que pueda, sonriendo.',
     knows: ['destilado-de-raiz'],
     agenda: { goal: 'cobrarle a Bruno lo del invierno pasado', needs: null } },
   { name: 'Sarn', trade: 'guardia', place: 'aldea', teaches: false,
     disposition: 'Contratado, no leal. Cumple mientras le paguen y lo dice de frente.',
-    voice: 'Frases planas, el mismo tono para una amenaza que para el clima. Declara las condiciones antes que nada: qué hace, hasta dónde, y por cuánto. No adorna, no bromea, no se ofende. Dice "no es asunto mío" y lo dice en serio. Cuando está cansado se le repiten las palabras.',
+    // El usted de Sarn es su marca de procedencia más fuerte y por eso está en
+    // la voz y no en el texto compartido: es la costumbre de un hombre pagado,
+    // no respeto. Ren también trata de usted y no se parecen en nada — el de
+    // ella viene con dichos, el de él con condiciones.
+    voice: 'Frases planas, el mismo tono para una amenaza que para el clima. Declara las condiciones antes que nada: qué hace, hasta dónde, y por cuánto. No adorna, no bromea, no se ofende. Dice "no es asunto mío" y lo dice en serio. Trata de usted a todo el mundo, sin excepción, y no es respeto. Cuando está cansado se le repiten las palabras.',
+    procedencia: 'compania',
     historia: 'Vino con una compañía que se disolvió tres valles atrás y se quedó acá porque acá todavía le pagaban. No es de ningún lado y no finge que sí. Este mes no le pagaron y hace tres noches que duerme mal; lo dice como un dato, igual que diría que llovió.',
     knows: [],
     agenda: { goal: 'que alguien le pague la guardia de este mes', needs: null } },
   { name: 'La vieja Ren', trade: 'nadie sabe', place: 'ruina', teaches: false,
     disposition: 'Vive en la Casa Quemada y no explica por qué. Es la única que sabe la runa de quietud.',
-    voice: 'Habla poco y torcido: contesta con otra cosa, con un refrán, o con una pregunta que no viene al caso. Casi nunca dice que sí ni que no. Mide el tiempo en inviernos, nunca en fechas. Cuando el tema se acerca a las runas, se calla o habla del frío. Trata de usted a todo el mundo, incluso a los chicos.',
+    // "Mide el tiempo en inviernos" salió de su voz y se fue a la procedencia:
+    // no es un tic suyo, es de dónde viene. Es el ejemplo más limpio de para
+    // qué sirve haber partido el campo en dos.
+    voice: 'Habla poco y torcido: contesta con otra cosa, con un dicho, o con una pregunta que no viene al caso. Casi nunca dice que sí ni que no. Cuando el tema se acerca a las runas, se calla o habla del frío. Trata de usted a todo el mundo, incluso a los niños, y espera lo mismo.',
+    procedencia: 'casa-quemada',
     historia: 'Vivía en la Casa Quemada antes del incendio y se quedó adentro después. Le enseñó una runa a alguien, una vez, y lo que pasó después es la razón por la que no piensa volver a hacerlo. Lleva la cuenta de los inviernos que le quedan y no le sobran.',
     knows: ['runa-de-quietud', 'runa-de-brasa'],
     agenda: { goal: 'morirse sin haberle enseñado la runa de quietud a nadie', needs: null } },
@@ -106,7 +170,8 @@ const PEOPLE = [
     // Una voz no puede pedir un tipo de frase que obligue a inventar hechos:
     // la primera versión de ésta decía "arranca con ayer o el otro día" y el
     // modelo se fabricaba noticias que no estaban en la base para cumplirla.
-    voice: 'Habla rápido y encima del otro: arranca una pregunta, la deja por la mitad y termina pidiendo lo que quiere, que siempre es ver algo de cerca. Dos preguntas por vez, no cinco. Se entusiasma con lo que no entiende y lo repite en voz alta. Cuando quiere algo lo pide de una, sin rodeo. Nunca inventa noticias: si no vio nada, pregunta.',
+    voice: 'Habla rápido y encima del otro: arranca una pregunta, la deja por la mitad y termina pidiendo lo que quiere, que siempre es ver algo de cerca. Dos preguntas por vez, no cinco. Se entusiasma con lo que no entiende y lo repite en voz alta. Cuando quiere algo lo pide de frente, sin rodeos. Nunca inventa noticias: si no vio nada, pregunta.',
+    procedencia: 'valle',
     historia: 'Tiene doce o trece, nadie llevó la cuenta, y vive en el Camino del Norte porque ahí pasa lo único que pasa. Vio a alguien trazar una runa una vez, de lejos, y no se lo pudo sacar más de la cabeza. Reparte gratis todo lo que sabe y todavía no se dio cuenta de que eso le va a costar caro.',
     knows: [],
     agenda: { goal: 'ver de cerca a alguien que sepa magia', needs: 'runa-de-brasa' } },
@@ -141,6 +206,11 @@ async function main() {
   const knowledgeBySlug = new Map(knowledge.map((k) => [k.slug, k.id]))
 
   for (const spec of PEOPLE) {
+    // Un slug de origen mal escrito dejaría a esa persona sin procedencia y
+    // hablando como nadie. Se revienta acá, que es donde se ve.
+    const procedencia = PROCEDENCIAS[spec.procedencia as Origen]
+    if (!procedencia) throw new Error(`${spec.name} apunta a un origen que no existe: ${spec.procedencia}`)
+
     const { data: person, error } = await db
       .from('people')
       .insert({
@@ -150,6 +220,12 @@ async function main() {
         trade: spec.trade,
         disposition: spec.disposition,
         voice: spec.voice,
+        // El slug se resuelve acá y lo que se guarda es el texto entero. En la
+        // base queda repetido para los del mismo origen, y está bien que quede:
+        // el que lee la fila tiene que poder saber cómo suena esa persona sin
+        // ir a buscar una tabla de orígenes que, con siete habitantes, sería
+        // una junta más por cada charla a cambio de nada.
+        procedencia,
         historia: spec.historia,
         teaches: spec.teaches,
       })
