@@ -14,12 +14,13 @@ import { narrate, type Cronica } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear, recibirGolpe, levantarse } from './world/combate.js'
 import { escalonDe, elegirSaludo } from './world/saludos.js'
+import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta } from './world/magia.js'
 // Los umbrales y cómo se dicen en palabras viven en tick.ts, que es quien los
 // aplica. Importarlos y no copiarlos no es prolijidad: la copia que había acá
 // decía "ya confía en vos, pedile que te enseñe" con 10 de aprecio, cuando el
 // umbral real había pasado a 35. O sea, el juego mandaba a hacer algo que iba
 // a fallar. Un tutorial que miente es peor que ninguno.
-import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe } from './world/tick.js'
+import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe, rutinaDe } from './world/tick.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -456,7 +457,7 @@ export async function handler(
 
         const [places, people, amenazas, objetos, saberes, vinculos, otros] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
-          db.from('people').select('id, name, trade, place_id, teaches, saludos').eq('region_id', region.id).eq('alive', true),
+          db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
           // ("mató a X"), pero el cliente no tiene que plantar el cadáver otra vez.
           db.from('threats').select('id, kind, nombre, people_id, health, max_health, place_id')
@@ -464,7 +465,7 @@ export async function handler(
           db.from('objects').select('kind, quality, made_by')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
           db.from('knows')
-            .select('destreza, veces, learned_from, knowledge:knowledge_id (name, kind, makes, makes_at)')
+            .select('destreza, veces, learned_from, knowledge:knowledge_id (name, kind, makes, makes_at, para_que)')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
           db.from('bonds').select('person_id, valued, feared').eq('toward_id', player.id),
           // Los otros jugadores. Sin esto no hay multijugador: hay gente
@@ -519,9 +520,14 @@ export async function handler(
           // te fuiste, y saldría plata cada vez que alguien camina por la
           // aldea. Sale del vínculo, que es lo que de verdad determina cómo te
           // miran.
+          // `rutinaDe` va AL FINAL y pisa `place_id` a propósito: la columna
+          // dice dónde lo dejó su jornada, y lo que el jugador tiene que ver es
+          // dónde está AHORA — que de noche es su casa. La simulación piensa en
+          // días; esta consulta piensa en horas.
           people: (people.data ?? []).map((q) => ({
             ...q, saludos: undefined,
             ...actitud(q, vinculos.data ?? [], (saberes.data ?? []).length, region.tick, player.name),
+            ...rutinaDe(q, places.data ?? []),
           })),
           // Qué hacer ahora. Es la diferencia entre un mundo y una demo
           // técnica: llegás, no conocés a nadie, no sabés qué hay, y sin esto
@@ -534,10 +540,15 @@ export async function handler(
           vos: {
             nombre: player.name,
             saberes: (saberes.data ?? []).map((k) => {
-              const c = (k as unknown as { knowledge: { name: string; kind: string } | null }).knowledge
+              const c = (k as unknown as {
+                knowledge: { name: string; kind: string; para_que: string | null } | null
+              }).knowledge
               const d = (k as unknown as { destreza: number; veces: number; learned_from: string | null })
               return {
                 nombre: c?.name ?? '?', tipo: c?.kind ?? '',
+                // Para qué sirve. Es lo que faltaba: "sabés Destilado de raíz"
+                // no le dice nada a nadie si no se dice qué te deja hacer.
+                paraQue: c?.para_que ?? '',
                 mano: mano(d.destreza), veces: d.veces,
                 maestro: (people.data ?? []).find((q) => q.id === d.learned_from)?.name ?? null,
               }
@@ -550,6 +561,11 @@ export async function handler(
               teme: (vinculos.data?.find((v) => v.person_id === q.id)?.feared ?? 0) >= 25,
             })),
           },
+          // Las cicatrices que dejó la magia. Duran días, las ve todo el
+          // mundo, y llevan el nombre del que las dejó: hay que poder pasar
+          // por un claro que sigue ardiendo y saber quién lo prendió, aunque
+          // esa persona ya no esté.
+          marcas: await marcasDe(region.id, region.tick + 1),
           primeros_pasos: pasos({
             places: places.data ?? [],
           // Cada persona viene con cómo te trata. Es lo que contesta el
@@ -561,9 +577,14 @@ export async function handler(
           // te fuiste, y saldría plata cada vez que alguien camina por la
           // aldea. Sale del vínculo, que es lo que de verdad determina cómo te
           // miran.
+          // `rutinaDe` va AL FINAL y pisa `place_id` a propósito: la columna
+          // dice dónde lo dejó su jornada, y lo que el jugador tiene que ver es
+          // dónde está AHORA — que de noche es su casa. La simulación piensa en
+          // días; esta consulta piensa en horas.
           people: (people.data ?? []).map((q) => ({
             ...q, saludos: undefined,
             ...actitud(q, vinculos.data ?? [], (saberes.data ?? []).length, region.tick, player.name),
+            ...rutinaDe(q, places.data ?? []),
           })),
             amenazas: amenazas.data ?? [], objetos: objetos.data ?? [],
             saberes: saberes.data ?? [], vinculos: vinculos.data ?? [],
@@ -655,8 +676,15 @@ export async function handler(
         // Un botón que no dice nada parece roto, y ahora sí hay algo que
         // decir: lo que pasó. Si el reclamo se lo llevó un tick que corría al
         // mismo tiempo, no hay outcome acá y el aviso lo dice sin mentir.
-        return back(token, resueltas.length > 0
-          ? resueltas.map((r) => r.outcome).join('; ')
+        // SÓLO el resultado de lo que acabás de hacer, no de todo lo que
+        // tuvieras encolado. Al concatenar salía en pantalla "habló con Sarn;
+        // habló con Sarn; habló con Sarn; le enseñó Temple de río a Sarn":
+        // tres charlas viejas sin resolver y la acción real al final, todo
+        // pegado. El jugador aprieta un botón y espera saber qué pasó con ESE
+        // botón.
+        const mio = resueltas[resueltas.length - 1]
+        return back(token, mio
+          ? mio.outcome
           : 'Lo mandaste. Se resuelve cuando cierre el día del valle.')
       }
 
@@ -758,6 +786,13 @@ export async function handler(
         const found = await byToken(token)
         if (!found) return json({ error: 'no existe' })
         const f = await body(req)
+        // Si está quieta por una runa, no muerde. Sin esto la marca se escribe
+        // y el bicho te pega igual: la runa de quietud sería decorativa.
+        const de = f.get('de')
+        if (de && await estaQuieta(de, found.region.tick + 1)) {
+          return json({ ok: false, health: found.player.health, caido: false,
+            porque: 'está quieta' })
+        }
         return json(await recibirGolpe({
           regionId: found.region.id, tick: found.region.tick + 1,
           player: found.player, threatId: f.get('de'),
@@ -772,6 +807,43 @@ export async function handler(
           regionId: found.region.id, tick: found.region.tick + 1,
           player: found.player,
         }))
+      }
+
+      // Colgarse las runas del día. Entran tres, y una cuarta sólo con un
+      // frasco de raíz encima — que es, por fin, para qué sirve un frasco.
+      if (req.method === 'POST' && parts[2] === 'preparar') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        return json(await preparar({
+          regionId: found.region.id, tick: found.region.tick + 1, player: found.player,
+          runas: (f.get('runas') ?? '').split(/[\s,]+/).filter(Boolean),
+        }))
+      }
+
+      // Trazar. Inmediato, como pelear: un hechizo que tarda seis horas no es
+      // un hechizo.
+      if (req.method === 'POST' && parts[2] === 'lanzar') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        return json(await lanzar({
+          regionId: found.region.id, tick: found.region.tick + 1, player: found.player,
+          runas: (f.get('runas') ?? '').split(/[\s,]+/).filter(Boolean),
+          blanco: {
+            tipo: (f.get('blanco') ?? 'amenaza') as 'amenaza' | 'persona' | 'jugador' | 'lugar',
+            id: f.get('id') ?? undefined,
+          },
+        }))
+      }
+
+      // El grimorio: SÓLO lo que te salió a vos. Nunca lo posible — una lista
+      // de lo que falta convierte el saber en información, que es justo lo que
+      // este sistema evita.
+      if (req.method === 'GET' && parts[2] === 'grimorio') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        return json(await grimorioDe(found.player.id))
       }
 
       if (req.method === 'POST' && parts[2] === 'hablar') {

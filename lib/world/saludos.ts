@@ -67,7 +67,7 @@ const COMO_TE_TRATA: Record<Escalon, string> = {
   nadie: 'no sabe bien quién eres: te conoce de vista y nada más',
   ubica: 'ya te tiene medido, pero todavía no confía',
   confia: 'empieza a confiar en ti: ya te pediría un favor',
-  fe: 'te tiene fe, te confiaría lo suyo',
+  fe: 'te tiene fe — pero seguís siendo alguien que pasa caminando, no una visita',
 }
 
 // El prompt está en el mismo castellano llano que se le pide de vuelta, y por
@@ -80,6 +80,18 @@ levanta la vista.
 Te doy quién es, cómo habla, de dónde es y qué está persiguiendo ahora.
 Devuelves TRES variantes para cada uno de los seis grados de confianza que
 puede tenerle a quien pasa. Dieciocho líneas en total, en una sola respuesta.
+
+LO MÁS IMPORTANTE, Y ES DONDE SE FALLA: **es un cruce, no una escena.**
+La persona levanta la vista y sigue con lo suyo. Ni siquiera para de trabajar.
+Aunque te tenga muchísima confianza, lo que dice al pasar es chico: un gesto,
+media frase, una queja del día. **Nada de declaraciones.** "Confío en ti más
+que en mis propias manos" es algo que se dice una vez en la vida sentado, no
+algo que se suelta cuando alguien pasa caminando — y si se dice al pasar, la
+próxima vez que pase suena ridículo.
+
+Regla dura: si la frase sólo tiene sentido dicha UNA vez, no sirve. Estas
+líneas se van a oír muchas veces, así que tienen que aguantar la repetición
+como aguanta un "buen día".
 
 CÓMO TIENEN QUE SER:
 - Cortísimas. Una línea. Muchas veces ni siquiera habla: "Ilde no levanta la
@@ -151,7 +163,7 @@ type Persona = {
 /** La versión de la RECETA, no de los datos. Subirla rehace los saludos de todo
  *  el mundo sin tener que tocar ninguna fila: es la salida cuando lo que cambió
  *  es el prompt de acá arriba y no la persona. */
-const RECETA = 'v2'
+const RECETA = 'v3'   // v3: el saludo es un cruce, no una escena
 
 /** Hash chico y estable. La huella se guarda en `people.saludos_de` y se lee en
  *  cada barrido del cron: meterle adentro los cuatrocientos caracteres de una

@@ -937,7 +937,17 @@ export async function hablarCon(
     },
     {
       verbo: 'ensenar',
-      texto: 'Enseñarle algo tuyo',
+      // Nombra QUÉ le vas a enseñar. "Enseñarle algo tuyo" no dice nada: el
+      // jugador aprieta sin saber qué está por regalar, y regalar un saber es
+      // la decisión más grande que hay en este juego — es lo único que hace
+      // que no se pierda cuando te morís, y también lo que deja de hacerte
+      // único. Una decisión así no se toma a ciegas.
+      texto: (() => {
+        const puede = saberesJug.filter((k) => !saberesNpc.includes(k))
+        return puede.length === 1 ? `Enseñarle ${puede[0]}`
+          : puede.length > 1 ? `Enseñarle ${puede[0]} (sabés ${puede.length} que no sabe)`
+          : 'Enseñarle algo tuyo'
+      })(),
       posible: saberesJug.some((s) => !saberesNpc.includes(s)),
       porque: !saberesJug.length ? 'todavía no sabes nada que enseñar'
         : 'ya sabe todo lo que sabes',
