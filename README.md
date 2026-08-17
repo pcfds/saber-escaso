@@ -55,6 +55,9 @@ sin que nadie lo note.
 - **[`ROADMAP.md`](ROADMAP.md)** — qué anda, qué está a medias y hacia dónde va.
 - **[`BACKLOG.md`](BACKLOG.md)** — las tareas, con dueño y archivos.
 - **[`CLAUDE.md`](CLAUDE.md)** — estado técnico y cada trampa ya pisada.
+- **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — si venís a programar acá, empezá
+  por este. Los invariantes, cómo se prueba, y las trampas que ya costaron una
+  tarde cada una.
 
 ## Correrlo
 

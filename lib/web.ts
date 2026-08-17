@@ -10,10 +10,16 @@
 import { createServer } from 'node:http'
 import { db, getRegion } from './db.js'
 import { step } from './world/tick.js'
-import { narrate } from './world/director.js'
+import { narrate, type Cronica } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear, recibirGolpe, levantarse } from './world/combate.js'
 import { escalonDe, elegirSaludo } from './world/saludos.js'
+// Los umbrales y cómo se dicen en palabras viven en tick.ts, que es quien los
+// aplica. Importarlos y no copiarlos no es prolijidad: la copia que había acá
+// decía "ya confía en vos, pedile que te enseñe" con 10 de aprecio, cuando el
+// umbral real había pasado a 35. O sea, el juego mandaba a hacer algo que iba
+// a fallar. Un tutorial que miente es peor que ninguno.
+import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, comoTeVe } from './world/tick.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -84,6 +90,33 @@ async function byToken(token: string) {
     .select('id, name, place_id, last_seen_tick, token, health, downed_at_tick')
     .eq('region_id', region.id).eq('token', token).maybeSingle()
   return data ? { region, player: data as Player } : null
+}
+
+/**
+ * Deja registrada en la base la segunda auditoría del director —la gente que
+ * nombró sin ningún hecho que la ponga en escena— sobre la crónica que
+ * `narrate()` acaba de insertar.
+ *
+ * Se hace desde acá y no desde el `insert` del director porque ese archivo no
+ * se toca en esta tanda. La versión que corresponde es una línea más en el
+ * insert (`unbacked_names: sinRespaldo`); cuando entre, esta función sobra y
+ * hay que borrarla.
+ *
+ * Se apoya en un invariante que dejó cierto la migración
+ * `20260817100000_cronicas_sin_respaldo`: todas las crónicas viejas quedaron
+ * medidas por el backfill, así que la única fila con `unbacked_names` en null
+ * es la que se acaba de escribir. Si no hay ninguna —porque el director cortó
+ * por ventana vacía y no escribió— no toca nada, y la crónica queda en null,
+ * que es lo que null significa: no medida.
+ */
+async function anotarSinRespaldo(playerId: string, c: Cronica) {
+  if (!c.leidos) return
+  const { data: fila } = await db.from('chronicles')
+    .select('id').eq('player_id', playerId).is('unbacked_names', null)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+  if (fila) {
+    await db.from('chronicles').update({ unbacked_names: c.sinRespaldo }).eq('id', fila.id)
+  }
 }
 
 async function renderPlayer(token: string, aviso?: string, recienCreado = false) {
@@ -517,6 +550,20 @@ export async function handler(
       if (req.method === 'POST' && parts[2] === 'cronica') {
         const found = await byToken(token)
         if (!found) return json({ text: 'No existe ese jugador.' })
+        // Este corte parece redundante ahora que `narrate()` también se calla
+        // con la ventana vacía, y no lo es: los dos predicados son distintos.
+        // Acá se pregunta por el tick de la región; el director pregunta por
+        // eventos con `tick > last_seen_tick`, y las acciones del cliente
+        // escriben eventos en `region.tick + 1` (ver `llegada` más arriba, y
+        // los golpes y las caídas). O sea que hay estados —medidos hoy en
+        // valle-primero: dos jugadores con `hay=false` y ocho eventos en la
+        // ventana— donde el director sí narraría.
+        //
+        // Y esta ruta la pega el cliente de Godot **solo, al entrar al valle**
+        // (`valle.gd`, `pedir_cronica()`). Sin el corte, cualquiera que jugó y
+        // volvió a entrar dispararía una llamada al modelo por entrada, y
+        // como `to_tick` quedaría por detrás de esos eventos, volvería a
+        // narrar los mismos en la siguiente. Se queda.
         const hay = found.region.tick > found.player.last_seen_tick
         if (!hay) {
           const { data: ultima } = await db.from('chronicles')
@@ -525,6 +572,7 @@ export async function handler(
           return json({ text: ultima?.text ?? 'Todavía no pasó nada digno de contar.' })
         }
         const c = await narrate(found.player.name)
+        await anotarSinRespaldo(found.player.id, c)
         return json({ text: c.text })
       }
 
@@ -532,9 +580,24 @@ export async function handler(
         const found = await byToken(token)
         if (!found) return send(page('No existe', '<h1>No existe</h1>'), 404)
         const c = await narrate(found.player.name)
-        return back(token, c.inventados.length
-          ? `El director citó ${c.inventados.length} hecho(s) inexistente(s). Alucinación — anotala.`
-          : undefined)
+        await anotarSinRespaldo(found.player.id, c)
+
+        const avisos: string[] = []
+        // Ventana vacía: el director no llamó al modelo y no escribió crónica,
+        // así que la página va a seguir mostrando la anterior. Sin esto el
+        // botón parece roto — apretás «¿Qué pasó?» y no cambia nada. El texto
+        // que trae la respuesta es la explicación, y va arriba de todo.
+        if (!c.leidos) avisos.push(c.text)
+        if (c.inventados.length) {
+          avisos.push(`El director citó ${c.inventados.length} hecho(s) inexistente(s). Alucinación — anotala.`)
+        }
+        // La otra auditoría. No es un error por sí sola —sugerir a alguien en
+        // condicional es legítimo— pero es el agujero que el chequeo de ids no
+        // ve, así que se mira acá y queda guardada en `chronicles`.
+        if (c.sinRespaldo.length) {
+          avisos.push(`Nombró a ${c.sinRespaldo.join(', ')} sin ningún hecho que los ponga en escena.`)
+        }
+        return back(token, avisos.join(' · ') || undefined)
       }
 
       // El valle en el navegador ya no existe. Era un cliente Three.js de 600
@@ -618,10 +681,15 @@ function pasos(m: {
     const quien = candidatos[0]
     if (quien) {
       const v = aprecio(quien.id)
+      // Tres escalones, y cada uno manda a hacer lo que de verdad se puede
+      // hacer con ese aprecio. El orden correcto lo dijo quien lo jugaba sin
+      // querer: primero te piden algo, después te enseñan.
       out.push({
-        texto: v >= 10
-          ? `${quien.name} ya confía en vos. Pedile que te enseñe su oficio.`
-          : `Nadie te enseña nada todavía. Buscá a ${quien.name}, ${quien.trade}, y ganátelo: quedate trabajando cerca y hablale.`,
+        texto: v >= UMBRAL_ENSENAR
+          ? `${quien.name} ${comoTeVe(v)}. Pedile que te enseñe su oficio.`
+          : v >= UMBRAL_ENCARGO
+          ? `${quien.name} ${comoTeVe(v)}: encargate de algo que necesite y va a ser otra cosa.`
+          : `Nadie te enseña nada todavía. Buscá a ${quien.name}, ${quien.trade}, y ganátelo: hablale y quedate trabajando cerca.`,
         donde: slug(quien.place_id),
       })
     }
