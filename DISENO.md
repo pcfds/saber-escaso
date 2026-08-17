@@ -1105,6 +1105,62 @@ decirlo.
 un contador de crímenes. La consecuencia es social y ya está construida; lo que
 falta es conectarla.
 
+### 9.3d Estamentos, carácter y la reputación del pueblo entero
+
+Pedido de la dirección del proyecto, textual:
+
+> *"De los principios, un pueblo: los NPCs pueden ser buenos, malos,
+> delincuentes, nobles, cleros, magos, reyes, ser justos o no. **Pueden odiarte
+> en un pueblo según cómo venga tu reputación.**"*
+
+Lo último es lo más importante de la frase y **ya está en la base sin que nadie
+lo use.** La tabla `peoples` tiene `aprecio` y `temor` a escala de pueblo, con
+este comentario escrito hace semanas:
+
+> *"Los dos ejes, a escala de pueblo. Igual que con la gente, pero **el pueblo
+> entero se acuerda de lo que le hiciste a cualquiera de los suyos**."*
+
+Hoy sólo lo escribe el autor y **nadie lo lee para decidir nada**. Es dato
+muerto, y es la tercera vez que pasa lo mismo en este proyecto: `holder_kind`
+aceptaba `'place'` desde el primer día y nadie había escrito un objeto en el
+suelo; `people.trade` decidía nueve cosas y nadie lo usaba para el sonido.
+**Antes de agregar una tabla, buscá la que ya está.**
+
+**1. La reputación tiene dos escalas y la de arriba es la que hace política.**
+Lo que una persona siente por vos sale de lo suyo **más lo de los suyos**. Eso
+cambia el juego entero: le pegás a uno de la Ceniza y **el pueblo entero se
+entera**, aunque el que te vio se muera. Y hace que tomar partido cueste algo,
+que es exactamente lo que §9.3b decía que faltaba: hay dos versiones
+irreconciliables del incendio, y hoy podés escuchar las dos y quedar bien con
+todos, que es lo mismo que no haber elegido.
+
+**2. Los estamentos tienen que HACER algo o son una etiqueta.** Un noble que es
+"un noble" no existe; uno que decide quién puede usar el camino, sí. Y acá hay
+un caso vivo que muestra cómo se hace bien: **la vieja Ren es la maga, y su
+poder es que es la única que sabe las runas y NO ENSEÑA.** Eso no necesitó un
+estamento, un título ni una facción — necesitó una decisión suya con
+consecuencias. Ese es el listón.
+
+**3. Cuidado con la escala.** "Reyes" y "clero" en un valle de siete personas
+es disfraz. Estas cosas entran cuando el mundo crezca, y el mundo tiene una
+puerta por donde crecer —el Camino del Norte, que ya está construido y se ve
+desde toda la aldea—. **Un estamento nuevo se gana cuando hay suficiente gente
+para que mande sobre alguien.**
+
+**4. Bueno y malo no es una barra.** La versión que arruina esto es un número de
+alineamiento. La que funciona ya está andando: **los dos pueblos tienen un
+agravio concreto y ninguno está equivocado.** Los de la Ceniza vivían en la
+Casa Quemada antes del incendio; los del Sotobosque perdieron el claro que la
+aldea taló para las vigas. Nadie es el malo — hay intereses que no entran
+juntos. Un delincuente de este valle no es alguien con la etiqueta "malo": es
+alguien que hizo algo y **el pueblo se acuerda**.
+
+**5. Y lo que hace que valga la pena: se puede dar vuelta.** El comentario de
+`agravio` en el esquema ya lo dice — *"no es sabor: se puede averiguar hablando,
+y resolverlo es lo que puede darlos vuelta"*. Un pueblo que te odia y no puede
+dejar de odiarte es una pared. **Lo que hay que construir no es el odio: es la
+puerta de salida.**
+
 ### 9.4 El diálogo — lo que NO se hace
 
 **Nada de NPCs charlatanes de libre conversación.** Se hablan una vez, se
@@ -1214,6 +1270,41 @@ porque cocinar es hacer y no decidir.
 > **El límite que no se cruza: el frasco da opciones, no potencia.** Si se
 > vuelven obligatorios para competir, inventaste el grindeo — y esa es la forma
 > más común en que un juego sin grindeo termina teniendo uno.
+
+#### Curarse: dónde estás, no cuánto tenés
+
+La dirección lo pidió así: *"y sí, hay vida, y se recupera con pociones, o te
+curas durmiendo, o cosas"*. Y hay una razón para que sean varias formas y no
+una: **lo que las distingue no es cuánta vida te devuelven, es DÓNDE te dejan.**
+
+Lo primero que hubo que tapar era feo y estaba medido: **la única forma de
+curarse era caerse.** La vida no subía nunca sola, `levantarse()` te dejaba
+entero pero en la aldea, y la runa que cierra heridas necesita a otro que la
+sepa, la haya colgado ese día y esté al lado. O sea que a alguien con veinte de
+vida en el Sotobosque **le convenía dejarse matar**: salía gratis y volvía
+entero.
+
+Las tres que ya existen o vienen, y el eje real es la posición:
+
+| | te deja | cuesta |
+|---|---|---|
+| **caerte** | entero, **en la aldea** | la caminata de vuelta, y la cara |
+| **el cuenco de cuajada** | a medias, **donde estás** | que alguien lo haya hecho |
+| **dormir** | entero, **donde dormiste** | el tiempo, y tener dónde |
+
+**Dormir es el que falta y es el que mejor encaja con lo que se acaba de
+construir.** La rutina del servidor ya manda a la gente a su casa al anochecer;
+se entra a las doce casas; y adentro hay una cama que hoy no es nada. Que
+dormir cure es lo que convierte esa cama en un mueble y no en un adorno — y de
+paso le da al valle **una razón para que alguien te preste techo**, que es
+social, que es lo que este juego hace bien, y que no existe hoy de ninguna
+manera.
+
+**Y las tres reglas que no se cruzan**, que son las mismas de §10.2: es bono y
+nunca impuesto, así que **no hay hambre, no hay cansancio y no hay barra que
+baje sola**; no tenerlo te deja como estabas ayer; y ninguna sube el techo — 100
+sigue siendo 100. El día que haga falta dormir para no empeorar, se inventó una
+obligación disfrazada.
 
 ### 10.3 El resto
 - **Robar** se puede, y te lo van a recordar mucho tiempo.
