@@ -72,13 +72,28 @@ lib/web.ts                servidor: handler exportado, sirve local y en Vercel
 api/index.ts, api/tick.ts entradas de Vercel
 ```
 
-**Seis verbos:** `ir`, `hablar`, `trabajar`, `aprender`, `ensenar`, `pelear`.
-Arrancó con cinco a propósito —si el bucle no funciona con cinco, no lo salva
-el sexto— y `pelear` entró porque el combate ya estaba pasando del lado del
-cliente, donde no lo veía nadie. Un verbo de más es mejor que una mentira.
-Falta `dar`, que está diseñado y no implementado: regalar mueve el vínculo, y
-es lo que cierra el bucle chico (aprendés → fabricás → regalás → te ganás a la
-gente → te enseñan más).
+**Nueve verbos:** `ir`, `hablar`, `trabajar`, `aprender`, `ensenar`, `pelear`,
+`encargarse`, `buscar`, `dar`.
+
+Arrancó con cinco a propósito —si el bucle no funciona con cinco, no lo salva el
+sexto— y cada uno que entró después tuvo que ganarse el lugar:
+
+- `pelear` porque el combate ya estaba pasando del lado del cliente, donde no
+  lo veía nadie. Un verbo de más es mejor que una mentira.
+- `encargarse`, `buscar` y `dar` porque sin ellos el saber no servía para nada:
+  aprendías a forjar y después no podías hacer nada con eso. Cierran el bucle
+  chico — **aprendés → fabricás o buscás → das → te ganás a la gente → te
+  enseñan más.**
+
+**La línea que no se cruza, y está en los datos y no en un comentario:**
+`objects.made_by = null` significa que nadie lo hizo, y lo único en todo el
+código que puede escribir ese null es `case 'buscar'`. La raíz crece sola y la
+junta cualquiera; el frasco lo hace sólo quien sabe destilar. Si algún día un
+objeto fabricado aparece con `made_by` en null, se rompió la regla que sostiene
+el juego entero.
+
+**Un verbo nuevo necesita una migración que toque el `CHECK` de `actions.verb`.**
+Ya nos mordió: el insert falla en silencio y la acción nunca existe.
 
 ## Estado real (verificar antes de asumir)
 

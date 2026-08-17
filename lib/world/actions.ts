@@ -6,12 +6,26 @@
  *   pnpm act Pedro trabajar
  *   pnpm act Pedro aprender Ilde
  *   pnpm act Pedro ensenar Bruno
+ *   pnpm act Pedro encargarse Odila
+ *   pnpm act Pedro buscar
+ *   pnpm act Pedro dar "raíz del Sotobosque a Odila"
  *
- * Cinco verbos. Si el bucle no funciona con cinco, no lo salva el sexto.
+ * Arrancó con cinco a propósito: si el bucle no funciona con cinco, no lo salva
+ * el sexto. Los tres últimos entraron juntos porque son uno solo partido en
+ * tres —agarrás lo que alguien persigue, lo conseguís, se lo das— y sueltos no
+ * hacen nada. Sin `dar`, `buscar` junta basura; sin `buscar`, `encargarse` es
+ * anotarse para nada.
+ *
+ * ⚠ Cada verbo de esta lista tiene que estar TAMBIÉN en el CHECK de
+ *   `actions.verb`, en una migración. Si no está, el insert falla y la acción
+ *   nunca existe — sin error visible del lado del jugador. Ya nos mordió.
  */
 import { db, getRegion } from '../db.js'
 
-const VERBOS = ['ir', 'hablar', 'trabajar', 'aprender', 'ensenar', 'pelear'] as const
+const VERBOS = [
+  'ir', 'hablar', 'trabajar', 'aprender', 'ensenar', 'pelear',
+  'encargarse', 'buscar', 'dar',
+] as const
 
 async function main() {
   const [name, verb, ...rest] = process.argv.slice(2)

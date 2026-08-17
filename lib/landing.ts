@@ -16,6 +16,8 @@
  *    mundo va a ver una sola vez, aburrido y correcto le gana a vistoso y roto.
  */
 
+import { bannerValle, diagramaSaber, bannerCielo } from './arte.js'
+
 const DESCARGA = 'https://github.com/pcfds/saber-escaso-godot/releases/tag/v0.1.0-demo'
 
 export function landing(): string {
@@ -41,6 +43,20 @@ export function landing(): string {
     --brasa:  #9d3a10;
     --serif:  "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
     --mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* Los colores de las ilustraciones. Van acá y no adentro del SVG para que
+       cambien con el tema como cualquier otra cosa de la página. */
+    --cielo-alto:    #6d7f8c;
+    --cielo-bajo:    #b39274;
+    --horizonte:     #d6a678;
+    --sombra1:       #55636a;
+    --sombra2:       #3b474d;
+    --sombra3:       #232c31;
+    --luna:          #f2efe6;
+    --noche-alto:    #10161f;
+    --noche-bajo:    #1c2530;
+    --planeta:       #8a7052;
+    --planeta-banda: #c4a97e;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -51,6 +67,18 @@ export function landing(): string {
       --tenue:  #6e7876;
       --linea:  #232c2e;
       --brasa:  #e8834a;
+
+      --cielo-alto:    #23303c;
+      --cielo-bajo:    #5c4636;
+      --horizonte:     #8a5c34;
+      --sombra1:       #1c262b;
+      --sombra2:       #141c21;
+      --sombra3:       #0b1114;
+      --luna:          #e9e6dc;
+      --noche-alto:    #070b11;
+      --noche-bajo:    #0e141c;
+      --planeta:       #7a6247;
+      --planeta-banda: #b0997a;
     }
   }
   * { box-sizing: border-box; }
@@ -133,6 +161,23 @@ export function landing(): string {
   .pasos { margin: 1.3rem 0 0; padding-left: 1.4rem; }
   .pasos li { margin-bottom: 0.7rem; }
 
+  .lienzo {
+    display: block; width: 100%; height: auto; border-radius: 3px;
+    border: 1px solid var(--linea);
+  }
+  .lienzo-chico { border: none; background: none; }
+  .lienzo-cielo { margin-top: 1.6rem; }
+  .pie {
+    font-family: var(--mono); font-size: 13px; fill: var(--tenue);
+    letter-spacing: 0.04em;
+  }
+  .pie-brasa { fill: var(--brasa); }
+  .marco { margin: 2rem 0 0; }
+  .epigrafe {
+    font-size: 0.84rem; color: var(--tenue); margin: 0.6rem 0 0;
+    font-family: var(--mono); letter-spacing: 0.03em;
+  }
+
   footer { padding: 2.4rem 0; color: var(--tenue); font-size: 0.87rem; }
   footer a { color: var(--suave); }
 </style>
@@ -140,7 +185,9 @@ export function landing(): string {
 <body>
 <div class="hoja">
 
-<header>
+<div class="marco" style="margin-top:1.5rem">${bannerValle()}</div>
+
+<header style="padding-top:clamp(2rem,6vh,3.5rem)">
   <p class="rotulo">Demo temprana · Windows · gratis</p>
   <h1>Saber Escaso</h1>
   <p class="tesis">Un mundo de fantasía donde el conocimiento vive en gente que se muere.
@@ -160,6 +207,13 @@ export function landing(): string {
   había. Nada de eso lo escribió un guionista: el mundo corre en un servidor y
   avanza igual con vos o sin vos. Si no hay nadie conectado va más lento, pero
   no se detiene.</p>
+  <ul class="lista">
+  </ul>
+
+  <div class="marco">${diagramaSaber()}
+    <p class="epigrafe">Cuando se muere el último que sabe algo, ese saber se va del mundo. No hay wiki que lo devuelva.</p>
+  </div>
+
   <ul class="lista">
     <li><b>Aprendés de personas, no de menús.</b> Nadie nace sabiendo y no hay
     recetas tiradas en un cofre. Alguien tiene que enseñarte, y para eso tiene
@@ -198,8 +252,9 @@ export function landing(): string {
   <p>Es una demo temprana de verdad, no un demo de prensa. Esto es lo que ya
   funciona y se puede jugar:</p>
   <ul class="lista">
-    <li>Caminar el valle en 3D, con día y noche: <b>una hora real es un día del
-    valle</b>, y el sol que ves es el mismo que ven todos los conectados.</li>
+    <li>Caminar el valle en 3D, con día y noche: <b>seis horas reales son un
+    día del valle</b>, y el sol que ves es el mismo que ven todos los
+    conectados. La fase de la luna te dice qué día va el valle.</li>
     <li>Hablarles a los habitantes <b>escribiéndoles lo que se te cante</b>, y
     que te contesten en personaje, acordándose de lo anterior.</li>
     <li>Aprender un oficio de alguien que confíe en vos, y enseñárselo a otro.</li>
@@ -207,6 +262,10 @@ export function landing(): string {
     <li>Pelear con lo que ronda el bosque, con lo que hayas forjado.</li>
     <li>Leer la crónica de lo que pasó en el valle mientras no estabas.</li>
   </ul>
+  <div class="marco">${bannerCielo()}
+    <p class="epigrafe">Dos lunas y un gigante gaseoso. El cielo no es decoración: es el reloj compartido del valle.</p>
+  </div>
+
   <div class="aviso">
     Y ya pasó de verdad: el día 10, la vieja Ren se murió y se llevó las dos
     únicas runas que había en el valle. Nadie lo guionó. Nadie las va a poder

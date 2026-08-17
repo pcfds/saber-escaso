@@ -27,6 +27,117 @@ const pick = <T>(xs: T[]): T | undefined => xs[roll(xs.length)]
  *  parte de lo que alguien sabe, y se muere con esa persona. */
 type Receta = { name: string; makes: string; makes_at: string }
 
+// ─────────────────────────────────────────────────────────────
+// LA LÍNEA QUE SOSTIENE EL JUEGO ENTERO
+// ─────────────────────────────────────────────────────────────
+//
+// **Un objeto sólo existe si alguien vivo sabe hacerlo.** No hay tienda, no hay
+// drops, no hay receta tirada en un cofre. Cuando se muere el último que sabe
+// forjar, no vuelve a haber una hoja nueva en el valle. Nunca.
+//
+// `buscar` no rompe esa regla, y hay que entender exactamente por qué o la
+// próxima persona que toque este archivo la rompe sin darse cuenta:
+//
+//   · La raíz CRECE SOLA. El hierro que quedó en la Casa Quemada estaba ahí
+//     antes que nadie. Nadie los fabrica, así que no hay saber que perder ni
+//     saber que exigir: **la raíz la junta cualquiera.**
+//   · El frasco NO crece. Sale de las manos de alguien que aprendió a destilar,
+//     y el día que se muera esa persona no hay más frascos. **El destilado lo
+//     hace sólo el que sabe destilar.**
+//
+// La línea está escrita en los datos, no en un comentario: **un objeto con
+// `made_by = null` es uno que nadie hizo.** Es la ÚNICA forma en que algo entra
+// al mundo sin que alguien sepa hacerlo, y sólo la produce esta tabla. Todo lo
+// demás pasa por `trabajar`, que exige `knows` + el lugar correcto.
+//
+// Si alguna vez agregás algo acá, la pregunta es una sola: ¿esto crece, se
+// cae o quedó ahí? Si la respuesta es "lo hace alguien", no va acá — va a
+// `knowledge.makes`.
+//
+// La fragua no aparece a propósito. Es donde se HACE, no donde se junta, y que
+// `buscar` devuelva nada ahí es lo que le enseña la diferencia al jugador.
+const LO_QUE_DA_EL_LUGAR: Record<string, { kind: string; peso: number }[]> = {
+  // Crece solo, y es lo que Odila viene persiguiendo desde el primer día.
+  bosque: [
+    { kind: 'raíz del Sotobosque', peso: 5 },
+    { kind: 'rama de roble', peso: 3 },
+    { kind: 'hongo de tronco', peso: 2 },
+  ],
+  // Lo que dejó el fuego. Lo que sobrevive a un incendio es el material, no el
+  // objeto: de las vigas queda carbón y de las herraduras, hierro sin forma.
+  ruina: [
+    { kind: 'carbón', peso: 4 },
+    { kind: 'hierro viejo', peso: 3 },
+    { kind: 'ceniza', peso: 2 },
+  ],
+  // Piedra del pedregal y lo que crece al borde. Poco: es un camino.
+  camino: [
+    { kind: 'piedra de afilar', peso: 3 },
+    { kind: 'hierba del borde', peso: 3 },
+  ],
+  // Casi nada, y el "casi nada" es el mensaje: en la aldea se hace y se habla.
+  aldea: [
+    { kind: 'caña de la orilla', peso: 2 },
+    { kind: 'lino en rama', peso: 2 },
+  ],
+}
+
+/** Cuántas veces de cada diez volvés con las manos vacías.
+ *
+ *  Sin esto `buscar` es una máquina expendedora: apretás y sale. Que a veces
+ *  no salga nada es lo que hace que traer la raíz sea traer algo. */
+const NO_HAY_NADA: Record<string, number> = {
+  bosque: 2, ruina: 3, camino: 5, aldea: 6,
+}
+
+// ─────────────────────────────────────────────────────────────
+// La confianza: cuánto hay que ganarse cada cosa
+// ─────────────────────────────────────────────────────────────
+//
+// Estaba regalado. Con `aprender` en 10, hablar dando +2 y trabajar +4, eran
+// TRES acciones y ya te enseñaban el oficio. Quien lo jugó lo dijo apenas lo
+// tocó: *"me deja aprender ya pero recién me pidió algo, no tengo tanta
+// confianza"*. El saber es el corazón del juego y no puede costar una tarde.
+//
+// Y ahí está la forma correcta, que la dijo el jugador sin querer: **primero te
+// piden algo, después te enseñan.** Por eso son dos umbrales y no uno, y el de
+// abajo es el que abre el camino al de arriba.
+//
+// Con los números de hoy (hablar +2, trabajar +4, fabricar +6, encargarse +4,
+// cumplirle la agenda +25):
+//
+//   · Camino diseñado — 3 charlas (6) + encargarse (4) + traerle lo que
+//     necesitaba (25 + calidad) = 36. Seis acciones, seis días del valle, y un
+//     viaje al Sotobosque en el medio.
+//   · Sin encargos — nueve jornadas trabajando delante suyo, o seis cosas
+//     fabricadas donde te vea, o dieciocho charlas.
+//
+// Un tick es un día y el cron corre uno cada seis horas, pero además cada
+// acción del jugador dispara un tick (`web.ts`), así que esto se mide en
+// acciones, no en horas de reloj.
+export const UMBRAL_ENCARGO = 5
+export const UMBRAL_ENSENAR = 35
+
+/** Cómo te ve alguien, dicho como se dice en el valle.
+ *
+ * **Nunca un número, nunca un porcentaje.** Un jugador tiene que poder saber
+ * cuánto le falta sin ver una barra: la diferencia entre "te ubica, nada más"
+ * y "empieza a confiar" se siente, y los dos saltos que importan además se
+ * anuncian solos en `events` (ver `tocarVinculo`).
+ *
+ * Los cortes son los umbrales de verdad, no adornos: si movés un umbral, la
+ * escalera se mueve con él y nadie tiene que acordarse de sincronizar dos
+ * listas de números.
+ */
+export function comoTeVe(valued: number): string {
+  if (valued < 0) return 'te tiene bronca'
+  if (valued === 0) return 'todavía no te conoce'
+  if (valued < UMBRAL_ENCARGO) return 'te ubica, nada más'
+  if (valued < UMBRAL_ENSENAR - 17) return 'empieza a confiar'
+  if (valued < UMBRAL_ENSENAR) return 'te tiene fe'
+  return 'te confiaría lo suyo'
+}
+
 /** Cuánto sube la destreza esta vez.
  *
  * Rendimientos decrecientes a propósito. Las primeras diez veces que forjás
@@ -95,13 +206,57 @@ export async function step() {
   // el mundo no espera al jugador, y cuando vuelve encuentra otra cosa.
   const agendas = (await db
     .from('agendas')
-    .select('id, person_id, goal, needs_kind, needs_id, progress, state')
+    .select('id, person_id, goal, needs_kind, needs_id, needs_object, progress, state')
     .eq('state', 'activa')).data ?? []
 
   for (const agenda of agendas) {
     const who = people.find((p) => p.id === agenda.person_id)
     if (!who) continue
     if (Math.random() > pace) continue
+
+    // ¿Le falta una COSA?
+    //
+    // Ésta es la puerta por la que entra el jugador, y la razón de que corra
+    // igual esté él o no: si te encargaste de traerle la raíz a Odila y no
+    // volvés, Odila la consigue sola. El mundo no te espera — es la lección de
+    // Red Dead y es a propósito.
+    if (agenda.needs_kind === 'object' && agenda.needs_object) {
+      const falta = agenda.needs_object
+
+      // Ojo con lo que NO hay acá: no se chequea si el NPC ya tiene una en la
+      // mano, y no se le crea el objeto cuando la termina solo. Las dos cosas
+      // estuvieron escritas y las dos estaban mal.
+      //
+      // Una agenda material se cumple GASTANDO la cosa: Ilde junta carbón para
+      // el invierno y lo quema, Odila quiere la raíz para destilarla. Si al
+      // cumplirla le dejábamos el carbón en el inventario, la próxima vez que
+      // le tocara "juntar carbón" se cumplía sola en el acto — y pasó, tres
+      // ticks seguidos, en la primera corrida de esto. El valle se convertía en
+      // una persona anunciando que consiguió lo mismo una y otra vez.
+      //
+      // Lo único que entra al mundo por esta vía es lo que trae un jugador, y
+      // eso pasa por `dar`.
+
+      // Acá está la regla otra vez, del lado de los NPCs: la raíz crece sola
+      // y Odila la puede ir a juntar, pero un frasco sale de las manos de
+      // alguien que sabe destilar. Si no queda nadie vivo que lo sepa hacer, la
+      // agenda se traba igual que cuando falta un saber — y eso es exactamente
+      // lo que tiene que pasar. Si el NPC "consiguiera" un frasco de la nada,
+      // la escasez sería decorativa.
+      const crece = Object.values(LO_QUE_DA_EL_LUGAR)
+        .some((tabla) => tabla.some((t) => t.kind === falta))
+      if (!crece) {
+        const quienSabe = await quienLoSabeHacer(falta, people)
+        if (!quienSabe) {
+          await db.from('agendas').update({ state: 'bloqueada' }).eq('id', agenda.id)
+          ev({ kind: 'agenda_bloqueada', place_id: who.place_id,
+            summary: `${who.name} dejó de intentar ${agenda.goal}: ya no queda nadie que sepa hacer ${falta}.`,
+            detail: { person: who.name, goal: agenda.goal, object: falta } })
+          continue
+        }
+      }
+      // Si llegó hasta acá, es alcanzable: avanza con el progreso de siempre.
+    }
 
     // ¿Le falta un saber que nadie cerca tiene? Se traba, y eso es una historia.
     if (agenda.needs_kind === 'knowledge' && agenda.needs_id) {
@@ -117,19 +272,11 @@ export async function step() {
       // progreso no haya llegado a 100. Sin esto la gente sigue persiguiendo
       // cosas que ya tiene, y el director narra alrededor de ese absurdo.
       if (hasIt.data) {
-        await db.from('agendas')
-          .update({ state: 'cumplida', progress: 100, ended_tick: nextTick })
-          .eq('id', agenda.id)
-        ev({ kind: 'agenda_cumplida', place_id: who.place_id,
-          summary: `${who.name} consiguió ${agenda.goal}.`,
-          detail: { person: who.name, goal: agenda.goal } })
-        const siguiente = siguienteMeta(who.trade)
-        await db.from('agendas').insert({
-          person_id: who.id, goal: siguiente, started_tick: nextTick,
+        await cumplirAgenda(agenda, who, nextTick, ev, {
+          kind: 'agenda_cumplida', place_id: who.place_id,
+          summary: `${who.name} consiguió lo que le faltaba para ${agenda.goal}.`,
+          detail: { person: who.name, goal: agenda.goal },
         })
-        ev({ kind: 'agenda_nueva', place_id: who.place_id,
-          summary: `${who.name} se puso a ${siguiente}.`,
-          detail: { person: who.name, goal: siguiente } })
         continue
       }
 
@@ -152,28 +299,35 @@ export async function step() {
       }
     }
 
-    const gained = 8 + roll(18)
+    // Cuánto se avanza en un día.
+    //
+    // Estaba en `8 + roll(18)`, o sea ~16 por tick: una agenda entera en SEIS
+    // días del valle. Con eso el jugador no llega nunca — en la primera corrida
+    // de esto Odila cerró lo suyo en el mismo tick en que Pedro se encargó, y
+    // no por mala suerte: era el caso típico. Una ventana de seis días donde
+    // además tenés que enterarte, ir y volver, es no tener ventana.
+    //
+    // Con `2 + roll(8)` (media 5,5) una agenda dura unos 18 días del valle. El
+    // cron corre cuatro ticks por día real, así que son ~4 días reales si nadie
+    // juega, y ~18 acciones si hay alguien adentro (cada acción dispara un
+    // tick). Alcanza para escucharlo, cruzar el valle y volver, y sigue
+    // dejando una agenda cerrándose cada tres o cuatro ticks entre las cinco
+    // personas del valle: el mundo se mueve igual, sólo que a paso de gente y
+    // no de planilla.
+    const gained = 2 + roll(8)
     const progress = Math.min(100, agenda.progress + gained)
 
     if (progress >= 100) {
-      await db.from('agendas')
-        .update({ state: 'cumplida', progress: 100, ended_tick: nextTick })
-        .eq('id', agenda.id)
-      ev({ kind: 'agenda_cumplida', place_id: who.place_id,
-        summary: `${who.name} consiguió ${agenda.goal}.`,
-        detail: { person: who.name, goal: agenda.goal } })
-
-      // Una agenda cumplida abre la siguiente. El mundo no se queda quieto.
-      const nueva = siguienteMeta(who.trade)
-      await db.from('agendas').insert({
-        person_id: who.id, goal: nueva, started_tick: nextTick,
+      await cumplirAgenda(agenda, who, nextTick, ev, {
+        kind: 'agenda_cumplida', place_id: who.place_id,
+        summary: `${who.name} se salió con la suya: ${agenda.goal}.`,
+        detail: { person: who.name, goal: agenda.goal },
       })
-      ev({ kind: 'agenda_nueva', place_id: who.place_id,
-        summary: `${who.name} se puso a ${nueva}.`,
-        detail: { person: who.name, goal: nueva } })
     } else {
       await db.from('agendas').update({ progress }).eq('id', agenda.id)
-      if (gained > 20) {
+      // Un buen día suelto no es noticia todos los días. Con la curva nueva
+      // esto sale ~1 vez por agenda: la vez que de verdad pegó un salto.
+      if (gained >= 9 && Math.random() < 0.5) {
         ev({ kind: 'agenda_avanza', place_id: who.place_id,
           summary: `${who.name} avanzó bastante con ${agenda.goal}.`,
           detail: { person: who.name, goal: agenda.goal, progress } })
@@ -381,6 +535,43 @@ export async function step() {
       detail: { from: contador.name, to: oyente.name } })
   }
 
+  // ── 6. Los encargos que se cerraron sin vos ───────────────
+  //
+  // Ésta es la parte incómoda y es la que más importa: te encargaste de
+  // conseguirle la raíz a Odila, no volviste en tres días, y Odila la
+  // consiguió. No perdiste nada — nunca fue tuya. El valle siguió andando.
+  //
+  // Vale igual si la cerró otro jugador mientras dormías. No es un bug: es lo
+  // que hace que las agendas sean únicas por mundo y no una copia por persona.
+  //
+  // Ruido: un encargo se cierra UNA vez en su vida. No hay forma de que esto
+  // se repita tick a tick, así que no lleva probabilidad.
+  if (players.length > 0) {
+    const abiertos = (await db
+      .from('encargos').select('id, agenda_id, player_id')
+      .eq('state', 'activo').in('player_id', players.map((p) => p.id))).data ?? []
+
+    for (const enc of abiertos) {
+      const { data: a } = await db
+        .from('agendas').select('goal, state, person_id').eq('id', enc.agenda_id)
+        .limit(1).maybeSingle()
+      // Sigue abierta: nada que contar. Un estado que no cambió no es noticia.
+      if (!a || a.state === 'activa' || a.state === 'bloqueada') continue
+
+      await db.from('encargos')
+        .update({ state: 'perdido', closed_tick: nextTick }).eq('id', enc.id)
+
+      const quien = people.find((p) => p.id === a.person_id)
+      const jugador = players.find((p) => p.id === enc.player_id)
+      if (!quien || !jugador) continue
+      ev({ kind: 'encargo_perdido', place_id: quien.place_id,
+        summary: a.state === 'cumplida'
+          ? `${quien.name} lo resolvió sin esperar a ${jugador.name}, que se había encargado: ${a.goal}.`
+          : `${quien.name} soltó lo suyo y ${jugador.name} se había encargado de eso: ${a.goal}.`,
+        detail: { person: quien.name, player: jugador.name, goal: a.goal } })
+    }
+  }
+
   if (events.length > 0) await db.from('events').insert(events)
   await db.from('regions').update({ tick: nextTick }).eq('id', region.id)
 
@@ -388,15 +579,128 @@ export async function step() {
   for (const e of events) console.log(`  · ${e.summary}`)
 }
 
-function siguienteMeta(trade: string): string {
-  const metas: Record<string, string[]> = {
-    herrera: ['juntar carbón para el invierno', 'rehacer las bisagras del granero'],
-    aprendiz: ['ganarse que lo dejen tocar el yunque', 'pagar lo que debe'],
-    cazadora: ['marcar una senda nueva antes de las lluvias', 'curtir lo de esta semana'],
-    destiladora: ['conseguir raíz del Sotobosque', 'cobrar tres deudas viejas'],
-    guardia: ['conseguir que le paguen el mes', 'dormir una noche entera'],
+/** Lo próximo que va a perseguir alguien de ese oficio.
+ *
+ * `obj` es lo que convierte una meta en algo que un jugador puede cerrar. No
+ * todas lo tienen a propósito: "dormir una noche entera" no se resuelve
+ * trayendo nada, y un valle donde todo se arregla con un objeto es una lista
+ * de recados.
+ *
+ * Y mirá cuáles piden algo FABRICADO —el frasco de Odila, el filo de Sarn—:
+ * ésas sólo las puede cerrar alguien que aprendió el oficio. Ahí está el bucle
+ * entero en una línea de datos: aprendés → fabricás → regalás → te ganás a la
+ * gente → te enseñan más.
+ */
+function siguienteMeta(trade: string, evitar?: string): { goal: string; obj?: string } {
+  const metas: Record<string, { goal: string; obj?: string }[]> = {
+    herrera: [
+      { goal: 'juntar carbón para el invierno', obj: 'carbón' },
+      { goal: 'rehacer las bisagras del granero', obj: 'hierro viejo' },
+    ],
+    aprendiz: [
+      { goal: 'ganarse que lo dejen tocar el yunque' },
+      { goal: 'pagar lo que debe', obj: 'frasco de raíz' },
+    ],
+    cazadora: [
+      { goal: 'marcar una senda nueva antes de las lluvias' },
+      { goal: 'curtir lo de esta semana' },
+      { goal: 'conseguir una piedra que le devuelva el filo', obj: 'piedra de afilar' },
+    ],
+    destiladora: [
+      { goal: 'conseguir raíz del Sotobosque', obj: 'raíz del Sotobosque' },
+      { goal: 'cobrar tres deudas viejas', obj: 'frasco de raíz' },
+    ],
+    guardia: [
+      { goal: 'conseguir que le paguen el mes' },
+      { goal: 'dormir una noche entera' },
+      { goal: 'conseguir un filo que no se le melle', obj: 'hoja templada' },
+    ],
+    'chico del camino': [
+      { goal: 'ver de cerca a alguien que sepa magia' },
+      { goal: 'juntar algo que valga para cambiar', obj: 'piedra de afilar' },
+    ],
   }
-  return pick(metas[trade] ?? ['pasar el invierno sin deberle nada a nadie'])!
+  const catalogo = metas[trade] ?? [{ goal: 'pasar el invierno sin deberle nada a nadie' }]
+  // Nunca la misma que acaba de terminar. Sin esto el sorteo repetía la meta y
+  // el valle quedaba con «Ilde consiguió juntar carbón» / «Ilde se puso a
+  // juntar carbón» tres ticks seguidos: no es un mundo que avanza, es un disco
+  // rayado, y el director cobra por leerlo.
+  const otras = catalogo.filter((m) => m.goal !== evitar)
+  return pick(otras.length ? otras : catalogo)!
+}
+
+/** ¿Hay alguien vivo que sepa hacer esto? Devuelve su nombre, o null.
+ *
+ * Es la regla de la escasez hecha función, y se consulta antes de que cualquier
+ * cosa fabricada entre al mundo. `people` ya viene filtrado por `alive`, así
+ * que un muerto no cuenta — que es justamente el punto: cuando se va el último
+ * que sabía, deja de haberlas.
+ *
+ * (Los jugadores también cuentan. Si el único que sabe forjar es un jugador,
+ * el valle depende de que se conecte, y eso está bien.)
+ */
+async function quienLoSabeHacer(
+  kind: string, people: { id: string; name: string }[],
+): Promise<string | null> {
+  const { data: receta } = await db
+    .from('knowledge').select('id').eq('makes', kind).limit(1).maybeSingle()
+  if (!receta) return null
+  const holders = (await db
+    .from('knows').select('holder_kind, holder_id')
+    .eq('knowledge_id', receta.id)).data ?? []
+  for (const h of holders) {
+    if (h.holder_kind === 'person') {
+      const p = people.find((q) => q.id === h.holder_id)
+      if (p) return p.name
+    }
+    if (h.holder_kind === 'player') {
+      const { data: pl } = await db
+        .from('players').select('name').eq('id', h.holder_id).limit(1).maybeSingle()
+      if (pl) return pl.name
+    }
+  }
+  return null
+}
+
+/** Cierra una agenda, cierra los encargos que la seguían, y abre la que sigue.
+ *
+ * Está en un solo lugar porque son cuatro cosas que tienen que pasar juntas o
+ * ninguna: si se cumple la agenda y el encargo queda abierto, el jugador se
+ * queda esperando algo que ya pasó; si no se abre la siguiente, el NPC se queda
+ * quieto y el valle se apaga de a una persona por vez.
+ *
+ * `porJugador` es quién la cerró, si la cerró alguien. Los encargos de los
+ * demás quedan abiertos y los levanta la pasada 6 como `perdido`.
+ */
+async function cumplirAgenda(
+  agenda: { id: string; goal: string },
+  who: { id: string; name: string; trade: string; place_id: string | null },
+  tick: number,
+  ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void,
+  evento: Omit<Ev, 'region_id' | 'tick'>,
+  porJugador?: { id: string; name: string },
+) {
+  await db.from('agendas')
+    .update({ state: 'cumplida', progress: 100, ended_tick: tick })
+    .eq('id', agenda.id)
+  ev(evento)
+
+  if (porJugador) {
+    await db.from('encargos')
+      .update({ state: 'cumplido', closed_tick: tick })
+      .eq('agenda_id', agenda.id).eq('player_id', porJugador.id).eq('state', 'activo')
+  }
+
+  // Una agenda cumplida abre la siguiente. El mundo no se queda quieto.
+  const nueva = siguienteMeta(who.trade, agenda.goal)
+  await db.from('agendas').insert({
+    person_id: who.id, goal: nueva.goal, started_tick: tick,
+    needs_kind: nueva.obj ? 'object' : null,
+    needs_object: nueva.obj ?? null,
+  })
+  ev({ kind: 'agenda_nueva', place_id: who.place_id,
+    summary: `${who.name} se puso a ${nueva.goal}.`,
+    detail: { person: who.name, goal: nueva.goal, object: nueva.obj ?? null } })
 }
 
 async function resolveAction(
@@ -418,6 +722,12 @@ async function resolveAction(
       const destino = places.find((p) => norm(p.slug) === target || norm(p.name).includes(target))
       if (!destino) return `no existe "${action.target}"`
       await db.from('players').update({ place_id: destino.id }).eq('id', player.id)
+      // Y también en memoria. Si en el mismo tick quedaron encoladas `ir
+      // bosque` y `buscar`, la segunda tiene que ver el bosque y no la aldea:
+      // `player` es el objeto que traía el tick de antes de moverse, y sin esta
+      // línea el jugador busca donde ya no está. Es el camino normal de una
+      // sesión —te movés y hacés algo— y estaba roto en silencio.
+      player.place_id = destino.id
       ev({ kind: 'llegada', place_id: destino.id,
         summary: `${player.name} llegó a ${destino.name}.`,
         detail: { player: player.name, place: destino.name } })
@@ -431,7 +741,7 @@ async function resolveAction(
         summary: `${player.name} habló con ${quien.name}.`,
         detail: { player: player.name, person: quien.name } })
       await recordar(quien.id, player, `${player.name} vino a hablar conmigo`, tick)
-      await tocarVinculo(quien.id, player.id, { valued: 2 })
+      await tocarVinculo(quien, player, { valued: 2 }, ev)
       return `habló con ${quien.name}`
     }
 
@@ -481,7 +791,7 @@ async function resolveAction(
           detail: { player: player.name, object: receta.makes, quality: q, destreza: ahora } })
         for (const t of testigos) {
           await recordar(t.id, player, `${player.name} sabe hacer ${receta.makes}`, tick)
-          await tocarVinculo(t.id, player.id, { valued: 6 })
+          await tocarVinculo(t, player, { valued: 6 }, ev)
         }
         return `hizo ${receta.makes} (destreza ${ahora})`
       }
@@ -491,7 +801,7 @@ async function resolveAction(
         detail: { player: player.name } })
       for (const t of testigos) {
         await recordar(t.id, player, `${player.name} trabaja sin que se lo pidan`, tick)
-        await tocarVinculo(t.id, player.id, { valued: 4 })
+        await tocarVinculo(t, player, { valued: 4 }, ev)
       }
       return 'trabajó'
     }
@@ -538,7 +848,7 @@ async function resolveAction(
       // el aprecio. Dos ejes, no una barra.
       for (const t of people.filter((p) => p.place_id === player.place_id)) {
         await recordar(t.id, player, `${player.name} mató a ${bicho.kind} acá`, tick)
-        await tocarVinculo(t.id, player.id, { valued: 8, feared: 5 })
+        await tocarVinculo(t, player, { valued: 8, feared: 5 }, ev)
       }
       return `mató a ${bicho.kind}`
     }
@@ -556,11 +866,16 @@ async function resolveAction(
       const { data: vinculo } = await db
         .from('bonds').select('valued')
         .eq('person_id', maestro.id).eq('toward_id', player.id).maybeSingle()
-      if ((vinculo?.valued ?? 0) < 10) {
+      const v = vinculo?.valued ?? 0
+      if (v < UMBRAL_ENSENAR) {
+        // La negativa DICE en qué escalón estás. Es la mitad del arreglo: subir
+        // el umbral sin que se note cuánto falta convierte "ganarse a alguien"
+        // en tirar el dado hasta que salga. Con esto lo intentás dos veces con
+        // una semana de por medio y escuchás que la frase cambió.
         ev({ kind: 'negativa', place_id: maestro.place_id,
-          summary: `${maestro.name} todavía no confía lo suficiente en ${player.name} como para enseñarle.`,
-          detail: { player: player.name, person: maestro.name } })
-        return `${maestro.name} todavía no confía`
+          summary: `${maestro.name} ${comoTeVe(v)}, pero no lo suficiente como para enseñarle lo suyo a ${player.name}.`,
+          detail: { player: player.name, person: maestro.name, confianza: comoTeVe(v) } })
+        return `${maestro.name} ${comoTeVe(v)}`
       }
       const sabe = (await db
         .from('knows').select('knowledge_id')
@@ -598,8 +913,19 @@ async function resolveAction(
         .from('knows').select('knowledge_id')
         .eq('holder_kind', 'person').eq('holder_id', alumno.id)).data ?? []
       const tiene = new Set(ya.map((k) => k.knowledge_id))
-      const nuevo = pick(sabe.filter((k) => !tiene.has(k.knowledge_id)))
-      if (!nuevo) return `${alumno.name} ya sabe todo lo que él sabe`
+      const puede = sabe.filter((k) => !tiene.has(k.knowledge_id))
+      if (puede.length === 0) return `${alumno.name} ya sabe todo lo que él sabe`
+
+      // Si el tipo está trabado esperando justo eso, enseñale eso. Antes salía
+      // al azar y podías tener la runa de brasa en la cabeza, enseñarle a Tobio
+      // a leer sendas, e irte sin enterarte de que estabas a un paso de cerrar
+      // lo único que ese chico quiere en la vida. *"Tobio quiere ver magia de
+      // cerca, y vos acabás de aprender la runa de brasa"* — eso es la tarea.
+      const { data: suya } = await db
+        .from('agendas').select('id, goal, needs_id')
+        .eq('person_id', alumno.id).in('state', ['activa', 'bloqueada'])
+        .eq('needs_kind', 'knowledge').limit(1).maybeSingle()
+      const nuevo = puede.find((k) => k.knowledge_id === suya?.needs_id) ?? pick(puede)!
 
       const { data: info } = await db
         .from('knowledge').select('name').eq('id', nuevo.knowledge_id).single()
@@ -615,13 +941,290 @@ async function resolveAction(
         summary: `${player.name} le enseñó ${info?.name} a ${alumno.name}. Ahora lo saben dos.`,
         detail: { from: player.name, to: alumno.name, knowledge: info?.name } })
       await recordar(alumno.id, player, `${player.name} me enseñó ${info?.name}`, tick)
-      await tocarVinculo(alumno.id, player.id, { valued: 20 })
+      await tocarVinculo(alumno, player, { valued: 20 }, ev)
+
+      // Y si eso era lo que le faltaba, la agenda se cierra ACÁ y con tu
+      // nombre. La pasada 2 la cerraría igual un rato después, pero sin decir
+      // que fuiste vos: el jugador haría lo más generoso del juego y leería
+      // «Tobio consiguió lo que quería» como si hubiera pasado solo.
+      if (suya && suya.needs_id === nuevo.knowledge_id) {
+        await cumplirAgenda(suya, alumno, tick, ev, {
+          kind: 'agenda_cumplida', place_id: alumno.place_id,
+          summary: `${alumno.name} llevaba tiempo detrás de ${suya.goal}. Se lo enseñó ${player.name}, y ahora lo saben dos.`,
+          detail: {
+            person: alumno.name, player: player.name, goal: suya.goal,
+            knowledge: info?.name,
+          },
+        }, player)
+        await tocarVinculo(alumno, player, { valued: 25 }, ev)
+      }
       return `le enseñó ${info?.name} a ${alumno.name}`
+    }
+
+    // ── encargarse ────────────────────────────────────────────
+    //
+    // El verbo que faltaba, y con él las quests. **No hay sistema de quests
+    // porque ya existían y se llaman agendas**: "Odila quiere conseguir raíz
+    // del Sotobosque" está en la base desde el primer día, avanza sola y nadie
+    // la podía tocar. Esto es la manija, nada más.
+    //
+    // Lo importante de lo que NO hace: no congela la agenda, no la reserva, no
+    // te la asigna. Sigue siendo de Odila y sigue corriendo. Si te encargás y
+    // no volvés, Odila la resuelve igual o se traba igual. Eso es Red Dead: el
+    // mundo no te espera, y que otro jugador te la cierre mientras dormís es
+    // parte del diseño, no un bug.
+    case 'encargarse': {
+      const quien = people.find(
+        (p) => norm(p.name).includes(target) && p.place_id === player.place_id)
+      if (!quien) return `no hay ningún ${action.target} acá`
+
+      const abiertas = (await db
+        .from('agendas').select('id, goal, state, progress, needs_kind, needs_object')
+        .eq('person_id', quien.id).in('state', ['activa', 'bloqueada'])
+        .order('started_tick', { ascending: true })).data ?? []
+      const agenda = abiertas[0]
+      if (!agenda) return `${quien.name} no anda detrás de nada ahora mismo`
+
+      // Nadie le pasa a otro algo que ya casi terminó. El mundo no te espera,
+      // pero tampoco te deja anotarte para perder: sin esto te encargabas y en
+      // el mismo tick te llegaba «lo resolvió sin esperarte», que es la peor
+      // versión posible de la lección.
+      if (agenda.progress >= 80) {
+        return `${quien.name} ya casi lo tiene resuelto y no necesita que nadie se meta`
+      }
+
+      const { data: yaEsta } = await db
+        .from('encargos').select('id, state')
+        .eq('agenda_id', agenda.id).eq('player_id', player.id).limit(1).maybeSingle()
+      if (yaEsta) return `ya se había encargado de eso`
+
+      // Un favor se pide antes que un oficio. Por eso este umbral es bajo y el
+      // de enseñar es alto: te piden algo primero, te enseñan después, y hacer
+      // el favor es lo que te lleva del uno al otro.
+      const { data: vinculo } = await db
+        .from('bonds').select('valued')
+        .eq('person_id', quien.id).eq('toward_id', player.id).maybeSingle()
+      const v = vinculo?.valued ?? 0
+      if (v < UMBRAL_ENCARGO) {
+        ev({ kind: 'negativa', place_id: quien.place_id,
+          summary: `${quien.name} ${comoTeVe(v)}: no le va a encargar nada suyo a ${player.name} todavía.`,
+          detail: { player: player.name, person: quien.name, confianza: comoTeVe(v) } })
+        return `${quien.name} ${comoTeVe(v)}`
+      }
+
+      await db.from('encargos').insert({
+        agenda_id: agenda.id, player_id: player.id, taken_tick: tick,
+      })
+      ev({ kind: 'encargo', place_id: quien.place_id,
+        summary: agenda.needs_object
+          ? `${quien.name} le encargó a ${player.name} ${agenda.goal}: le hace falta ${agenda.needs_object}.`
+          : `${quien.name} le encargó a ${player.name} ${agenda.goal}.`,
+        detail: {
+          person: quien.name, player: player.name, goal: agenda.goal,
+          object: agenda.needs_object ?? null, trabada: agenda.state === 'bloqueada',
+        } })
+      await recordar(quien.id, player, `${player.name} se encargó de ${agenda.goal}`, tick)
+      await tocarVinculo(quien, player, { valued: 4 }, ev)
+
+      // El "dónde" sale del estado, nunca de un modelo: si te digo que la raíz
+      // está en el Sotobosque es porque el Sotobosque la da. Un tutorial que
+      // miente es peor que ninguno.
+      const donde = agenda.needs_object ? dondeSeConsigue(agenda.needs_object, places) : null
+      return `se encargó de ${agenda.goal}`
+        + (agenda.needs_object ? ` — hace falta ${agenda.needs_object}` : '')
+        + (donde ? `, y eso se junta en ${donde}` : '')
+    }
+
+    // ── buscar ────────────────────────────────────────────────
+    //
+    // *"buscar algo en el bosque, ¿existe eso?"* — no existía, y era lo único
+    // que faltaba para que "conseguir raíz del Sotobosque" fuera jugable.
+    //
+    // **Acá no se pide saber nada, y es a propósito.** La raíz la junta
+    // cualquiera; el frasco lo hace sólo el que aprendió a destilar. Ésa es la
+    // línea entera del juego y está en las dos ramas de este archivo: `buscar`
+    // no mira `knows` ni una vez, `trabajar` no hace nada sin `knows`. Ver el
+    // comentario largo arriba de LO_QUE_DA_EL_LUGAR antes de tocar cualquiera
+    // de las dos.
+    case 'buscar': {
+      const lugar = places.find((p) => p.id === player.place_id)
+      if (!lugar) return 'no está en ningún lado'
+
+      const tabla = LO_QUE_DA_EL_LUGAR[lugar.kind]
+      if (!tabla) {
+        ev({ kind: 'busqueda', place_id: lugar.id,
+          summary: `${player.name} se puso a revolver ${lugar.name} y no hay nada que juntar: acá las cosas se hacen, no se encuentran.`,
+          detail: { player: player.name, place: lugar.name, object: null } })
+        return `en ${lugar.name} no hay nada que juntar; acá se trabaja`
+      }
+
+      // Sorteo con pesos, y el "nada" es una entrada más del sorteo. Sin esa
+      // entrada `buscar` es una máquina expendedora y traer la raíz deja de
+      // ser traer algo.
+      const nada = NO_HAY_NADA[lugar.kind] ?? 3
+      let n = roll(tabla.reduce((s, t) => s + t.peso, 0) + nada)
+      let sale: string | null = null
+      for (const t of tabla) {
+        if (n < t.peso) { sale = t.kind; break }
+        n -= t.peso
+      }
+
+      const testigos = people.filter((p) => p.place_id === player.place_id)
+      if (!sale) {
+        // Esto sí se emite siempre aunque no haya cambiado nada, y es la única
+        // excepción a la regla del ruido: lo pidió un jugador. Un tick que
+        // repite algo solo es ruido; una acción que alguien mandó a propósito
+        // siempre es noticia para esa persona.
+        ev({ kind: 'busqueda', place_id: lugar.id,
+          summary: `${player.name} anduvo revolviendo ${lugar.name} y volvió con las manos vacías.`,
+          detail: { player: player.name, place: lugar.name, object: null } })
+        return `no encontró nada en ${lugar.name}`
+      }
+
+      // La calidad de una raíz es de la raíz, no de tus manos: no hay destreza
+      // que valga para agacharse. Por eso tampoco sube nada al buscar.
+      const q = 40 + roll(35)
+      await db.from('objects').insert({
+        region_id: regionId, kind: sale, quality: q,
+        // ⚠ null. NADIE LO HIZO. Es la única puerta por la que entra al mundo
+        //   algo sin que haya un vivo que sepa hacerlo, y sólo la abre este
+        //   caso. Si alguna vez ves un `made_by` acá, alguien rompió la regla.
+        made_by: null,
+        made_tick: tick,
+        holder_kind: 'player', holder_id: player.id,
+      })
+      ev({ kind: 'hallazgo', place_id: lugar.id,
+        summary: `${player.name} salió de ${lugar.name} con ${sale}.`,
+        detail: { player: player.name, place: lugar.name, object: sale, quality: q } })
+      for (const t of testigos) {
+        await recordar(t.id, player, `${player.name} anduvo juntando cosas por acá`, tick)
+        await tocarVinculo(t, player, { valued: 3 }, ev)
+      }
+      return `encontró ${sale} en ${lugar.name}`
+    }
+
+    // ── dar ───────────────────────────────────────────────────
+    //
+    // El verbo que cierra el bucle chico: **aprendés → fabricás → regalás → te
+    // ganás a la gente → te enseñan más.** Hasta hoy fabricabas y no había nada
+    // que hacer con lo fabricado, que era el agujero original del diseño — un
+    // saber que no habilita hacer algo es un renglón en una lista.
+    //
+    // Dos resultados, y los dos importan:
+    //   · Si es lo que esa persona necesitaba, la agenda se CUMPLE y el vínculo
+    //     salta. Es lo más narrable que hay en el juego.
+    //   · Si no, igual mueve el aprecio. **Regalar es regalar.**
+    //
+    // Sólo a NPCs: pasarse cosas entre jugadores necesita las dos puntas
+    // conectadas y todavía no hay dónde ponerlo.
+    case 'dar': {
+      // "<cosa> a <alguien>", o sólo "<alguien>" y le damos lo que necesita.
+      // Nunca elegimos por el jugador cuando no hay pedido: dar por descarte lo
+      // mejor que llevás encima es la clase de ayuda que te deja sin la espada.
+      const bruto = action.target ?? ''
+      const corte = bruto.toLowerCase().lastIndexOf(' a ')
+      const queStr = corte > 0 ? bruto.slice(0, corte).trim() : null
+      const quienStr = norm((corte > 0 ? bruto.slice(corte + 3) : bruto).trim())
+      if (!quienStr) return 'uso: dar <cosa> a <persona>'
+
+      const quien = people.find(
+        (p) => norm(p.name).includes(quienStr) && p.place_id === player.place_id)
+      if (!quien) return `no hay ningún ${quienStr} acá`
+
+      const mios = (await db
+        .from('objects').select('id, kind, quality, made_by')
+        .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
+      if (mios.length === 0) return 'no tiene nada encima para dar'
+
+      const abiertas = (await db
+        .from('agendas').select('id, goal, needs_kind, needs_object')
+        .eq('person_id', quien.id).in('state', ['activa', 'bloqueada'])).data ?? []
+
+      const candidatos = queStr
+        ? mios.filter((o) => norm(o.kind).includes(norm(queStr)))
+        : mios.filter((o) => abiertas.some((a) => a.needs_object === o.kind))
+      if (candidatos.length === 0) {
+        return queStr
+          ? `no lleva ningún "${queStr}" encima`
+          : `${quien.name} no anda detrás de nada que ${player.name} tenga encima`
+      }
+      // El mejor de los que tenga. Un regalo es un regalo, y además la calidad
+      // pesa en cuánto mueve el vínculo: tu destreza se vuelve capital social.
+      const regalo = candidatos.sort((a, b) => b.quality - a.quality)[0]!
+
+      // Se va del inventario de verdad. El objeto no se destruye: sigue en el
+      // mundo, en la mano de otro, y sigue diciendo quién lo hizo. Un cuchillo
+      // que dice "lo hizo Ilde" veinte días después de que Ilde no está es el
+      // juego entero en una línea.
+      await db.from('objects')
+        .update({ holder_kind: 'person', holder_id: quien.id }).eq('id', regalo.id)
+
+      const autoria = regalo.made_by && regalo.made_by !== player.name
+        ? ` Lo había hecho ${regalo.made_by}.` : ''
+      const bonus = Math.floor(regalo.quality / 25)   // 0..4, la mano se nota
+      const cumple = abiertas.find(
+        (a) => a.needs_kind === 'object' && a.needs_object === regalo.kind)
+
+      if (!cumple) {
+        ev({ kind: 'regalo', place_id: quien.place_id,
+          summary: `${player.name} le dio ${regalo.kind} a ${quien.name} sin pedirle nada a cambio.${autoria}`,
+          detail: {
+            player: player.name, person: quien.name, object: regalo.kind,
+            quality: regalo.quality, made_by: regalo.made_by ?? null, cumple: false,
+          } })
+        await recordar(quien.id, player, `${player.name} me regaló ${regalo.kind}`, tick)
+        await tocarVinculo(quien, player, { valued: 5 + bonus }, ev)
+        return `le dio ${regalo.kind} a ${quien.name}`
+      }
+
+      const { data: encargado } = await db
+        .from('encargos').select('id')
+        .eq('agenda_id', cumple.id).eq('player_id', player.id).eq('state', 'activo')
+        .limit(1).maybeSingle()
+
+      // Esto no se cuenta con un texto de sistema. Alguien venía atrás de algo
+      // hace días, se lo trajiste, y eso es de las mejores cosas que le van a
+      // pasar al director para narrar. El hecho estructurado va en `detail`;
+      // acá va la frase.
+      await cumplirAgenda(cumple, quien, tick, ev, {
+        kind: 'agenda_cumplida', place_id: quien.place_id,
+        summary: encargado
+          ? `${quien.name} venía detrás de ${cumple.goal} y no lo conseguía. ${player.name} se había encargado, y volvió con ${regalo.kind}.${autoria}`
+          : `${quien.name} venía detrás de ${cumple.goal}. ${player.name} apareció con ${regalo.kind} y se lo puso en la mano sin que nadie se lo pidiera.${autoria}`,
+        detail: {
+          person: quien.name, player: player.name, goal: cumple.goal,
+          object: regalo.kind, quality: regalo.quality,
+          made_by: regalo.made_by ?? null, encargado: !!encargado,
+        },
+      }, player)
+
+      await recordar(quien.id, player,
+        `${player.name} me trajo ${regalo.kind} cuando lo necesitaba`, tick)
+      await tocarVinculo(quien, player, { valued: 25 + bonus }, ev)
+      return `le cumplió a ${quien.name}: ${cumple.goal}`
     }
 
     default:
       return 'verbo desconocido'
   }
+}
+
+/** En qué lugar del valle se junta esto, si es que se junta en alguno.
+ *
+ * Sale del estado y no de un modelo, así que no puede mandar a nadie a buscar
+ * la raíz a un lugar donde no hay raíz. Devuelve null para lo fabricado: eso no
+ * se junta en ningún lado, hay que encontrar a alguien que sepa hacerlo — que
+ * es exactamente el juego.
+ */
+function dondeSeConsigue(
+  kind: string, places: { name: string; kind: string }[],
+): string | null {
+  for (const [tipo, tabla] of Object.entries(LO_QUE_DA_EL_LUGAR)) {
+    if (!tabla.some((t) => t.kind === kind)) continue
+    const lugar = places.find((p) => p.kind === tipo)
+    if (lugar) return lugar.name
+  }
+  return null
 }
 
 async function recordar(
@@ -632,23 +1235,61 @@ async function recordar(
   })
 }
 
+/** Mueve el vínculo y —esto es lo nuevo— avisa cuando cruzás un escalón.
+ *
+ * **El camino tiene que ser visible sin un número.** Un jugador no puede ver
+ * "confianza 27/35": los porcentajes de cara al jugador están prohibidos y
+ * además convierten una relación en una barra de progreso. Pero tampoco puede
+ * quedarse a ciegas, porque entonces subir la confianza es superstición.
+ *
+ * La salida son dos avisos y sólo dos, los dos que abren algo:
+ *
+ *   · cruzar UMBRAL_ENCARGO — a partir de acá te piden favores.
+ *   · cruzar UMBRAL_ENSENAR — a partir de acá te enseñan el oficio.
+ *
+ * Se emite en la TRANSICIÓN y nada más. Un vínculo que subió dos puntos y no
+ * cruzó nada no es noticia, y si lo fuera el director cobraría por leer que a
+ * Ilde le caés un poquito mejor que ayer. Cada par (persona, jugador) puede
+ * producir estos dos eventos una vez en la vida.
+ *
+ * El resto del camino se ve en `comoTeVe()`, que es lo que dicen los NPCs y lo
+ * que sale cuando alguien se niega a enseñarte.
+ */
 async function tocarVinculo(
-  personId: string, playerId: string, delta: { valued?: number; feared?: number },
+  person: { id: string; name: string; place_id: string | null },
+  player: { id: string; name: string },
+  delta: { valued?: number; feared?: number },
+  ev?: (e: Omit<Ev, 'region_id' | 'tick'>) => void,
 ) {
   const { data: actual } = await db
     .from('bonds').select('id, valued, feared')
-    .eq('person_id', personId).eq('toward_id', playerId).maybeSingle()
+    .eq('person_id', person.id).eq('toward_id', player.id).maybeSingle()
   const clamp = (n: number) => Math.max(-100, Math.min(100, n))
+  const antes = actual?.valued ?? 0
+  const ahora = clamp(antes + (delta.valued ?? 0))
+
   if (actual) {
     await db.from('bonds').update({
-      valued: clamp(actual.valued + (delta.valued ?? 0)),
+      valued: ahora,
       feared: clamp(actual.feared + (delta.feared ?? 0)),
     }).eq('id', actual.id)
   } else {
     await db.from('bonds').insert({
-      person_id: personId, toward_kind: 'player', toward_id: playerId,
-      valued: clamp(delta.valued ?? 0), feared: clamp(delta.feared ?? 0),
+      person_id: person.id, toward_kind: 'player', toward_id: player.id,
+      valued: ahora, feared: clamp(delta.feared ?? 0),
     })
+  }
+
+  if (!ev) return
+  const cruzo = (u: number) => antes < u && ahora >= u
+  if (cruzo(UMBRAL_ENSENAR)) {
+    ev({ kind: 'confianza', place_id: person.place_id,
+      summary: `${person.name} ya le confiaría a ${player.name} lo que sabe hacer.`,
+      detail: { person: person.name, player: player.name, abre: 'aprender' } })
+  } else if (cruzo(UMBRAL_ENCARGO)) {
+    ev({ kind: 'confianza', place_id: person.place_id,
+      summary: `${person.name} empezó a confiar en ${player.name}: ya le pediría un favor.`,
+      detail: { person: person.name, player: player.name, abre: 'encargarse' } })
   }
 }
 
