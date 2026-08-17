@@ -32,6 +32,9 @@
       "schedule": "40 5 * * *"
     }
   ],
+  "regions": [
+    "gru1"
+  ],
   "functions": {
     "api/index.ts": {
       "maxDuration": 60
