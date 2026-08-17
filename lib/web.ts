@@ -129,6 +129,59 @@ async function latir(region: { id: string; tick: number }): Promise<boolean> {
   return true
 }
 
+/**
+ * El aviso de que te ganaste a alguien, por el camino de la web.
+ *
+ * Es el gemelo del `avisarConfianza()` de `tick.ts` y **tiene que decir
+ * exactamente lo mismo**: el mismo `kind`, el mismo texto, el mismo `detail` y
+ * los mismos dos umbrales. La gracia de que `pelear()` sea una sola función es
+ * que el mismo muerto produzca el mismo hecho venga por donde venga, y hasta
+ * hoy no lo hacía — matar un bicho por `POST /act` avisaba «Marta empezó a
+ * confiar en Fulano» y matarlo desde el cliente 3D, que es el camino principal
+ * del juego, no avisaba nada. Con +8 de aprecio por muerto, desde cero se cruza
+ * `UMBRAL_ENCARGO` siempre, así que el aviso que faltaba no era un caso raro:
+ * era el primero que le pasa a cualquiera que pelee.
+ *
+ * Y no es un capricho de simetría: `DISENO.md` §9.3 pide que la reputación sea
+ * **legible**. Si te ganaste a alguien y el juego no te lo dice, subir la
+ * confianza es superstición — el mismo motivo por el que nunca te enterás de
+ * que un pueblo te odia chocándote contra una puerta cerrada.
+ *
+ * La única diferencia con el del tick es dónde cae el evento, y es la misma que
+ * `combate.ts` ya resuelve para los suyos con su `emitir()`: el tick junta todo
+ * en un sumidero `ev` y lo inserta al cerrar el día; acá no hay ese final, así
+ * que se escribe en el momento. El `tick` que se le pasa es `region.tick + 1`
+ * por lo mismo que el resto de este archivo — ver el comentario de
+ * `POST /pelear`.
+ *
+ * Se emite en la TRANSICIÓN y nada más: cruzar el escalón, no cada vez que sube
+ * el aprecio. Los umbrales se importan de `tick.ts` y no se copian, por lo que
+ * dice el comentario del import.
+ */
+async function avisarConfianza(
+  regionId: string, tick: number,
+  person: { name: string; place_id: string | null },
+  player: { name: string },
+  antes: number, ahora: number,
+) {
+  const cruzo = (u: number) => antes < u && ahora >= u
+  const e = cruzo(UMBRAL_ENSENAR)
+    ? {
+        summary: `${person.name} ya le confiaría a ${player.name} lo que sabe hacer.`,
+        detail: { person: person.name, player: player.name, abre: 'aprender' },
+      }
+    : cruzo(UMBRAL_ENCARGO)
+      ? {
+          summary: `${person.name} empezó a confiar en ${player.name}: ya le pediría un favor.`,
+          detail: { person: person.name, player: player.name, abre: 'encargarse' },
+        }
+      : null
+  if (!e) return
+  await db.from('events').insert({
+    region_id: regionId, tick, kind: 'confianza', place_id: person.place_id, ...e,
+  })
+}
+
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 
@@ -410,7 +463,8 @@ export async function handler(
             .eq('region_id', region.id).eq('alive', true),
           db.from('objects').select('kind, quality, made_by')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
-          db.from('knows').select('knowledge:knowledge_id (name, makes, makes_at)')
+          db.from('knows')
+            .select('destreza, veces, learned_from, knowledge:knowledge_id (name, kind, makes, makes_at)')
             .eq('holder_kind', 'player').eq('holder_id', player.id),
           db.from('bonds').select('person_id, valued, feared').eq('toward_id', player.id),
           // Los otros jugadores. Sin esto no hay multijugador: hay gente
@@ -473,6 +527,29 @@ export async function handler(
           // técnica: llegás, no conocés a nadie, no sabés qué hay, y sin esto
           // el juego te deja parado en un campo. NO lo escribe un modelo —
           // sale del estado, así que nunca te manda a hacer algo imposible.
+          // Quién sos. Es lo que faltaba para el reclamo de "no hay stats":
+          // los stats de este juego SÍ existen, pero son lo que sabés y cuánta
+          // mano tenés en cada cosa — y eso vivía sólo en la base. Un sistema
+          // que el jugador no puede ver es un sistema que no existe.
+          vos: {
+            nombre: player.name,
+            saberes: (saberes.data ?? []).map((k) => {
+              const c = (k as unknown as { knowledge: { name: string; kind: string } | null }).knowledge
+              const d = (k as unknown as { destreza: number; veces: number; learned_from: string | null })
+              return {
+                nombre: c?.name ?? '?', tipo: c?.kind ?? '',
+                mano: mano(d.destreza), veces: d.veces,
+                maestro: (people.data ?? []).find((q) => q.id === d.learned_from)?.name ?? null,
+              }
+            }),
+            // Cómo te ve cada uno, en palabras. Nunca en números: un
+            // porcentaje de confianza rompe la ilusión de que son personas.
+            gente: (people.data ?? []).map((q) => ({
+              nombre: q.name, trade: q.trade,
+              comoTeVe: comoTeVe(vinculos.data?.find((v) => v.person_id === q.id)?.valued ?? 0),
+              teme: (vinculos.data?.find((v) => v.person_id === q.id)?.feared ?? 0) >= 25,
+            })),
+          },
           primeros_pasos: pasos({
             places: places.data ?? [],
           // Cada persona viene con cómo te trata. Es lo que contesta el
@@ -599,9 +676,18 @@ export async function handler(
         // el tick actual cae en un agujero y el que mató al bicho nunca se
         // entera de que lo mató. Con +1 entra en la ventana siguiente, igual
         // que cualquier otra cosa que pase ese día.
+        const tick = found.region.tick + 1
         const r = await pelear({
-          regionId: found.region.id, tick: found.region.tick + 1,
+          regionId: found.region.id, tick,
           player: found.player, threatId: f.get('id'),
+          // El aviso de que te ganaste a alguien. Lo pasa el tick desde su
+          // `case 'pelear'` y hasta hoy no lo pasaba nadie acá, así que el
+          // camino que más se usa —el cliente 3D— era el único que no te
+          // avisaba nunca. Mismo texto y mismos umbrales que el del tick; la
+          // única diferencia es que se escribe en el momento porque acá no hay
+          // un cierre de día donde volcar un sumidero.
+          avisarVinculo: (t, antes, ahora) =>
+            avisarConfianza(found.region.id, tick, t, found.player, antes, ahora),
         })
         // Y acá el mundo late, si le toca. Va DESPUÉS del golpe a propósito:
         // el golpe se escribe con `region.tick + 1` y el tick cierra ese
@@ -985,4 +1071,20 @@ function actitud(
     ]),
     animo: 'neutral', ensena: false,
   }
+}
+
+/** Cuánta mano tenés en algo, en palabras.
+ *
+ * En números no: el diseño prohíbe mostrarle porcentajes al jugador, y con
+ * razón — "forja simple 47%" convierte un oficio en una barra de progreso, que
+ * es justo lo que este juego no quiere ser. Los cortes siguen la curva real de
+ * `mejora()` en tick.ts, donde las primeras veces suben mucho y de 80 para
+ * arriba cada punto cuesta.
+ */
+function mano(destreza: number): string {
+  if (destreza < 12) return 'recién empezás'
+  if (destreza < 30) return 'te sale, con esfuerzo'
+  if (destreza < 55) return 'le tenés la mano'
+  if (destreza < 78) return 'te sale bien'
+  return 'sos de los que saben'
 }

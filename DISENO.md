@@ -228,6 +228,65 @@ Si una mazmorra sólo le sirve al que pelea, falta la mitad.
   trabajo del director y lo que mantiene viable mobile alguna vez.
 - El entorno tiene que encantar. **La luz hace ese trabajo, no los polígonos.**
 
+### Dirección de arte: estilizado, y comprometido
+
+**Decidido el 17 de agosto de 2026.** El juego es **estilizado**, con todas las
+letras. No es una concesión al rendimiento ni un paso intermedio hacia algo más
+realista: es la dirección.
+
+El motivo no es el peso. El peso ya se atacó por otro lado —tres niveles de
+calidad, el terreno remuestreado, el pasto en baldosas— y no era el problema.
+El motivo es éste, y hay que dejarlo escrito porque es la frase que impide que
+la decisión se erosione:
+
+> **Hoy el juego no es realista ni estilizado: es indeciso, y eso es
+> exactamente lo que se lee como Playmobil.** Playmobil no se ve mal por ser
+> estilizado. Se ve mal por ser **plástico de color plano bajo una luz que
+> pretende ser real**. Minecraft y Stardew son mucho más simples que esto y no
+> se ven baratos, porque están comprometidos con una decisión. Lo que se lee
+> como barato no es la simpleza: es la indecisión.
+
+Y encaja con la referencia central que ya está en §4: **Frieren es plano y
+cálido, y no por eso se siente pobre.**
+
+Las tres consecuencias, que son lo que usa quien trabaja:
+
+1. **El color es una decisión de diseño, no una aproximación a lo real.** Un
+   techo no es marrón porque la teja sea marrona: es el valor y el matiz que
+   necesita para separarse del pasto y de la montaña a veinte metros. **Eso le
+   da a la paleta autoridad sobre todo lo demás** — si un color "correcto" no
+   separa, el correcto está mal.
+2. **La silueta hace el trabajo pesado**, que además es lo único que se lee a la
+   distancia a la que se juega. Es la misma decisión que el piso de zoom:
+   silueta, postura y ropa, nunca la expresión.
+3. **Es más barato de hacer y de correr.** No es una concesión: es la misma
+   dirección vista desde el costo.
+
+Esto vale para las cuatro ramas de arte —paleta, vegetación, arquitectura y
+cuerpos— y **las cuatro tienen que trabajar con el mismo criterio o se rompe**.
+Una rama que apunta a lo real mientras las otras tres estilizan reproduce la
+indecisión que esta decisión existe para terminar.
+
+**Y hay mallas hechas por una persona, no sólo geometría generada por código.**
+Decidido el 17 de agosto, después de *"parece un juego choto"*: la geometría
+primitiva por código tiene un techo y ya se había tocado — **el pasto eran conos
+verdes porque eran conos verdes.** Entraron 80 mallas CC0 de Kenney.
+
+> **Un solo autor, y es la parte que no se negocia.** Mezclar packs de artistas
+> distintos se ve **peor** que las cajas, porque **la incoherencia se lee como
+> error y lo simple se lee como decisión.** Es la misma regla que la paleta,
+> aplicada a la geometría: lo que hace que un mundo se vea diseñado no es que
+> cada pieza sea linda, es que todas salgan de la misma cabeza.
+
+Lo que **no** cambia con esto: las piezas se **arman**, no se repiten. Las siete
+casas de la aldea son combinaciones distintas de los mismos módulos, sorteadas
+con semilla por lugar para que Vado Bajo sea el mismo en la pantalla de todos.
+Es §10.1 —*por partes, no por vóxeles*— con piezas de verdad en vez de cubos.
+
+Y el criterio para sumar assets nuevos, que sale de lo mismo: **del mismo autor,
+CC0, y con la procedencia archivada** (`assets/PROCEDENCIA.md`, con URL y md5 de
+cada zip). Un pack de otro artista no es un atajo, es empezar de nuevo.
+
 ### Control
 - La habilidad es del jugador con teclado y mouse. **No** veinte mil hechizos
   en barras tipo Diablo 2.
@@ -406,6 +465,37 @@ propósito. Absorber de un artefacto o un cadáver es saber sin maestro, y **una
 runa escrita en lengua muerta** es saber que está ahí y nadie puede leer
 (§12.3). Lo que no existe es la receta genérica que se roba de un cofre y
 funciona.
+
+### 8.2b El saber es la puerta, no el juego
+
+Corrección importante, y la hizo la dirección del proyecto cuando el documento
+ya estaba escrito:
+
+> *"No es sólo el saber. El saber es aprender cosas, pero después hay que
+> ponerlas en práctica: construir, hacer casas, cocinar, viajar, ir a mazmorras
+> y matar bosses, guerras de magia."*
+
+El documento venía diciendo que el corazón del juego es la economía del
+conocimiento, y eso es cierto **como motor**: es lo que hace que la gente
+importe, que morirse cueste, que enseñar sea una decisión. Pero un motor no es
+un juego. **Aprender a forjar no vale nada si después no hay nada que forjar,
+para nadie, en ningún lado.**
+
+Entonces la forma correcta de decirlo es:
+
+> El saber es **lo que te habilita**. Lo que hacés con él es el juego.
+
+Y de ahí sale una prueba que conviene aplicarle a cada saber nuevo antes de
+agregarlo: **¿qué te deja hacer que antes no podías?** Si la respuesta es "sube
+un número" o "aparece en tu ficha", el saber no está terminado. Ya pasó una vez
+en este proyecto y se lo anotó con estas palabras: *"aprendés a forjar y
+después no podés forjar nada"* — el saber era el corazón del juego y no hacía
+nada.
+
+La lista de lo que hay que poder hacer, que es la que ordena el trabajo:
+construir y hacer casas, cocinar, viajar, entrar a mazmorras y enfrentar algo
+grande al fondo, y pelear con magia. **Nada de eso sale del saber solo: el
+saber es lo que te deja empezar.**
 
 ### 8.3 La progresión, en tres reglas
 
@@ -662,6 +752,47 @@ te contesta en personaje, pero **el campo de texto libre no mueve estado; las
 opciones sí**, y las opciones se derivan del estado, no del modelo.
 
 ---
+
+### La gente vive su propia vida
+
+Ésta es la diferencia entre un mundo y un decorado, y hoy no está.
+
+**Los NPCs usan los mismos verbos que vos.** No una simulación aparte: los
+mismos. Ilde no "avanza un 12% en juntar carbón" — Ilde **va** a la Casa
+Quemada, **busca**, y **vuelve** con carbón, o vuelve con las manos vacías, o
+no vuelve. Cuando el jugador y el NPC juegan con las mismas reglas, todo lo
+que pasa es legible: te la cruzás en el camino y sabés a qué fue.
+
+**Salen de aventura y entran a las mazmorras.** Una mazmorra no es contenido
+que espera al jugador: es un lugar peligroso donde quedó algo, y cualquiera
+puede ir. Un NPC puede armar una expedición, llevarse a alguien, y **no
+volver**. Cuando eso pasa, se lleva lo que sabía — y ahí el tema del juego deja
+de ser una frase y es algo que te pasó sin que estuvieras.
+
+**Deciden.** No al azar y no por un modelo que juega el turno por ellos: eligen
+entre lo que su estado permite, con lo que quieren y con lo que les falta. Un
+aprendiz que le debe algo a alguien y ve una forma de saldarlo la toma. Uno que
+te tiene miedo se va del lugar cuando llegás.
+
+**De dónde salen las metas nuevas.** Hoy de una lista fija de dos por oficio, y
+es el techo del sistema: se repiten. Acá entra **el autor del mundo**, y hay
+que ser preciso con qué es y qué no es, porque roza el invariante 1:
+
+> La simulación produce las condiciones; el autor escribe el desenlace; el
+> director lo cuenta.
+
+- **La simulación no usa IA y no va a usarla.** Las simulaciones no producen
+  dragones: producen desigualdad, escasez y muertos.
+- **El autor corre cada tanto** —cada varios días del valle, no cada tick— lee
+  lo que pasó, y **escribe hechos nuevos en la base**: una meta que sale de lo
+  que ese valle perdió, un pueblo que se enoja porque le talaron el claro, una
+  figura que aparece porque murieron tres maestros seguidos. **No narra:
+  siembra.** Después la simulación los ejecuta sola, determinista.
+- Que corra cada tanto no es un ahorro, es lo que lo hace bueno: **un mundo
+  donde algo grande pasa todos los días no tiene nada grande.**
+
+Y el límite que lo mantiene honesto: el autor puede sembrar metas, pueblos y
+tensiones. **No puede decidir que algo ya pasó.** Lo que pasó lo decide el tick.
 
 ## 10. Vivir ahí
 
@@ -1057,13 +1188,26 @@ encuadra y las pone donde las veas.
 Ninguna la resuelve un agente por su cuenta, y las tres bloquean trabajo que ya
 está empezado.
 
-Quedan dos. La tercera —**el piso de zoom**— se cerró el 17 de agosto y está
-en §6: silueta, postura y ropa, nunca la expresión. **No la reabras.**
+**Queda una.** Las otras dos se cerraron el 17 de agosto y están en §6: el
+**piso de zoom** (silueta, postura y ropa, nunca la expresión) y la **dirección
+de arte** (estilizado, y comprometido). **No las reabras.**
 
 | # | Decisión | Por qué bloquea | Recomendación sobre la mesa |
 |---|---|---|---|
 | 1 | **Control o teclado** | Cambia el sistema de magia **desde la raíz**. Dibujar runas con un stick es horrible. No es una opción de accesibilidad que se agrega después. | Si va control, la magia son **secuencias o radiales, nunca trazos**. |
-| 2 | **Dirección de arte: quién** | Ningún agente sostiene una dirección de arte: no es una tarea, es un criterio. **La coherencia es lo que se lee como "muy lindo", no la novedad.** | Una persona con gusto decide y no se suelta. la dirección del proyecto o alguien que contrate. |
+
+> **Por qué la dirección de arte sale de esta tabla.** El renglón decía:
+> *"ningún agente sostiene una dirección de arte: no es una tarea, es un
+> criterio"*. Ése era el problema real, y ya no está — **el criterio está
+> escrito** (§6: estilizado; el color decide separación, no imita materiales; la
+> silueta hace el trabajo) y **tiene instrumento y dueño**: la paleta, y el
+> agente `arte`, que es el único que decide un color.
+>
+> Lo que queda abierto es más chico y es de gusto, no de criterio: alguien con
+> ojo mirando capturas y diciendo *más de esto, menos de aquello*. Eso no
+> bloquea a nadie hoy, y **por eso deja de ser un bloqueante y pasa a ser
+> trabajo normal.** La coherencia sigue siendo lo que se lee como "muy lindo",
+> y ahora hay dónde sostenerla.
 
 > **Lo que enseñó cerrar la del zoom.** Estuvo abierta meses porque nadie la
 > sentía urgente, y mientras tanto la rama de arte no podía arrancar: su propio
@@ -1089,11 +1233,13 @@ llegue el momento.
   que se termina. Pocos y grandes, disparados por umbrales del mundo. **Nunca
   calendario fijo: eso los convierte en rutina.**
 
-*Tres preguntas que estuvieron acá mucho tiempo y ya están contestadas, para que
-nadie las reabra:* **"Friere" era Frieren** (§4), no Feist ni Paulo Freire. **La
-progresión está resuelta** en §8.3: sin techo en lo que sabés, límite natural
-en lo que llevás, y mejora en lo que usás. Y **el piso de zoom está decidido**
-en §6: silueta, postura y ropa; sin caras modeladas.
+*Cuatro preguntas que estuvieron acá mucho tiempo y ya están contestadas, para
+que nadie las reabra:* **"Friere" era Frieren** (§4), no Feist ni Paulo Freire.
+**La progresión está resuelta** en §8.3: sin techo en lo que sabés, límite
+natural en lo que llevás, y mejora en lo que usás. **El piso de zoom está
+decidido** en §6: silueta, postura y ropa; sin caras modeladas. Y **el look está
+decidido** en §6: estilizado y comprometido — el problema nunca fue la simpleza,
+fue la indecisión.
 
 ---
 
