@@ -98,9 +98,58 @@ jugable esa misma noche.**
   ninguna de las dos antes de que alguien que no sea Pedro vuelva tres días
   seguidos.
 
+### Plataforma
+- **Se baja y se instala.** PC primero: es lo único que aguanta la vista, la
+  luz y el mundo persistente sin recortarlo todo. Hoy es un `.exe` de Windows
+  que se abre con doble clic.
+- Web y mobile más adelante, y **como ventana al mismo mundo**, no como otro
+  juego. El servidor ya está pensado así: el cliente es reemplazable, el mundo
+  no. La primera versión jugable fue web y se tiró; el mundo siguió igual.
+
+### Stats
+- Hay stats, y mejoran. **Pero no son la progresión.** La progresión es lo que
+  sabés y a quién conocés. Un personaje con stats altos y sin saberes no puede
+  hacer nada; uno con saberes y stats bajos hace todo, peor.
+- Un stat alto es **afinidad**: aprendés más rápido, te sale más limpio, tenés
+  más aura. Nunca es una puerta cerrada.
+- Esto es a propósito y va contra lo que hace el género: si la progresión son
+  los números, el juego es grindeo. Si es el conocimiento, el juego es la gente.
+
+### Regenerativo
+- El mundo se recompone. Un valle que perdió a su herrera puede volver a tener
+  forja si alguien la aprende afuera y la trae. **Nada se pierde para siempre a
+  nivel del mundo; sí a nivel de esa gente y de ese lugar.**
+- Esa es la diferencia con un survival de saqueo: acá lo que se destruye deja un
+  hueco que otro puede llenar, y llenarlo es contenido.
+
+### Referencias
+- **Stardew / Minecraft / Baldur's Gate** — la vista y la cámara.
+- **No Lights No Fire** (los de No Man's Sky) — tienen algo de lo que buscamos.
+- **Ashes of Creation** — el ejemplo de qué NO hacer: prometer todo, entregar
+  nada jugable. Empezar simple y que el roadmap crezca con los jugadores.
+
 ---
 
-## 4. Los cuatro invariantes
+## 4. Cómo se trabaja
+
+Reglas operativas, no de diseño. Son igual de firmes.
+
+- **Los dos repos son públicos y no se filtra nada.** Ni claves, ni tokens, ni
+  cadenas de conexión. Antes de cada push se revisa. Ya casi se nos escapa una
+  contraseña de base en `supabase/.temp/pooler-url`.
+- **La infraestructura no se le devuelve al usuario.** Los CLI de Supabase,
+  Vercel y GitHub están logueados. Crear proyectos, correr migraciones y
+  desplegar es trabajo nuestro. La única excepción legítima es un OAuth
+  inicial.
+- **El costo de la API se mide, no se estima.** Hoy el default es
+  `claude-haiku-4-5`. Ya encontramos que la densidad de una crónica era un
+  problema de prompt y no de modelo: bajó 8× el costo sin perder calidad.
+- **Medí antes de afirmar.** Este proyecto ya tuvo tres veces la conclusión
+  obvia equivocada.
+
+---
+
+## 5. Los cuatro invariantes
 
 No se negocian. Existen porque sin ellos el proyecto se convierte en otra cosa
 sin que nadie lo note.
@@ -125,7 +174,7 @@ escribe en la base o es una demo.
 
 ---
 
-## 5. La pregunta sin contestar
+## 6. La pregunta sin contestar
 
 **¿El director de IA es divertido?**
 
@@ -140,7 +189,7 @@ la pena tenerlo presente cada vez que se agrega algo grande.
 
 ---
 
-## 6. Cómo se decide cuando esto no alcanza
+## 7. Cómo se decide cuando esto no alcanza
 
 En orden:
 

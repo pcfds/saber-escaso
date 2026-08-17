@@ -12,6 +12,7 @@ import { db, getRegion } from './db.js'
 import { step } from './world/tick.js'
 import { narrate } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
+import { pelear } from './world/combate.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
 const esc = (s: string) =>
@@ -266,6 +267,13 @@ export async function handler(
           },
           player: { name: player.name, place_id: player.place_id },
           places: places.data ?? [], people: people.data ?? [],
+          amenazas: (amenazas.data ?? []).map((a) => ({
+            id: a.id, kind: a.kind, health: a.health, max_health: a.max_health,
+            place_slug: slugDe(a.place_id),
+          })),
+          // `made_by` es el nombre y no el id a propósito: el que lo forjó se
+          // muere y el objeto tiene que seguir diciendo quién fue.
+          objetos: objetos.data ?? [],
         })
       }
 
@@ -279,6 +287,22 @@ export async function handler(
         })
         await step()
         return back(token)
+      }
+
+      // El golpe no se encola: se resuelve acá y devuelve el resultado. Ver
+      // el porqué en world/combate.ts — resumido, una acción encolada tarda
+      // hasta una hora en resolverse y el combate es lo único que no aguanta
+      // eso. El evento queda escrito igual, así que el director lo puede
+      // narrar: si no está en `events`, no pasó.
+      if (req.method === 'POST' && parts[2] === 'pelear') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const f = await body(req)
+        const r = await pelear({
+          regionId: found.region.id, tick: found.region.tick,
+          player: found.player, threatId: f.get('id'),
+        })
+        return json(r)
       }
 
       if (req.method === 'POST' && parts[2] === 'hablar') {

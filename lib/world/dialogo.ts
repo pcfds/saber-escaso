@@ -15,19 +15,37 @@ import { db, getRegion } from '../db.js'
 
 const anthropic = new Anthropic()
 
-const SYSTEM = `Sos un habitante de un valle de fantasía hablándole a alguien
-que se te acercó. Te doy quién sos, qué estás persiguiendo, qué sabés y qué
-recordás de esta persona.
+// Acá no se declara ningún acento a propósito. Cuando el prompt decía "español
+// rioplatense", el modelo lo tomaba como la única instrucción de estilo y
+// aplicaba el mismo barniz a los siete habitantes: un valle de porteños
+// intercambiables. El acento es lo de menos. Lo que distingue a una herrera de
+// sesenta que trabaja sola de un chico de doce que habla encima del otro es el
+// largo de la frase, qué preguntan, y de qué no hablan nunca. Todo eso viene de
+// `people.voice`, por persona, y el system prompt sólo se ocupa de obedecerlo.
+const SYSTEM = `Sos una persona concreta de un valle de fantasía, en el medio de
+tu día, y alguien se te acercó. Te doy quién sos, cómo hablás, de dónde venís,
+qué perseguís, qué sabés, qué recordás de esta persona y qué se dijeron las
+últimas veces.
 
-Decí UNA o DOS frases. Cortas. En español rioplatense. Como habla alguien que
-está en el medio de su día y levanta la vista, no como un personaje que espera
-a que le hablen.
+Decí UNA o DOS frases, salvo que CÓMO HABLÁS diga otra cosa.
+
+CÓMO HABLÁS manda sobre todo lo demás. El largo de la frase, el registro, las
+muletillas, el trato, y sobre todo de qué NO hablás, salen de ahí y de ningún
+otro lado. No hay un tono neutro del valle al que volver. Si tu voz dice que
+contestás con tres palabras, contestás con tres palabras aunque te pregunten
+algo largo.
 
 REGLAS:
 - Sólo podés mencionar cosas que están en los datos que te doy. Nada inventado.
+- No hables como narrador ni te describas desde afuera. No pongas acotaciones
+  entre asteriscos ni entre paréntesis. Sale sólo lo que decís en voz alta.
 - Si no confiás en esta persona, se nota. Si te cae bien, también.
-- Si recordás algo puntual de ella, mencionalo — eso es lo que la hace sentir
-  vista.
+- Lo que ya se dijeron pasó de verdad y lo tenés presente. Si te contó algo, lo
+  sabés; no se lo vuelvas a preguntar. Si te preguntan si te acordás, contestá
+  con el dato, no con "sí, me acuerdo".
+- Sos el mismo de la charla anterior. Lo que perseguís y lo que pensás de esta
+  persona no cambia porque sí: cambia si pasó algo, y lo que pasó está en los
+  datos.
 - Si estás trabado en lo que perseguís, es lo primero que se te sale por la boca.
 - Nunca digas números, porcentajes, ni nombres de sistemas. Nada de "confianza
   35". Se dice "todavía no te conozco".
@@ -61,12 +79,16 @@ export async function hablarCon(
 ): Promise<Dialogo> {
   const region = await getRegion()
 
+  // `.limit(1)` antes del maybeSingle porque el ilike puede pescar dos: con más
+  // de una fila supabase-js devuelve error y `data` viene null, y el jugador
+  // vería "no hay nadie llamado Ilde" justo cuando hay dos.
   const { data: npc } = await db.from('people')
-    .select('id, name, trade, disposition, teaches, place_id')
-    .eq('region_id', region.id).eq('alive', true).ilike('name', npcName).maybeSingle()
+    .select('id, name, trade, disposition, teaches, place_id, voice, historia')
+    .eq('region_id', region.id).eq('alive', true).ilike('name', npcName)
+    .limit(1).maybeSingle()
   if (!npc) throw new Error(`No hay nadie llamado ${npcName} por acá.`)
 
-  const [agendas, sabeNpc, sabeJug, vinculo, memorias] = await Promise.all([
+  const [agendas, sabeNpc, sabeJug, vinculo, memorias, charlas, sucesos] = await Promise.all([
     db.from('agendas').select('goal, state').eq('person_id', npc.id).in('state', ['activa', 'bloqueada']),
     db.from('knows').select('knowledge:knowledge_id (name)')
       .eq('holder_kind', 'person').eq('holder_id', npc.id),
@@ -76,6 +98,19 @@ export async function hablarCon(
       .eq('person_id', npc.id).eq('toward_id', playerId).maybeSingle(),
     db.from('memories').select('what, tick').eq('person_id', npc.id)
       .eq('about_id', playerId).order('tick', { ascending: false }).limit(6),
+    // Las últimas cinco líneas de este par y nada más. Cada charla es una
+    // llamada a Haiku: meter la conversación entera la vuelve cara y lenta, y
+    // para "acordarse de que venís del norte" con cinco alcanza. Lo viejo no se
+    // pierde — queda en la tabla y se puede resumir a una memoria más adelante.
+    db.from('talks').select('said, replied').eq('person_id', npc.id).eq('player_id', playerId)
+      .order('created_at', { ascending: false }).limit(5),
+    // Lo que le pasó a ESTA persona en el mundo. Es el permiso para cambiar: un
+    // NPC puede haber cambiado de idea desde la última charla, pero tiene que
+    // ser porque murió alguien o se cumplió una agenda, no porque el modelo
+    // tiró otro dado. Si no hay eventos suyos, no hay motivo para cambiar.
+    db.from('events').select('summary, tick').eq('region_id', region.id)
+      .or(`detail->>person.eq."${npc.name}",detail->>from.eq."${npc.name}",detail->>to.eq."${npc.name}"`)
+      .order('tick', { ascending: false }).limit(4),
   ])
 
   const nombres = (r: { data: unknown[] | null }) =>
