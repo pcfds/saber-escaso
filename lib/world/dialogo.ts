@@ -17,10 +17,8 @@
  * genérico, se olvida de vos, o cambia de idea sin motivo, el arreglo va en una
  * de esas tres — no en agregarle otra línea al system prompt.
  */
-import Anthropic from '@anthropic-ai/sdk'
 import { db, getRegion } from '../db.js'
-
-const anthropic = new Anthropic()
+import { pedirJson } from '../modelo.js'
 
 // Acá no se declara ningún acento a propósito. Cuando el prompt decía "español
 // rioplatense", el modelo lo tomaba como la única instrucción de estilo y
@@ -196,18 +194,18 @@ export async function hablarCon(
     ? `${ctx}\n\n${playerName} te dice: "${dicho_por_el_jugador}"\nContestale a eso, en personaje. ${cierre}`
     : `${ctx}\n\n${playerName} se te acercó y no dijo nada todavía. ${cierre}`
 
-  const res = await anthropic.messages.create({
-    model: process.env.DIALOGO_MODEL ?? 'claude-haiku-4-5',
-    max_tokens: 600,
-    output_config: { format: { type: 'json_schema', schema: SCHEMA } },
+  // Cada charla es una llamada suelta y barata: sin `esfuerzo`, porque una o
+  // dos frases en personaje no mejoran por pensarlas más, y con `respaldo`,
+  // porque si el modelo no devuelve nada el NPC murmura y la charla sigue.
+  // Dejar al jugador plantado frente a alguien que no contesta es peor.
+  const { datos: dicho } = await pedirJson<{ saludo: string; animo: string }>({
+    modelo: process.env.DIALOGO_MODEL ?? 'claude-haiku-4-5',
+    maxTokens: 600,
+    schema: SCHEMA,
     system: SYSTEM,
-    messages: [{ role: 'user', content: contenido }],
+    prompt: contenido,
+    respaldo: { saludo: '…', animo: 'neutral' },
   })
-
-  const raw = res.content.find((b) => b.type === 'text')
-  const dicho = raw && raw.type === 'text'
-    ? (JSON.parse(raw.text) as { saludo: string; animo: string })
-    : { saludo: '…', animo: 'neutral' }
 
   // Guardar el intercambio es lo que convierte al NPC en alguien y no en un
   // botón que devuelve texto. Va después del modelo y no antes porque recién

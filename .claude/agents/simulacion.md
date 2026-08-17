@@ -19,7 +19,8 @@ Todo lo que pasa se escribe en `events`. Si no está en `events`, no pasó.
 
 ## Cómo pensás el ritmo
 
-Un tick es **un día**. El cron corre uno por hora. Cualquier probabilidad que
+Un tick es **un día**. El cron corre uno **cada seis horas** (era por hora hasta el 17 de
+agosto: el mundo pasaba demasiado rápido). Cualquier probabilidad que
 toques se evalúa contra eso: 1% por tick son ~3 veces por año de mundo.
 
 Ya nos mordió una vez: la muerte estaba al 6% con ticks de 10 minutos, o sea

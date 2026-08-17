@@ -274,12 +274,17 @@ export async function handler(
         return json({
           region: {
             name: region.name, tick: region.tick,
-            // La hora del valle, en segundos. Un tick es un día y el cron
-            // corre uno por hora, así que la hora del valle es cuánto va
-            // corrida la hora del servidor. Sale de acá y no del reloj de
-            // cada máquina a propósito: dos personas conectadas al mismo
-            // tiempo tienen que ver el mismo atardecer.
-            momento_del_dia: (Date.now() % 3_600_000) / 1000,
+            // La hora del valle, en segundos dentro del día del valle.
+            //
+            // Un tick es un día y el cron corre uno cada SEIS horas, así que
+            // la hora del valle es cuánto va corrido el bloque de seis horas
+            // en curso. El módulo cae justo porque el cron dispara a las
+            // 00, 06, 12 y 18 UTC y la época Unix arranca a medianoche UTC.
+            //
+            // Sale de acá y no del reloj de cada máquina a propósito: dos
+            // personas conectadas al mismo tiempo tienen que ver el mismo
+            // atardecer.
+            momento_del_dia: (Date.now() % 21_600_000) / 1000,
           },
           // La vida viaja. Antes el cliente llevaba su propia `vida_jugador`
           // local que bajaba en tiempo real y se reseteaba sola: vos les

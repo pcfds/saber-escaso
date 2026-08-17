@@ -29,12 +29,24 @@ if (problems.length === 0) {
   if (region) ok.push(`región "${region.slug}" en el tick ${region.tick}`)
   else problems.push(`No existe la región "${REGION_SLUG}" — corré pnpm seed`)
 
-  const Anthropic = (await import('@anthropic-ai/sdk')).default
+  // El chequeo pasa por `modelo.ts` y no por el SDK: el proveedor es
+  // intercambiable y este archivo no tiene por qué saber cuál está puesto.
+  // Se pide algo mínimo — si contesta, la credencial sirve.
   try {
-    await new Anthropic().models.retrieve('claude-opus-5')
-    ok.push('la API de Anthropic responde')
+    const { pedirJson, proveedorActual } = await import('./modelo.js')
+    await pedirJson<{ ok: boolean }>({
+      system: 'Contestá el JSON pedido y nada más.',
+      prompt: 'Devolvé {"ok": true}.',
+      schema: {
+        type: 'object', properties: { ok: { type: 'boolean' } },
+        required: ['ok'], additionalProperties: false,
+      },
+      maxTokens: 32,
+      modelo: process.env.DIRECTOR_MODEL ?? 'claude-haiku-4-5',
+    })
+    ok.push(`la IA responde (${proveedorActual()})`)
   } catch (e) {
-    problems.push(`Anthropic no responde: ${(e as Error).message}`)
+    problems.push(`la IA no responde: ${(e as Error).message}`)
   }
 }
 

@@ -14,10 +14,8 @@
  *     adaptarse a dónde quedaron las cosas — su trabajo no es hacer que pasen
  *     cosas, es traerlas al campo de visión del jugador.
  */
-import Anthropic from '@anthropic-ai/sdk'
 import { db, getRegion } from '../db.js'
-
-const anthropic = new Anthropic()
+import { pedirJson } from '../modelo.js'
 
 const SYSTEM = `Sos el director de un mundo de fantasía persistente. Un jugador
 vuelve después de un rato y tenés que contarle qué pasó mientras no estaba.
@@ -82,13 +80,6 @@ const SCHEMA = {
 export type Cronica = {
   text: string; leidos: number; usados: number; inventados: string[]
   model: string; inTokens: number; outTokens: number; costUsd: number
-}
-
-/** Precio por millón de tokens (entrada / salida). */
-const PRECIOS: Record<string, [number, number]> = {
-  'claude-opus-5': [5, 25],
-  'claude-sonnet-5': [3, 15],
-  'claude-haiku-4-5': [1, 5],
 }
 
 export type Opciones = {
@@ -169,26 +160,19 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
     ? events.map((e) => `[${e.id}] tick ${e.tick} · ${e.kind} · ${placeName(e.place_id)} — ${e.summary}`).join('\n')
     : '(ninguno)'
 
-  const response = await anthropic.messages.create({
-    model,
-    max_tokens: 4000,
-    output_config: {
-      // Haiku 4.5 no acepta `effort` — mandárselo devuelve 400.
-      ...(model.startsWith('claude-haiku') ? {} : { effort }),
-      format: { type: 'json_schema', schema: SCHEMA },
-    },
-    system: SYSTEM,
-    messages: [{
-      role: 'user',
-      content: `MUNDO\n${mundo}\n\nHECHOS (los únicos que podés afirmar)\n${hechos}`,
-    }],
-  })
-
-  const raw = response.content.find((b) => b.type === 'text')
-  if (!raw || raw.type !== 'text') throw new Error('El director no devolvió texto.')
-  const chronicle = JSON.parse(raw.text) as {
+  // Sin `respaldo` a propósito: una crónica que no salió es un fallo y tiene
+  // que reventar acá. Inventarle un texto vacío al jugador sería peor, y
+  // taparía justo el modo de falla que el experimento busca medir.
+  const { datos: chronicle, inTokens, outTokens, costUsd } = await pedirJson<{
     text: string; used_event_ids: string[]; nothing_happened: boolean
-  }
+  }>({
+    modelo: model,
+    esfuerzo: effort,
+    maxTokens: 4000,
+    schema: SCHEMA,
+    system: SYSTEM,
+    prompt: `MUNDO\n${mundo}\n\nHECHOS (los únicos que podés afirmar)\n${hechos}`,
+  })
 
   // ── Auditoría: ¿narró algo que no pasó? ───────────────────
   const validos = new Set(events.map((e) => e.id))
@@ -205,17 +189,12 @@ export async function narrate(playerName: string, opts: Opciones = {}): Promise<
     await db.from('players').update({ last_seen_tick: region.tick }).eq('id', player.id)
   }
 
-  const inTok = response.usage.input_tokens
-  const outTok = response.usage.output_tokens
-  const [pIn, pOut] = PRECIOS[model] ?? [5, 25]
-  const costUsd = (inTok * pIn + outTok * pOut) / 1_000_000
-
   return {
     text: chronicle.text.trim(),
     leidos: events.length,
     usados: chronicle.used_event_ids.length,
     inventados,
-    model, inTokens: inTok, outTokens: outTok, costUsd,
+    model, inTokens, outTokens, costUsd,
   }
 }
 

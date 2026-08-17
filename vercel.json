@@ -5,7 +5,7 @@
     { "source": "/(.*)", "destination": "/api/index" }
   ],
   "crons": [
-    { "path": "/api/tick", "schedule": "0 * * * *" }
+    { "path": "/api/tick", "schedule": "0 */6 * * *" }
   ],
   "functions": {
     "api/index.ts": { "maxDuration": 60 },

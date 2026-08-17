@@ -85,9 +85,10 @@ gente → te enseñan más).
 - **Supabase:** proyecto `saber-escaso`, ref `yctlmtewnbqyfbojwzhi`, São Paulo.
   El CLI ya está logueado — **no le pidas al usuario que entre al dashboard.**
 - **Vercel:** desplegado en https://saber-escaso.vercel.app, cuenta `pcfds`.
-  El CLI ya está logueado. **Cron a `/api/tick` una vez por hora**
-  (`0 * * * *` en `vercel.json`). Un tick es un día del valle, así que ese
-  número es del que cuelgan TODAS las probabilidades del tick — este renglón
+  El CLI ya está logueado. **Cron a `/api/tick` cada seis horas**
+  (`0 */6 * * *` en `vercel.json`). Un tick es un día del valle, así que ese
+  número es del que cuelgan TODAS las probabilidades del tick — y cambió: era
+  cada hora hasta el 17 de agosto, y el mundo pasaba demasiado rápido — este renglón
   decía 10 minutos y era falso.
 - **Regiones:** producción apunta a **`valle-primero`**. `valle-pruebas` es
   donde se rompe y se arregla (`REGION_SLUG=valle-pruebas`). Verificalo antes

@@ -286,7 +286,8 @@ Consecuencias prácticas:
   depender del tiempo real transcurrido. Así nadie gana por estar sentado ahí.
   *Ver §16: hoy el código frena el mundo, no sólo el gasto.*
 - **El sol es el reloj del mundo.** Un tick es un día y el cron corre uno por
-  hora, así que una hora real es un día del valle y una vuelta entera del sol.
+  seis horas, así que **seis horas reales son un día del valle** y una vuelta
+  entera del sol.
   **La hora la manda el servidor**, no la máquina de cada uno: dos personas
   conectadas ven el mismo atardecer, y tu sesión de una hora tiene forma sola.
 - **La fase de la luna dice qué día va el valle.** Ocho días por vuelta. Mirás

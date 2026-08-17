@@ -15,7 +15,7 @@ memorias.
 
 ## Qué hace
 
-Un tick es un día del valle y el cron corre uno por hora, así que el mundo
+Un tick es un día del valle y el cron corre uno cada seis horas, así que el mundo
 avanza tengas la sesión abierta o no. En cada tick la gente persigue sus metas,
 se enseña oficios, se muere, y se cuenta lo que vio. El director lee lo que
 pasó y te lo narra cuando volvés.
@@ -25,6 +25,7 @@ supabase/schema.sql       el mundo: lugares, gente, saberes, agendas, vínculos,
 lib/world/tick.ts         simulación pura. step() es la unidad
 lib/world/director.ts     narrate(nombre) → crónica auditada
 lib/world/dialogo.ts      hablarle a un NPC; cada uno con su voz y su memoria
+lib/modelo.ts             la única puerta al modelo. el proveedor es una variable
 lib/world/combate.ts      un golpe. lo único que no espera al tick
 lib/web.ts                el servidor: landing, API del cliente 3D, crónica
 ```
@@ -65,8 +66,18 @@ pnpm tick           # avanzar un día
 pnpm dev            # el servidor, en localhost:3210
 ```
 
-Hace falta `ANTHROPIC_API_KEY` y las credenciales de Supabase en `.env.local`.
-El director corre con `claude-haiku-4-5` por default (`DIRECTOR_MODEL` para
-cambiarlo): son unos 0,009 dólares por crónica, contra 0,057 con Opus, y la
-densidad de hechos es casi la misma — resultó ser un problema de prompt y no de
-modelo.
+Hacen falta las credenciales de Supabase en `.env.local`, y las del proveedor
+de IA que uses.
+
+**No estamos atados a ningún proveedor.** Todas las llamadas al modelo pasan
+por `lib/modelo.ts` y el proveedor se elige con `PROVEEDOR_IA`; cambiar a lo
+más barato que dé la calidad necesaria tiene que ser esa variable, no una
+reescritura — el costo de la IA escala con la cantidad de jugadores y es uno de
+los riesgos anotados en `ROADMAP.md`. **Hoy hay uno solo implementado**,
+`anthropic`, que es el default: con eso, lo que hay que tener es
+`ANTHROPIC_API_KEY`.
+
+Qué modelo usa cada cosa sale de `DIRECTOR_MODEL` y `DIALOGO_MODEL`. El
+director corre con `claude-haiku-4-5`: son unos 0,009 dólares por crónica,
+contra 0,057 con Opus, y la densidad de hechos es casi la misma — resultó ser
+un problema de prompt y no de modelo.
