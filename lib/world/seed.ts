@@ -299,6 +299,66 @@ async function main() {
     })
   }
 
+  // ── La plata ──────────────────────────────────────────────────────────
+  //
+  // Tres mostradores y tres monedas, y las tres son geografía: **lo que acepta
+  // la aldea no vale del otro lado del valle** (`DISENO.md` §9.3b). Cruzar el
+  // valle es cambiar de plata, y eso es una razón para viajar.
+  //
+  // Ninguno se inventa: los tres salen de quién es cada uno.
+  //
+  //   · **Odila, en la aldea, con marcos.** «Cobra por adelantado y se acuerda
+  //     de quién no le pagó»; «mide en cosas y no en monedas». El mostrador de
+  //     la aldea era suyo desde antes de que existiera la palabra.
+  //   · **Ren, en la ruina, con cuentas de hueso.** Los de la Ceniza vivían en
+  //     la Casa Quemada antes de que se quemara. La que se quedó adentro es la
+  //     única que tiene lo que ellos aceptan, y no explica por qué.
+  //   · **Marta, en el bosque, con resina.** Es la única que entra al
+  //     Sotobosque sola y vuelve.
+  //
+  // Si el que atiende se muere, el mostrador queda cerrado y su moneda deja de
+  // circular en el valle. Es la tesis del juego aplicada a la plata.
+  const MOSTRADORES = [
+    { lugar: 'aldea', quien: 'Odila', moneda: 'marco', abre: 8, cierra: 20 },
+    { lugar: 'ruina', quien: 'La vieja Ren', moneda: 'hueso', abre: 9, cierra: 17 },
+    { lugar: 'bosque', quien: 'Marta', moneda: 'resina', abre: 7, cierra: 19 },
+  ]
+  const gente = new Map(((await db.from('people')
+    .select('id, name').eq('region_id', region.id)).data ?? [])
+    .map((p) => [p.name as string, p.id as string]))
+
+  for (const m of MOSTRADORES) {
+    const quien = gente.get(m.quien)
+    const donde = placeBySlug.get(m.lugar)
+    if (!quien || !donde) continue
+    await db.from('mostradores').insert({
+      region_id: region.id, place_id: donde, person_id: quien,
+      moneda: m.moneda, abre: m.abre, cierra: m.cierra,
+    })
+    // El que atiende tiene con qué comprarte lo que le lleves. **Es la única
+    // forma de que el jugador gane plata desde el primer día sin que nada
+    // aparezca de la nada**: la que cobrás sale de una bolsa que ya la tenía.
+    await db.from('bolsas').insert({
+      region_id: region.id, holder_kind: 'person', holder_id: quien,
+      moneda: 'marco', cantidad: 60,
+    })
+    if (m.moneda !== 'marco') {
+      await db.from('bolsas').insert({
+        region_id: region.id, holder_kind: 'person', holder_id: quien,
+        moneda: m.moneda, cantidad: 40,
+      })
+    }
+  }
+  // Y el resto del valle, con lo puesto. Nadie arranca rico: con una hoja
+  // templada rondando los veinte marcos, doce marcos no compran nada entero.
+  const conMostrador = new Set(MOSTRADORES.map((m) => gente.get(m.quien)))
+  await db.from('bolsas').insert([...gente.values()]
+    .filter((id) => !conMostrador.has(id))
+    .map((id) => ({
+      region_id: region.id, holder_kind: 'person', holder_id: id,
+      moneda: 'marco', cantidad: 12,
+    })))
+
   await db.from('events').insert({
     region_id: region.id,
     tick: 0,

@@ -68,16 +68,20 @@ lib/world/tick.ts         simulación pura. step() es la unidad
 lib/world/run.ts          tickea solo cada N segundos (local)
 lib/world/director.ts     narrate(nombre) → crónica auditada
 lib/world/actions.ts      las cinco acciones
+lib/world/mercado.ts      bolsas, precios y mostradores. Lo usan el tick Y la web:
+                          el precio de la vidriera y el de la caja tienen que ser
+                          el mismo número o el mercado miente
 lib/web.ts                servidor: handler exportado, sirve local y en Vercel
 api/index.ts, api/tick.ts entradas de Vercel
 ```
 
-**Quince verbos.** Este renglón decía "nueve" y llevaba días desactualizado —
-faltaban los de la magia y el de la cuajada, que ya estaban en producción:
+**Dieciocho verbos.** Este renglón decía "nueve" y llevaba días desactualizado
+—faltaban los de la magia y el de la cuajada, que ya estaban en producción— y
+después decía "quince", antes de los tres de la plata:
 
 - **Del mundo, encolables por `/act`:** `ir`, `hablar`, `trabajar`, `aprender`,
   `ensenar`, `pelear`, `encargarse`, `buscar`, `dar`, `soltar`, `levantar`,
-  `pedir`.
+  `pedir`, `vender`, `comprar`, `cambiar`.
 - **Inmediatos, con ruta propia** (`preparar`, `lanzar`, `tomar`): no esperan al
   tick porque un hechizo o una cuajada que tardan seis horas no son un hechizo
   ni una cuajada. Están igual en el CHECK.
@@ -105,6 +109,39 @@ sexto— y cada uno que entró después tuvo que ganarse el lugar:
   llegaba a tu mano si lo hacías o lo juntabas vos. Cierra el bucle en la
   dirección que faltaba, y **cuesta**: pedir baja el aprecio, así que no es un
   botón de "dame" (medido: tres frascos seguidos y al cuarto te dicen que no).
+
+- `vender`, `comprar` y `cambiar` porque **el valle no tenía plata**, y este
+  archivo decía que era a propósito. Era una lectura, no una decisión, y
+  `DISENO.md` §9.3b ya la corrigió: *"debe haber economía: vender, poder tener
+  plata de distintos tipos, intercambios"*. Un mercado no diluye la tesis del
+  saber escaso — **la afila**, porque pone al lado una cosa que sí se puede
+  comprar. Podés comprar una hoja templada; no podés comprar saber hacerla, y
+  el día que se muera la última herrera vas a tener la plata en la mano y no va
+  a haber una hoja nueva ni al triple. **Un mercado sabe decir "no hay" de una
+  manera que un menú no.**
+
+  Tres reglas duras que salen de ahí y no se negocian:
+
+  1. **Ninguna transacción termina con una fila nueva en `knows`.** Ni comprar,
+     ni vender, ni pagar una lección. Se paga para que alguien te HAGA algo;
+     nunca para que te lo ENSEÑE. Medido: `knows` 0 → 0 a través de una compra
+     y de un «hacémelo».
+  2. **La plata de una región sólo AUMENTA cuando llega alguien de afuera.** La
+     única función que puede crearla es `acunar()` en `lib/world/mercado.ts`, y
+     la llaman dos lugares y los dos son llegadas por el Camino del Norte:
+     `llegaAlguien()` del tick y la creación de un jugador en `web.ts`. Es el
+     espejo exacto de `made_by = null`, que sólo lo escribe `case 'buscar'`.
+     Todo lo demás es transferencia y pasa por `pagar()`.
+  3. **El precio no es una lista de precios.** Sale de qué saber hay detrás, de
+     la calidad de la pieza y —la que importa— de **cuántas cabezas vivas
+     quedan que sepan hacerla**. Medido con una hoja q80: 16 marcos con tres
+     herreros, 25 con dos, 39 con uno, **62 sin ninguno y no hay ninguna que
+     comprar**.
+
+  Y una consecuencia de diseño que es la mitad del sistema: **un favor y un
+  pago no son lo mismo.** Regalar con `dar` lo que alguien necesitaba mueve el
+  aprecio +25; vendérselo, +3. El jugador elige cada vez entre la plata y la
+  gente, y como el saber sólo se consigue de la gente, cobrar tiene precio.
 
 **La línea que no se cruza, y está en los datos y no en un comentario:**
 `objects.made_by = null` significa que nadie lo hizo, y lo único en todo el

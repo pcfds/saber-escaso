@@ -5,10 +5,10 @@
  * el director no lo puede contar. Esa separación es el experimento entero:
  * si algún día este archivo importa el SDK de Anthropic, se rompió.
  *
- * **Los dos únicos imports de este archivo son `../db.js` y `./combate.js`, y
- * `combate.ts` importa sólo `../db.js`.** El invariante se rompe igual de
- * rebote que de frente, así que la cadena entera se mira antes de agregar un
- * import acá: dos archivos, un solo destino, y ninguno de los dos toca un SDK
+ * **Los tres únicos imports de este archivo son `../db.js`, `./combate.js` y
+ * `./mercado.js`, y los dos importan sólo `../db.js`.** El invariante se rompe
+ * igual de rebote que de frente, así que la cadena entera se mira antes de
+ * agregar un import acá: tres archivos, un solo destino, y ninguno toca un SDK
  * de modelo.
  *
  *   pnpm tick        avanza un tick
@@ -30,6 +30,19 @@ import { db, getRegion } from '../db.js'
 import {
   pelear, recibirGolpe, recordar, tocarVinculo as escribirVinculo, conA,
 } from './combate.js'
+// La plata, los precios y el mostrador. Está afuera por el mismo motivo que el
+// golpe: `lib/web.ts` necesita el MISMO precio para pintar la vidriera en
+// `/mundo`, y el día que el precio se calcule en dos lados, el que ves y el que
+// te cobran dejan de ser el mismo número.
+//
+// ⚠ Nada de lo que hay ahí adentro escribe en `knows`, y no puede. Ninguna
+//   transacción de este juego termina con una fila nueva de saber: se paga para
+//   que alguien te HAGA algo, nunca para que te lo ENSEÑE (DISENO §9.3b).
+import {
+  MONEDA_DEL_VALLE, acunar, bolsaDe, cotizacion, enPlata, monedaDe, monedas,
+  mostradores, pagar, precio, seFabricaTodavia, tarifas,
+  type Mostrador,
+} from './mercado.js'
 
 type Ev = {
   region_id: string
@@ -874,7 +887,12 @@ export async function resolverAcciones(args: {
     if (!mia?.length) continue
 
     const outcome = await resolveAction(region.id, tick, player, action, {
-      people: mundo.people, places: mundo.places, ev, yaHablaron,
+      // `players` viaja porque los precios lo necesitan: cuántos saben hacer
+      // una cosa en este valle cuenta a los jugadores igual que a los NPCs, y
+      // si el único herrero que queda es un jugador, la hoja no vale como si no
+      // quedara ninguno. Ya estaba leído — no hay consulta nueva.
+      people: mundo.people, players: mundo.players, places: mundo.places,
+      ev, yaHablaron,
     })
     await db.from('actions').update({ outcome }).eq('id', action.id)
     // `last_action_tick`, NO `last_seen_tick`. Actuar no es que te hayan
@@ -3104,6 +3122,32 @@ async function seMuere(args: {
       left_by: muerto.name, left_tick: tick,
     }).eq('holder_kind', 'person').eq('holder_id', muerto.id)
   }
+
+  // 6. **Y si atendía un mostrador, el mostrador queda cerrado.**
+  //
+  //    Con él se va del valle la moneda que ese puesto aceptaba: si la única
+  //    que cambiaba resina era Marta, cuando se muere Marta el Sotobosque
+  //    vuelve a estar del otro lado de una moneda que nadie tiene. **Eso no es
+  //    un bug, es la tesis del juego aplicada a la plata** — la misma que dice
+  //    que cuando se va la última herrera no hay una hoja nueva ni al triple.
+  //
+  //    No se reasigna a otro del valle a propósito. Lo reabre el que llegue por
+  //    el Camino del Norte, que es por donde entra todo lo que entra acá.
+  //
+  //    Sin evento: la muerte ya se contó y `perdida_de_saber` también. La
+  //    noticia de que el puesto está cerrado la da el puesto cerrado.
+  await db.from('mostradores')
+    .update({ person_id: null }).eq('person_id', muerto.id)
+
+  //    Y la plata que llevaba encima **desaparece del valle con ella.** Es la
+  //    contracara de que sólo entre por el norte, y la que hace que el
+  //    circulante no crezca solo hasta volverse decorado: se muere gente, se
+  //    va plata. Las cosas quedan tiradas y se pueden levantar; las monedas
+  //    que tenía en el bolsillo, no — nadie le revisa los bolsillos a un
+  //    muerto en este juego, y el día que alguien quiera hacerlo, va a ser un
+  //    verbo con su propio costo social y no una línea acá.
+  await db.from('bolsas')
+    .delete().eq('holder_kind', 'person').eq('holder_id', muerto.id)
 }
 
 /**
@@ -3389,6 +3433,40 @@ async function llegaAlguien(args: {
     born_tick: tick,
   }).select('id, name, trade, place_id').single()
   if (!nuevo) return false
+
+  // ── 5b. Y la plata que trae ───────────────────────────────
+  //
+  // **Éste es el único lugar del tick donde el valle tiene más plata que
+  // antes**, y es el espejo exacto de `objects.made_by = null`, que sólo lo
+  // escribe `case 'buscar'`. Si la plata apareciera en cualquier otro lado, la
+  // escasez se muere y el mercado pasa a ser un menú con números.
+  //
+  // Y tiene una sola puerta en la ficción, que es la misma por la que entra
+  // todo a este valle: **el Camino del Norte.** El marco de compañía no se
+  // acuña acá — lo trajeron los que vinieron de afuera, y cada uno trae lo que
+  // le quedaba. Un valle al que no llega nadie se queda sin circulante, y eso
+  // es exactamente lo que le pasa a un valle al que no llega nadie.
+  await acunar(regionId, { kind: 'person', id: nuevo.id }, MONEDA_DEL_VALLE,
+    18 + roll(25))
+
+  // ── 5c. Y si hay un mostrador cerrado, lo abre ────────────
+  //
+  // Un mostrador queda cerrado cuando se muere el que atendía, y con él se va
+  // del valle la moneda que aceptaba. **No se reasigna solo entre los que ya
+  // están** —eso sería un grifo contra la escasez— pero el que llega de afuera
+  // sin nada que hacer sí se para atrás de un puesto que nadie atiende. Es el
+  // mismo mecanismo regenerativo que `por_llegar`: el valle no se recompone
+  // solo, se recompone porque llega gente.
+  const cerrado = ((await db.from('mostradores')
+    .select('id, place_id').eq('region_id', regionId).is('person_id', null)).data ?? [])[0]
+  if (cerrado) {
+    await db.from('mostradores')
+      .update({ person_id: nuevo.id }).eq('id', cerrado.id)
+    const donde2 = places.find((p) => p.id === cerrado.place_id)
+    ev({ kind: 'mostrador_abierto', place_id: cerrado.place_id,
+      summary: `${nuevo.name} se puso atrás del mostrador de ${donde2?.name ?? 'el valle'}, que estaba cerrado desde que no queda quien lo atendiera.`,
+      detail: { person: nuevo.name, place: donde2?.name ?? null } })
+  }
 
   // ── 6. Quién lo vio llegar ────────────────────────────────
   //
@@ -3917,6 +3995,9 @@ async function resolveAction(
   action: { verb: string; target: string | null },
   ctx: {
     people: (MundoDeAccion['people'][number])[]
+    /** Los de carne y hueso de esta región. Lo usan los precios: un saber que
+     *  sólo tiene un jugador sigue siendo un saber vivo del valle. */
+    players: { id: string; name: string }[]
     places: { id: string; name: string; slug: string; kind: string }[]
     ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
     /** Los pares que ya hablaron en esta tanda. Hace falta además del chequeo
@@ -3928,7 +4009,7 @@ async function resolveAction(
     yaHablaron?: Set<string>
   },
 ): Promise<string> {
-  const { people, places, ev } = ctx
+  const { people, players, places, ev } = ctx
   const target = action.target?.toLowerCase() ?? ''
   const norm = (s: string) => s.toLowerCase()
 
@@ -4651,6 +4732,35 @@ async function resolveAction(
       const cosa = cands.sort((a, b) => b.quality - a.quality)[0]!
       const quienLaDejo = cosa.left_by
 
+      // ── ¿Esto estaba tirado, o estaba EN VENTA? ────────────
+      //
+      // **El primer delito del valle**, y §9.3b decía exactamente cuándo
+      // conectarlo: *"el día que un objeto pueda quedar tirado en el suelo,
+      // robar existe. Ése es el momento de conectar la consecuencia, no
+      // antes."* Ese día fue el que entró el suelo; hoy hay mostrador, así que
+      // lo que está en el suelo de un lugar con mostrador y lo dejó el que
+      // atiende **es mercadería, y llevársela sin pagar es robar.**
+      //
+      // Nadie te lo impide físicamente, y es a propósito: §9.3 ya dice que el
+      // castigo no puede ser una celda. La pena es que el que te vio deja de
+      // enseñarte — y como el saber vive en gente mortal, **perder maestros es
+      // lo más caro que hay en este mundo.**
+      //
+      // Y hay dos robos distintos, que es lo que lo hace un sistema y no un
+      // castigo: **con el mostrador abierto y el tendero delante, te vio.** A
+      // la noche, con el puesto cerrado, no te vio nadie — el hecho queda
+      // igual en `events` (si no está en `events`, no pasó) pero sin nombre en
+      // la memoria de nadie y sin un punto de vínculo movido. El valle
+      // amanece con algo de menos y sin saber quién fue.
+      const puestos = await mostradores(regionId)
+      const puesto = puestos.find((m) => m.place_id === lugar.id)
+      const tendero = puesto?.person_id
+        ? people.find((p) => p.id === puesto.person_id) : undefined
+      const esMercaderia = !!tendero && quienLaDejo === tendero.name
+      const teVieron = esMercaderia && !!puesto
+        && despiertoA(horaDelValle(), puesto.abre, puesto.cierra)
+        && !!tendero && aca(tendero) && !duerme(tendero)
+
       // ⚠ `made_by` intacto. `left_by` y `left_tick` se limpian porque
       //   describen el estar tirado: dejarlos puestos haría que la bolsa dijera
       //   "la dejó Bruno" de algo que tenés en la mano.
@@ -4658,6 +4768,36 @@ async function resolveAction(
         holder_kind: 'player', holder_id: player.id,
         left_by: null, left_tick: null,
       }).eq('id', cosa.id)
+
+      if (esMercaderia && tendero) {
+        ev({ kind: 'robo', place_id: lugar.id,
+          summary: teVieron
+            ? `${player.name} se llevó ${cosa.kind} del mostrador de ${tendero.name} sin pagar, delante de ${tendero.name}.`
+            : `Del mostrador de ${tendero.name} en ${lugar.name} faltó ${cosa.kind}, y nadie vio quién se la llevó.`,
+          detail: {
+            player: teVieron ? player.name : null, person: tendero.name,
+            place: lugar.name, object: cosa.kind, quality: cosa.quality,
+            made_by: cosa.made_by ?? null, visto: teVieron,
+          } })
+        if (teVieron) {
+          await recordar(tendero.id, player,
+            `${player.name} se llevó ${cosa.kind} del mostrador de ${tendero.name} sin pagar`, tick)
+          // El precio del robo es social y es caro: el aprecio se cae por
+          // abajo de todos los umbrales que abren verbos, y el miedo sube. No
+          // es una multa — es que dejaron de enseñarte.
+          await tocarVinculo(tendero, player, { valued: -30, feared: 12 }, ev)
+          // Y lo ve el que esté delante. El chusmerío de la pasada 5 lo
+          // reparte solo: un pueblo se entera de esto.
+          for (const t of people.filter((p) => aca(p) && p.id !== tendero.id)) {
+            await recordar(t.id, player,
+              `${player.name} le robó del mostrador a ${tendero.name}`, tick)
+            await tocarVinculo(t, player, { valued: -10, feared: 6 }, ev)
+          }
+        }
+        return teVieron
+          ? `se llevó ${cosa.kind} sin pagar, y ${tendero.name} lo vio`
+          : `se llevó ${cosa.kind} del mostrador y no lo vio nadie`
+      }
 
       if (!quienLaDejo || quienLaDejo === player.name) {
         return `levantó ${cosa.kind} en ${lugar.name}`
@@ -4934,6 +5074,464 @@ async function resolveAction(
       const bonusHecho = Math.floor(q / 25)
       await tocarVinculo(quien, player, { valued: -(10 + bonusHecho) }, ev)
       return `${quien.name} le hizo ${receta.makes}`
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // LA PLATA — vender, comprar y cambiar
+    // ══════════════════════════════════════════════════════════
+    //
+    // Son DOS economías que corren en paralelo y **nunca se cruzan**
+    // (`DISENO.md` §9.3b). Podés comprar una hoja templada; **no podés comprar
+    // saber hacerla.** Y el mercado no diluye la tesis del saber escaso: la
+    // afila, porque el día que se muera Ilde vas a tener la plata en la mano y
+    // no va a haber una sola hoja nueva en el valle, ni al doble ni al triple.
+    // **Un mercado sabe decir «no hay» de una manera que un menú no.**
+    //
+    // ⚠ LA REGLA DURA, y es la que no se rompe: **ninguna de estas tres ramas
+    //   escribe una sola fila nueva en `knows`, y no puede.** Ni comprar, ni
+    //   vender, ni pagar una lección. Se paga para que alguien te HAGA algo; no
+    //   se paga para que te lo ENSEÑE. Si alguna vez hay un precio para
+    //   aprender, este juego dejó de ser el que es.
+    //
+    // ⚠ Y la otra: **ninguna toca `made_by` jamás.** Una cosa que cambia de
+    //   mano sigue diciendo quién la hizo, y eso es exactamente lo que la
+    //   vuelve interesante. Lo único en todo el código que escribe un
+    //   `made_by = null` es `case 'buscar'`.
+    //
+    // ── Un favor y un pago no son lo mismo ────────────────────
+    //
+    // Es la mitad de esta tarea que no es plata, y está en el aprecio:
+    //
+    //   · `dar` lo que alguien necesitaba mueve el vínculo **+25**. Es un
+    //     regalo y te lo van a devolver enseñándote algo.
+    //   · `vender` lo mismo mueve **+3**. Cobraste. Está bien cobrar, y el
+    //     valle no te debe nada.
+    //
+    // O sea que el jugador elige, cada vez, entre la plata y la gente — y como
+    // el saber sólo se consigue de la gente, la elección tiene precio real.
+    // *Quién te pide cuál dice quién sos para esa persona.*
+
+    // ── vender ────────────────────────────────────────────────
+    //
+    // La primera forma de que un jugador tenga plata sin que aparezca de la
+    // nada: **la que cobrás sale de una bolsa que ya la tenía.**
+    //
+    // Y no te compra cualquiera. Dos, y las dos salen del estado:
+    //   · **el que lo necesita** — tiene una agenda abierta pidiendo eso.
+    //     Paga bien (un tercio más) porque lo venía buscando.
+    //   · **el que atiende un mostrador acá** — compra cualquier cosa para
+    //     revenderla, y por eso paga menos (dos tercios). Es el que hace que
+    //     siempre haya a quién venderle.
+    // El resto del valle no te compra nada, y eso está bien: un mundo donde
+    // todos compran todo es un menú con caras.
+    case 'vender': {
+      const bruto = action.target ?? ''
+      const corte = bruto.toLowerCase().lastIndexOf(' a ')
+      const queStr = corte > 0 ? bruto.slice(0, corte).trim() : bruto.trim()
+      const quienStr = corte > 0 ? norm(bruto.slice(corte + 3).trim()) : ''
+
+      const lugar = places.find((p) => p.id === player.place_id)
+      const ms = await mostradores(regionId)
+      const aqui = ms.find((m) => m.place_id === player.place_id)
+
+      // Sin nombre, le vendés al que atiende acá. Es lo que hace que el verbo
+      // se pueda usar con un botón del mostrador y no escribiendo una frase.
+      const quien = quienStr
+        ? people.find((p) => norm(p.name).includes(quienStr) && aca(p))
+        : people.find((p) => p.id === aqui?.person_id && aca(p))
+      if (!quien) {
+        return quienStr
+          ? `no hay ningún ${quienStr} acá`
+          : `no hay ningún mostrador abierto en ${lugar?.name ?? 'el valle'}`
+      }
+      if (duerme(quien)) return `${quien.name} está durmiendo`
+
+      const mios = (await db
+        .from('objects').select('id, kind, quality, made_by')
+        .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
+      const cands = queStr
+        ? mios.filter((o) => norm(o.kind).includes(norm(queStr)))
+        : mios
+      if (cands.length === 0) {
+        return queStr ? `no lleva ningún "${queStr}" encima` : 'no lleva nada encima para vender'
+      }
+
+      // Lo que esa persona anda buscando. Es lo mismo que mira `dar`, y por eso
+      // el jugador puede elegir: regalárselo y ganarse a alguien, o cobrárselo.
+      const abiertas = (await db
+        .from('agendas').select('id, goal, needs_kind, needs_object')
+        .eq('person_id', quien.id).in('state', ['activa', 'bloqueada'])).data ?? []
+      const leHaceFalta = (kind: string) => abiertas.find(
+        (a) => a.needs_kind === 'object' && a.needs_object === kind)
+
+      const suMostrador = ms.find((m) => m.person_id === quien.id
+        && m.place_id === player.place_id)
+      const atiende = !!suMostrador
+        && despiertoA(horaDelValle(), suMostrador.abre, suMostrador.cierra)
+
+      // El mejor de los que le sirvan, y primero lo que necesita: si lleva dos
+      // cosas y una le cierra una meta, es ésa la que paga bien.
+      const vendibles = cands
+        .filter((o) => atiende || !!leHaceFalta(o.kind))
+        .sort((a, b) => (leHaceFalta(b.kind) ? 1 : 0) - (leHaceFalta(a.kind) ? 1 : 0)
+          || b.quality - a.quality)
+      const cosa = vendibles[0]
+      if (!cosa) {
+        return `${quien.name} no compra nada de lo que ${player.name} lleva encima`
+      }
+
+      const t = await tarifas(people, players)
+      const cumple = leHaceFalta(cosa.kind)
+      const lista = precio(cosa, t)
+      // El que lo necesita paga más; el que revende, menos. La diferencia entre
+      // los dos números ES el margen del mostrador, y es de dónde vive el que
+      // atiende.
+      const pactado = Math.max(1, Math.round(lista * (cumple ? 1.3 : 0.6)))
+
+      const moneda = monedaDe(quien.id, ms)
+      const cat = await monedas()
+      const m = cat.find((x) => x.slug === moneda)
+
+      const suya = await bolsaDe(regionId, { kind: 'person', id: quien.id })
+      if ((suya[moneda] ?? 0) < pactado) {
+        // Un mercado que dice «no tengo con qué» es un mercado. Sin evento: es
+        // una negativa, y las negativas no son noticia para el valle.
+        return `${quien.name} no tiene con qué pagarte ${cosa.kind}`
+          + ` — te pagaría ${enPlata(pactado, m)} y no le quedan`
+      }
+      if (!(await pagar(regionId,
+        { kind: 'person', id: quien.id }, { kind: 'player', id: player.id },
+        moneda, pactado))) {
+        return `${quien.name} no llegó a pagarte; probá de nuevo`
+      }
+
+      // ⚠ Cambia de mano, no de autor. Y si el que compra atiende un mostrador
+      //   acá, la cosa va DERECHO AL MOSTRADOR —o sea al suelo del lugar, con
+      //   su nombre en `left_by`— porque es lo que acaba de pasar: la compró
+      //   para revenderla. Se ve en el acto y la puede comprar otro jugador.
+      await db.from('objects').update(atiende
+        ? {
+          holder_kind: 'place', holder_id: player.place_id,
+          left_by: quien.name, left_tick: tick,
+        }
+        : { holder_kind: 'person', holder_id: quien.id, left_by: null, left_tick: null },
+      ).eq('id', cosa.id)
+
+      const autoria = cosa.made_by && cosa.made_by !== player.name
+        ? ` La había hecho ${cosa.made_by}.` : ''
+      ev({ kind: 'venta', place_id: quien.place_id,
+        summary: cumple
+          ? `${player.name} le vendió ${cosa.kind} a ${quien.name}, que lo venía buscando, por ${enPlata(pactado, m)}.${autoria}`
+          : `${player.name} le vendió ${cosa.kind} a ${quien.name} por ${enPlata(pactado, m)}.${autoria}`,
+        detail: {
+          player: player.name, person: quien.name, object: cosa.kind,
+          quality: cosa.quality, made_by: cosa.made_by ?? null,
+          precio: pactado, moneda, necesitaba: !!cumple,
+        } })
+      await recordar(quien.id, player,
+        `${player.name} le vendió ${cosa.kind} a ${quien.name}`, tick)
+
+      if (cumple) {
+        // Le cerró la meta igual — pero cobrando. **Ésta es la línea que hace
+        // que el mercado no reemplace el favor**: `dar` mueve +25 y esto mueve
+        // +3. Le solucionaste el problema y te pagó; están a mano.
+        await cumplirAgenda(cumple, quien, tick, ev, {
+          kind: 'agenda_cumplida', place_id: quien.place_id,
+          summary: `${quien.name} venía detrás de ${cumple.goal}. ${player.name} apareció con ${cosa.kind} y se lo vendió.`,
+          detail: {
+            person: quien.name, player: player.name, goal: cumple.goal,
+            object: cosa.kind, quality: cosa.quality,
+            made_by: cosa.made_by ?? null, pagado: pactado, moneda,
+          },
+        }, player)
+        await tocarVinculo(quien, player, { valued: 3 }, ev)
+      } else {
+        await tocarVinculo(quien, player, { valued: 2 }, ev)
+      }
+      return `le vendió ${cosa.kind} a ${quien.name} por ${enPlata(pactado, m)}`
+    }
+
+    // ── comprar ───────────────────────────────────────────────
+    //
+    // Es `case 'pedir'` con otra moneda, y la costura ya estaba puesta ahí: el
+    // costo estaba separado del efecto —lo que cambia de mano es un `update` de
+    // `objects`, lo que se paga es otra línea— así que poner precio fue cambiar
+    // esa segunda línea, no reescribir el verbo.
+    //
+    // **Dos ramas, y la separación es el diseño:**
+    //
+    //   · **del mostrador** — lo que hay en la vidriera. No hace falta que te
+    //     quieran: un mostrador le vende a cualquiera que no le caiga mal.
+    //   · **que te lo haga** — le pagás el día y la mano. Sale con el nombre de
+    //     quien lo hizo puesto, porque lo hizo.
+    //
+    // Lo que NO se compra: lo que alguien lleva en la mano. Eso es suyo y para
+    // eso está `pedir`, que cuesta aprecio en vez de plata. **La mano se pide,
+    // el mostrador se compra**, y esa frase es el sistema entero.
+    //
+    // Y acá aparece el «no hay» del mercado, que es el punto de todo esto: si
+    // no queda nadie vivo que sepa hacer una cosa, no hay rama que la produzca
+    // y el precio de la última sube. La plata no compra un oficio muerto.
+    case 'comprar': {
+      const bruto = action.target ?? ''
+      const corte = bruto.toLowerCase().lastIndexOf(' a ')
+      const queStr = (corte > 0 ? bruto.slice(0, corte) : bruto).trim()
+      const quienStr = corte > 0 ? norm(bruto.slice(corte + 3).trim()) : ''
+
+      const lugar = places.find((p) => p.id === player.place_id)
+      const ms = await mostradores(regionId)
+      const cat = await monedas()
+      const t = await tarifas(people, players)
+      const mia = await bolsaDe(regionId, { kind: 'player', id: player.id })
+
+      const aqui = ms.find((m) => m.place_id === player.place_id)
+      const tendero = aqui?.person_id
+        ? people.find((p) => p.id === aqui.person_id) : undefined
+      const abierto = !!aqui && !!tendero
+        && despiertoA(horaDelValle(), aqui.abre, aqui.cierra)
+
+      // ── Rama 1: la vidriera ────────────────────────────────
+      //
+      // El stock del mostrador **es el suelo del lugar**, y lo que lo separa de
+      // la basura tirada es `left_by`: lo que dejó ahí el que atiende está en
+      // venta, lo que dejó cualquier otro está en el piso y se levanta gratis.
+      // Una columna que ya existía, usada para lo que significa.
+      if (abierto && tendero && (!quienStr || norm(tendero.name).includes(quienStr))) {
+        const stock = (await db
+          .from('objects').select('id, kind, quality, made_by')
+          .eq('region_id', regionId)
+          .eq('holder_kind', 'place').eq('holder_id', player.place_id)
+          .eq('left_by', tendero.name)).data ?? []
+        const cands = queStr
+          ? stock.filter((o) => norm(o.kind).includes(norm(queStr)))
+          : stock
+        if (cands.length > 0) {
+          // El mejor que haya, igual que `dar`, `levantar` y `tomar`.
+          const cosa = cands.sort((a, b) => b.quality - a.quality)[0]!
+          const moneda = aqui.moneda
+          const m = cat.find((x) => x.slug === moneda)
+          const cuesta = precio(cosa, t)
+          if ((mia[moneda] ?? 0) < cuesta) {
+            return `${cosa.kind} cuesta ${enPlata(cuesta, m)}, y a ${player.name} no le alcanza`
+          }
+          if (!(await pagar(regionId,
+            { kind: 'player', id: player.id }, { kind: 'person', id: tendero.id },
+            moneda, cuesta))) {
+            return 'no te alcanzó la plata'
+          }
+          // ⚠ `made_by` intacto. `left_by`/`left_tick` se limpian porque
+          //   describen el estar en el mostrador, no el objeto.
+          await db.from('objects').update({
+            holder_kind: 'player', holder_id: player.id,
+            left_by: null, left_tick: null,
+          }).eq('id', cosa.id)
+
+          const autoria = cosa.made_by && cosa.made_by !== tendero.name
+            ? ` La había hecho ${cosa.made_by}.` : ''
+          ev({ kind: 'compra', place_id: player.place_id,
+            summary: `${player.name} le compró ${cosa.kind} a ${tendero.name} por ${enPlata(cuesta, m)}.${autoria}`,
+            detail: {
+              player: player.name, person: tendero.name, object: cosa.kind,
+              quality: cosa.quality, made_by: cosa.made_by ?? null,
+              precio: cuesta, moneda, hecho_ahora: false,
+            } })
+          await recordar(tendero.id, player,
+            `${player.name} le compró ${cosa.kind} a ${tendero.name}`, tick)
+          await tocarVinculo(tendero, player, { valued: 2 }, ev)
+          return `compró ${cosa.kind} por ${enPlata(cuesta, m)}`
+            + (cosa.made_by ? ` — la hizo ${cosa.made_by}` : '')
+        }
+      }
+
+      // ── Rama 2: que te lo haga ─────────────────────────────
+      //
+      // Las tres cosas que exige fabricar cualquier cosa en este juego, y
+      // ninguna se saltea: que lo SEPA, que esté en el LUGAR donde eso se hace,
+      // y que esté DESPIERTO. **`makes_at` no se saltea nunca**, la pague quien
+      // la pague — una hoja se forja en la fragua y en ningún otro lado.
+      if (!queStr) {
+        return abierto
+          ? `no hay nada en el mostrador de ${tendero?.name}`
+          : `no hay ningún mostrador abierto en ${lugar?.name ?? 'el valle'}`
+      }
+
+      const posibles = quienStr
+        ? people.filter((p) => norm(p.name).includes(quienStr) && aca(p))
+        : people.filter(aca)
+      if (posibles.length === 0) {
+        return quienStr ? `no hay ningún ${quienStr} acá` : 'no hay nadie acá'
+      }
+
+      for (const quien of posibles) {
+        const saberes = (await db
+          .from('knows')
+          .select('id, destreza, veces, knowledge:knowledge_id (name, makes, makes_at)')
+          .eq('holder_kind', 'person').eq('holder_id', quien.id)).data ?? []
+        const receta = saberes.find((k) => {
+          const c = (k as unknown as { knowledge: Receta | null }).knowledge
+          if (!c?.makes || c.makes_at !== lugar?.kind) return false
+          return c.makes.toLowerCase().includes(queStr.toLowerCase())
+            || c.name.toLowerCase().includes(queStr.toLowerCase())
+        })
+        if (!receta) continue
+        const c = (receta as unknown as { knowledge: Receta }).knowledge
+        if (duerme(quien)) return `${quien.name} está durmiendo`
+
+        const { data: vinculo } = await db
+          .from('bonds').select('valued')
+          .eq('person_id', quien.id).eq('toward_id', player.id).limit(1).maybeSingle()
+        const v = vinculo?.valued ?? 0
+        // El umbral de la plata es MUCHO más bajo que el del favor: un
+        // mostrador le vende a cualquiera que no le caiga mal, y ése es
+        // justamente el punto de que haya plata. Lo que no se compra es que
+        // alguien que te desprecia se ponga a trabajar para vos.
+        if (v <= -20) {
+          return `${quien.name} ${comoTeVe(v)}: no va a trabajar para ${player.name} por ninguna plata`
+        }
+
+        const moneda = monedaDe(quien.id, ms)
+        const m = cat.find((x) => x.slug === moneda)
+        // El doble de lo que valdría hecho: le estás pagando el día entero y la
+        // mano. Es caro a propósito — que te lo hagan tiene que costar más que
+        // encontrarlo hecho, o nadie miraría nunca un mostrador.
+        const cuesta = Math.max(1,
+          Math.round(precio({ kind: c.makes, quality: 60 }, t) * 2))
+        if ((mia[moneda] ?? 0) < cuesta) {
+          return `${quien.name} te hace ${c.makes} por ${enPlata(cuesta, m)}, y a ${player.name} no le alcanza`
+        }
+        if (!(await pagar(regionId,
+          { kind: 'player', id: player.id }, { kind: 'person', id: quien.id },
+          moneda, cuesta))) {
+          return 'no te alcanzó la plata'
+        }
+
+        // Le costó el día y le queda la mano: practicó, así que mejora. Es la
+        // misma curva de siempre — la destreza es de quien la practicó y no se
+        // presta, y **no hay plata que la compre**.
+        const antes: number = receta.destreza
+        const ahora = Math.min(100, antes + mejora(antes))
+        await db.from('knows')
+          .update({ destreza: ahora, veces: receta.veces + 1 }).eq('id', receta.id)
+
+        const q = calidad(antes)
+        // ⚠ `made_by` con SU nombre, porque lo hizo con sus manos. Nunca null:
+        //   lo único que escribe un null es `case 'buscar'`.
+        await db.from('objects').insert({
+          region_id: regionId, kind: c.makes, quality: q,
+          made_by: quien.name, made_tick: tick,
+          holder_kind: 'player', holder_id: player.id,
+        })
+        ev({ kind: 'compra', place_id: quien.place_id,
+          summary: `${player.name} le pagó ${enPlata(cuesta, m)} a ${quien.name} para que le hiciera ${c.makes},`
+            + ` y ${quien.name} se puso a hacerlo en ${lugar?.name ?? 'el valle'}.`,
+          detail: {
+            player: player.name, person: quien.name, object: c.makes,
+            quality: q, made_by: quien.name, precio: cuesta, moneda,
+            hecho_ahora: true,
+          } })
+        await recordar(quien.id, player,
+          `${player.name} le pagó a ${quien.name} para que le hiciera ${c.makes}`, tick)
+        // Dos, y no los diez que se lleva `pedir` en negativo: **un pago no
+        // gasta el favor.** Le pagaste; están a mano y un poco mejor que antes.
+        await tocarVinculo(quien, player, { valued: 2 }, ev)
+        return `${quien.name} le hizo ${c.makes} por ${enPlata(cuesta, m)}`
+      }
+
+      // **El «no hay» del mercado**, y es la razón por la que este verbo existe.
+      // Si nadie vivo sabe hacerlo, no hay precio que lo arregle: el mercado
+      // sabe decir que no hay de una manera que un menú no.
+      if (!seFabricaTodavia(queStr, t)) {
+        return `nadie en el valle sabe hacer ${queStr}. No hay, y no lo va a haber`
+      }
+      return `acá no hay quien te haga "${queStr}"`
+    }
+
+    // ── cambiar ───────────────────────────────────────────────
+    //
+    // **Plata de distintos tipos**, que fue el pedido y no es un adorno. El
+    // valle tiene dos pueblos que no son humanos, con lengua propia y un
+    // agravio concreto, y lo que acepta la aldea no vale del otro lado. **Una
+    // moneda que no sirve del otro lado del valle es geografía, es política y
+    // es una razón para viajar — las tres cosas de una.**
+    //
+    // Y el tipo de cambio ES la política: sale de `peoples.aprecio`. Cuanto
+    // peor tratamos a un pueblo, más caro es su dinero, porque el que lo junta
+    // lo suelta con más asco. Arreglar el agravio abarata la moneda. Es la
+    // diplomacia con cotización, en un número que se mira todos los días.
+    //
+    // Va en una sola dirección —marcos a lo suyo— a propósito: **la plata del
+    // monte se gasta en el monte.** Para volver a tener marcos se vende algo de
+    // este lado, que es exactamente el viaje que queremos que exista.
+    //
+    // **Sin evento, y es la misma regla que `soltar`.** Dos bolsas cambiaron de
+    // número; no le pasó nada a nadie más. Todo lo que entra a `events` lo lee
+    // el director y se paga. La noticia es lo que hagas con esa plata.
+    case 'cambiar': {
+      const bruto = action.target ?? ''
+      const corte = bruto.toLowerCase().lastIndexOf(' a ')
+      const cuantoStr = (corte > 0 ? bruto.slice(0, corte) : bruto).trim()
+      const quienStr = corte > 0 ? norm(bruto.slice(corte + 3).trim()) : ''
+      const cuanto = Math.floor(Number(cuantoStr.replace(/[^0-9]/g, '')))
+      if (!Number.isFinite(cuanto) || cuanto <= 0) {
+        return 'uso: cambiar <cuántos marcos> a <persona>'
+      }
+
+      const ms = await mostradores(regionId)
+      const cat = await monedas()
+      // El que atiende un mostrador de moneda ajena, acá y ahora. Sin nombre,
+      // el de este lugar: en el valle no hay dos.
+      const posibles = ms.filter((m) => m.moneda !== MONEDA_DEL_VALLE && m.person_id)
+      let quien: (typeof people)[number] | undefined
+      let mostrador: Mostrador | undefined
+      for (const m of posibles) {
+        const p = people.find((q) => q.id === m.person_id)
+        if (!p || !aca(p)) continue
+        if (quienStr && !norm(p.name).includes(quienStr)) continue
+        quien = p; mostrador = m; break
+      }
+      if (!quien || !mostrador) {
+        return 'acá no hay quien te cambie plata'
+      }
+      if (duerme(quien)) return `${quien.name} está durmiendo`
+      if (!despiertoA(horaDelValle(), mostrador.abre, mostrador.cierra)) {
+        return `el mostrador de ${quien.name} está cerrado a esta hora`
+      }
+
+      const { data: vinculo } = await db
+        .from('bonds').select('valued')
+        .eq('person_id', quien.id).eq('toward_id', player.id).limit(1).maybeSingle()
+      const v = vinculo?.valued ?? 0
+      if (v < UMBRAL_ENCARGO) {
+        return `${quien.name} ${comoTeVe(v)}: no le va a cambiar plata a ${player.name} todavía`
+      }
+
+      const m = cat.find((x) => x.slug === mostrador.moneda)
+      const { data: pueblo } = await db
+        .from('peoples').select('name, aprecio')
+        .eq('region_id', regionId).eq('slug', m?.pueblo ?? '').limit(1).maybeSingle()
+      const tipo = cotizacion(pueblo?.aprecio ?? 0)
+      const salen = Math.floor(cuanto / tipo)
+      if (salen <= 0) {
+        return `a ${tipo} marcos cada una, con ${cuanto} no sale ninguna`
+      }
+      const gasto = salen * tipo
+
+      const suya = await bolsaDe(regionId, { kind: 'person', id: quien.id })
+      if ((suya[mostrador.moneda] ?? 0) < salen) {
+        return `${quien.name} no tiene esa cantidad: le quedan ${enPlata(suya[mostrador.moneda] ?? 0, m)}`
+      }
+      const marco = cat.find((x) => x.slug === MONEDA_DEL_VALLE)
+      if (!(await pagar(regionId,
+        { kind: 'player', id: player.id }, { kind: 'person', id: quien.id },
+        MONEDA_DEL_VALLE, gasto))) {
+        return `a ${player.name} no le alcanzan ${enPlata(gasto, marco)}`
+      }
+      await pagar(regionId,
+        { kind: 'person', id: quien.id }, { kind: 'player', id: player.id },
+        mostrador.moneda, salen)
+
+      return `cambió ${enPlata(gasto, marco)} por ${enPlata(salen, m)}`
+        + (pueblo ? ` — lo que acepta ${pueblo.name}` : '')
     }
 
     // ── tomar ─────────────────────────────────────────────────

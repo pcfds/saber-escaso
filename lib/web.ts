@@ -22,8 +22,15 @@ import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta, loQueLleva, RUNAS }
 // a fallar. Un tutorial que miente es peor que ninguno.
 import {
   UMBRAL_ENCARGO, UMBRAL_ENSENAR, UMBRAL_MIEDO,
-  comoTeVe, rutinaDe, tomar, CUAJADA,
+  comoTeVe, rutinaDe, tomar, CUAJADA, despiertoA, horaDelValle,
 } from './world/tick.js'
+// El precio **se calcula en un solo lado**. El día que la vidriera y la caja
+// usen dos funciones distintas, el número que ves y el que te cobran dejan de
+// ser el mismo, y eso en un mercado es la peor clase de mentira.
+import {
+  MONEDA_DEL_VALLE, acunar, bolsaDe, bolsasDe, monedas, mostradores,
+  precio, tarifas,
+} from './world/mercado.js'
 import { landing } from './landing.js'
 
 const PORT = Number(process.env.PORT ?? 3210)
@@ -244,6 +251,19 @@ async function ensurePlayer(name: string): Promise<{ region: Awaited<ReturnType<
     region_id: region.id, tick: region.tick, kind: 'llegada', place_id: aldea?.id,
     summary: `${name} llegó al valle por el Camino del Norte.`, detail: { player: name },
   })
+  // **Lo puesto y unas monedas de afuera.**
+  //
+  // Es la segunda de las dos únicas puertas por las que entra plata a este
+  // valle, y las dos son llegadas por el Camino del Norte: ésta y
+  // `llegaAlguien()` del tick. Las dos llaman a `acunar()`, que es la única
+  // función de todo el código que puede hacer que el valle tenga más plata que
+  // antes — el espejo exacto de `objects.made_by = null`, que sólo lo escribe
+  // `case 'buscar'`. Si algún día la llama un tercero, preguntale de dónde
+  // salió esa plata.
+  //
+  // Quince marcos no compran una hoja templada, y es a propósito: alcanzan
+  // para empezar a moverse y no para saltearse el valle.
+  await acunar(region.id, { kind: 'player', id: nuevo.id }, MONEDA_DEL_VALLE, 15)
   return { region, player: nuevo as Player }
 }
 
@@ -290,7 +310,9 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
   const [places, people, sabe, ultima, lleva] = await Promise.all([
     db.from('places').select('id, slug, name').eq('region_id', region.id),
     db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
-    db.from('knows').select('knowledge:knowledge_id (name)')
+    // `learned_from` y `learned_tick` viajan porque la ficha nombra la COSA y
+    // no el mecanismo: ver abajo, donde se arma el renglón.
+    db.from('knows').select('learned_from, learned_tick, knowledge:knowledge_id (name)')
       .eq('holder_kind', 'player').eq('holder_id', player.id),
     db.from('chronicles').select('text, to_tick').eq('player_id', player.id)
       .order('to_tick', { ascending: false }).limit(1).maybeSingle(),
@@ -305,6 +327,39 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
   const saberes = (sabe.data ?? [])
     .map((k) => (k.knowledge as unknown as { name: string } | null)?.name)
     .filter((n): n is string => Boolean(n))
+
+  // ── El renglón que da por cumplida §8.2b ──────────────────────────────
+  //
+  // Este renglón decía `'Tu oficio: ' + saberes.join(', ')`, y `DISENO.md`
+  // §8.2b lo pone como la prueba exacta de la sección:
+  //
+  //   > El día que la ficha diga *"Odila te enseñó a destilar el invierno
+  //   > pasado"* en vez de *"sabes Destilado de raíz — te lo enseñó Odila"*,
+  //   > esta sección está cumplida.
+  //
+  // **La interfaz nombra la COSA, no el mecanismo que la sostiene.** El dato
+  // ya estaba entero en `knows` —`learned_from` y `learned_tick`— y no salía
+  // de ahí: lo único que faltaba era un join y un formateo.
+  //
+  // Los días se cuentan contra `region.tick`, que es el día del valle. El que
+  // lo trajo puesto no tiene maestro y se dice distinto: no es una carencia,
+  // es de dónde viene.
+  const haceCuanto = (dias: number) =>
+    dias <= 0 ? 'hoy'
+      : dias === 1 ? 'ayer'
+      : dias < 14 ? `hace ${dias} días`
+      : dias < 60 ? `hace ${Math.round(dias / 7)} semanas`
+      : 'hace meses'
+  const aprendido = (sabe.data ?? []).map((k) => {
+    const nombre = (k.knowledge as unknown as { name: string } | null)?.name
+    if (!nombre) return null
+    const d = k as unknown as { learned_from: string | null; learned_tick: number }
+    const maestro = (people.data ?? []).find((p) => p.id === d.learned_from)?.name
+    const cuando = haceCuanto(region.tick - (d.learned_tick ?? 0))
+    return maestro
+      ? `${maestro} te enseñó ${nombre} ${cuando}`
+      : `Sabes ${nombre} desde antes de llegar acá`
+  }).filter((s): s is string => Boolean(s))
   const hayNovedades = region.tick > player.last_seen_tick
   const base = `/j/${player.token}`
 
@@ -319,7 +374,7 @@ async function renderPlayer(token: string, aviso?: string, recienCreado = false)
   return page(`${player.name} — Saber Escaso`, `
     <h1>${esc(player.name)}</h1>
     <p class="sub">Estás en ${esc(lugar?.name ?? 'algún lado')}. ${
-      saberes.length ? 'Tu oficio: ' + saberes.map(esc).join(', ') + '.'
+      aprendido.length ? aprendido.map(esc).join('. ') + '.'
         : 'Todavía no tienes oficio. Alguien te lo tiene que enseñar.'
     }</p>
 
@@ -472,7 +527,7 @@ export async function handler(
           .then(() => undefined)
 
         const [places, people, amenazas, objetos, saberes, vinculos, otros,
-               marcas, colgadas, hechosMios, suelo] = await Promise.all([
+               marcas, colgadas, hechosMios, suelo, plata, puestos] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -526,6 +581,25 @@ export async function handler(
             .eq('region_id', region.id).eq('holder_kind', 'place')
             .order('left_tick', { ascending: false, nullsFirst: false })
             .limit(150),
+          // **Tu bolsa**, con el nombre de cada moneda pegado. El embed de
+          // PostgREST evita la segunda consulta al catálogo: `bolsas.moneda`
+          // tiene foreign key a `monedas`, así que viene en la misma.
+          //
+          // Va en esta tanda y no en una ruta aparte porque la plata que
+          // llevás es como la vida: se mira todo el tiempo y tiene que estar
+          // bien SIEMPRE. Lo que NO va acá es el precio de cada cosa del
+          // mostrador — eso se pide al abrirlo (`/mostrador`), que es cuando
+          // hace falta, igual que el grimorio.
+          db.from('bolsas')
+            .select('moneda, cantidad, monedas (singular, plural, quien, pueblo)')
+            .eq('region_id', region.id)
+            .eq('holder_kind', 'player').eq('holder_id', player.id),
+          // Y dónde hay mostrador. Es una tabla de tres filas y el cliente la
+          // necesita para DIBUJAR el puesto: sin esto no hay dónde poner la
+          // malla, y un mostrador que no se ve no existe.
+          db.from('mostradores')
+            .select('place_id, person_id, moneda, abre, cierra, monedas (singular, plural)')
+            .eq('region_id', region.id),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -708,6 +782,45 @@ export async function handler(
           //
           // `place_slug` y no `place_id` por lo mismo que las amenazas: el
           // cliente ubica por slug y los uuid no le dicen nada.
+          // ── La plata ────────────────────────────────────────
+          //
+          // Lo que llevás encima, por tipo. **Plata de distintos tipos** no es
+          // un adorno: lo que acepta la aldea no vale del otro lado del valle
+          // (`DISENO.md` §9.3b), así que la bolsa tiene que decir CUÁL, no un
+          // número. Un contador de oro sería justo el menú que este sistema
+          // vino a no ser.
+          bolsa: (plata.data ?? []).map((b) => {
+            const m = (b as unknown as {
+              monedas: { singular: string; plural: string; quien: string; pueblo: string | null } | null
+            }).monedas
+            return {
+              moneda: b.moneda, cantidad: b.cantidad,
+              // Ya en palabras, y con el plural de la tabla: armarlo desde el
+              // singular es cómo se llega a «3 cuenta de huesos».
+              como: `${b.cantidad} ${b.cantidad === 1 ? m?.singular ?? b.moneda : m?.plural ?? b.moneda}`,
+              quien: m?.quien ?? '', pueblo: m?.pueblo ?? null,
+            }
+          }),
+          // Los mostradores del valle, ya resueltos a slug y con si están
+          // abiertos AHORA. La hora es la del servidor, igual que el sol: dos
+          // personas conectadas tienen que ver el mismo puesto cerrado.
+          mostradores: (puestos.data ?? []).map((m) => {
+            const quien = (people.data ?? []).find((q) => q.id === m.person_id)
+            const mon = (m as unknown as {
+              monedas: { singular: string; plural: string } | null
+            }).monedas
+            return {
+              place_slug: slugDe(m.place_id),
+              atiende: quien?.name ?? null,
+              moneda: m.moneda, moneda_nombre: mon?.plural ?? m.moneda,
+              // Cerrado tiene dos causas y las dos importan: **no hay quien lo
+              // atienda** (se murió, y con él se fue esa moneda del valle) o
+              // **es la hora de cerrar**. El cliente dice cuál.
+              abierto: !!quien && despiertoA(horaDelValle(), m.abre, m.cierra),
+              hay_quien: !!quien,
+              abre: m.abre, cierra: m.cierra,
+            }
+          }),
           suelo: (suelo.data ?? []).map((o) => ({
             id: o.id, kind: o.kind, quality: o.quality,
             made_by: o.made_by ?? null,
@@ -959,6 +1072,86 @@ export async function handler(
         return json(await grimorioDe(found.player.id))
       }
 
+      // ── El mostrador ──────────────────────────────────────────
+      //
+      // Lo que hay en la vidriera, con precio, y lo que te pagarían por lo que
+      // llevás encima. **NO va en `/mundo`** y es a propósito: esa ruta la pega
+      // el cliente cada pocos segundos y calcular precios cuesta dos consultas
+      // más (el catálogo de recetas y cuántas cabezas quedan). Esto se pide al
+      // abrir el puesto, que es cuando hace falta, igual que el grimorio.
+      //
+      // **El precio sale de `mercado.ts` y de ningún otro lado**, que es la
+      // misma función que cobra en el tick. El día que la vidriera y la caja
+      // usen dos cuentas distintas, el número que ves y el que te cobran dejan
+      // de ser el mismo, y en un mercado ésa es la peor clase de mentira.
+      if (req.method === 'GET' && parts[2] === 'mostrador') {
+        const found = await byToken(token)
+        if (!found) return json({ error: 'no existe' })
+        const { region, player } = found
+
+        const [gente, jugadores, puestos, cat, mia] = await Promise.all([
+          db.from('people').select('id, name, place_id, home_place_id, jornada_desde, jornada_hasta')
+            .eq('region_id', region.id).eq('alive', true),
+          db.from('players').select('id').eq('region_id', region.id),
+          mostradores(region.id),
+          monedas(),
+          bolsaDe(region.id, { kind: 'player', id: player.id }),
+        ])
+        const puesto = puestos.find((m) => m.place_id === player.place_id)
+        const quien = puesto?.person_id
+          ? (gente.data ?? []).find((p) => p.id === puesto.person_id) : undefined
+        if (!puesto) return json({ hay: false, porque: 'Aquí no hay mostrador.' })
+        if (!quien) {
+          // El mostrador cerrado para siempre. **Es la tesis del juego dicha
+          // por la plata**: se murió quien atendía y con él se fue la moneda
+          // que este puesto aceptaba.
+          return json({ hay: true, abierto: false,
+            porque: 'El mostrador está cerrado. No queda quien lo atienda.' })
+        }
+        const abierto = despiertoA(horaDelValle(), puesto.abre, puesto.cierra)
+        const m = cat.find((x) => x.slug === puesto.moneda)
+
+        const [stock, mios, t] = await Promise.all([
+          db.from('objects').select('id, kind, quality, made_by')
+            .eq('region_id', region.id)
+            .eq('holder_kind', 'place').eq('holder_id', player.place_id)
+            .eq('left_by', quien.name),
+          db.from('objects').select('id, kind, quality, made_by')
+            .eq('holder_kind', 'player').eq('holder_id', player.id),
+          tarifas(gente.data ?? [], jugadores.data ?? []),
+        ])
+        const suya = await bolsaDe(region.id, { kind: 'person', id: quien.id })
+
+        return json({
+          hay: true, abierto,
+          atiende: quien.name,
+          moneda: puesto.moneda,
+          moneda_nombre: m?.plural ?? puesto.moneda,
+          quien_la_acepta: m?.quien ?? '',
+          abre: puesto.abre, cierra: puesto.cierra,
+          // Lo que tenés de ESTA moneda. Lo que tenés de las otras no sirve
+          // acá, y decirlo es la mitad del sistema.
+          tenes: mia[puesto.moneda] ?? 0,
+          // Con cuánto te puede pagar. Un mercado que dice «no tengo con qué»
+          // es un mercado.
+          tiene: suya[puesto.moneda] ?? 0,
+          vende: (stock.data ?? []).map((o) => ({
+            kind: o.kind, quality: o.quality, made_by: o.made_by ?? null,
+            precio: precio(o, t),
+            // Cuántos quedan que sepan hacerla. **Es la línea que hace que un
+            // mercado sepa decir «no hay» de una manera que un menú no**: si
+            // dice cero, ésa es la última que va a existir en este valle.
+            saben: t.get(o.kind)?.saben ?? null,
+          })),
+          // Y lo que te pagarían por lo tuyo. El mostrador revende, así que
+          // paga dos tercios; el mismo número que cobra el tick.
+          compra: (mios.data ?? []).map((o) => ({
+            kind: o.kind, quality: o.quality, made_by: o.made_by ?? null,
+            precio: Math.max(1, Math.round(precio(o, t) * 0.6)),
+          })),
+        })
+      }
+
       if (req.method === 'POST' && parts[2] === 'hablar') {
         const found = await byToken(token)
         if (!found) return json({ error: 'no existe' })
@@ -996,7 +1189,25 @@ export async function handler(
         // volvió a entrar dispararía una llamada al modelo por entrada, y
         // como `to_tick` quedaría por detrás de esos eventos, volvería a
         // narrar los mismos en la siguiente. Se queda.
-        const hay = found.region.tick > found.player.last_seen_tick
+        //
+        // **Y hay un segundo caso, que es un off-by-one estructural.** La
+        // llegada no depende del tick: este mismo archivo crea al jugador con
+        // `last_seen_tick = region.tick` y le escribe su `llegada` en ESE
+        // MISMO tick, y la ventana del director es `.gt('tick',
+        // last_seen_tick)`. O sea que **la llegada de un jugador quedaba
+        // afuera de su propia primera crónica por un tick**, y el corte de acá
+        // arriba ni siquiera dejaba llamar al director para verlo: el que
+        // entraba por primera vez leía "todavía no pasó nada digno de contar"
+        // en vez de su llegada al valle.
+        //
+        // Lo que corta el bucle no es el cursor sino **la fila en
+        // `chronicles`**: si ya le contaron algo alguna vez, este caso no
+        // vuelve a entrar. Y `laLlegada()` no mueve `last_seen_tick` a
+        // propósito, así que el que tenía once días de valle esperándolo lee
+        // primero su llegada y en la siguiente lee los once días.
+        const { count: yaLeContaron } = await db.from('chronicles')
+          .select('id', { count: 'exact', head: true }).eq('player_id', found.player.id)
+        const hay = found.region.tick > found.player.last_seen_tick || !yaLeContaron
         if (!hay) {
           const { data: ultima } = await db.from('chronicles')
             .select('text').eq('player_id', found.player.id)
