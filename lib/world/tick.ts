@@ -843,6 +843,10 @@ export async function resolverAcciones(args: {
     .order('submitted_tick', { ascending: true })).data ?? []
 
   const resueltas: Resuelta[] = []
+  // Ver el comentario en `resolveAction`: sólo lo usa el camino del tick, donde
+  // los eventos se insertan al final y el chequeo contra la base no ve lo que
+  // se acaba de decidir en esta misma vuelta.
+  const yaHablaron = new Set<string>()
   for (const action of pendientes) {
     const player = mundo.players.find((p) => p.id === action.player_id)
     if (!player) continue
@@ -855,7 +859,7 @@ export async function resolverAcciones(args: {
     if (!mia?.length) continue
 
     const outcome = await resolveAction(region.id, tick, player, action, {
-      people: mundo.people, places: mundo.places, ev,
+      people: mundo.people, places: mundo.places, ev, yaHablaron,
     })
     await db.from('actions').update({ outcome }).eq('id', action.id)
     // `last_action_tick`, NO `last_seen_tick`. Actuar no es que te hayan
@@ -3699,6 +3703,13 @@ async function resolveAction(
     people: (MundoDeAccion['people'][number])[]
     places: { id: string; name: string; slug: string; kind: string }[]
     ev: (e: Omit<Ev, 'region_id' | 'tick'>) => void
+    /** Los pares que ya hablaron en esta tanda. Hace falta además del chequeo
+     *  contra `events` del `case 'hablar'`, y sólo por el camino del tick: ahí
+     *  `ev` acumula y los eventos se insertan todos al final, así que la
+     *  segunda charla del mismo día no vería a la primera en la base. Por el
+     *  camino de la web —una acción por pedido— el que trabaja es el chequeo
+     *  contra `events` y este conjunto está siempre vacío. */
+    yaHablaron?: Set<string>
   },
 ): Promise<string> {
   const { people, places, ev } = ctx
@@ -3715,10 +3726,34 @@ async function resolveAction(
   // que no hay ningún Bruno acá. Es el invariante 4 al revés: lo que se ve en
   // el cliente tiene que ser lo que el servidor cree.
   //
-  // Se le puede hablar, encargar y enseñar a alguien que duerme: le golpeás la
-  // puerta y se levanta. No hay verbo que se caiga por la hora, y es a
-  // propósito — la rutina tiene que agregar mundo, no puertas cerradas.
+  // Se le puede hablar, encargar y DAR a alguien que duerme: le golpeás la
+  // puerta y se levanta, o le dejás la cosa. La rutina tiene que agregar mundo,
+  // no puertas cerradas.
+  //
+  // **Enseñar y aprender sí se caen por la hora, y eso cambió hoy.** Este
+  // renglón decía que ningún verbo se caía, y el motivo era bueno: una rutina
+  // que sólo quita cosas es una lista de horarios cerrados. Lo que faltaba era
+  // el otro lado — *"que a veces no quieran hablar, y que eso signifique algo.
+  // Un NPC que siempre está disponible no tiene vida propia"*.
+  //
+  // De todos los verbos, los dos del oficio son los únicos donde negarse a esa
+  // hora no es una puerta cerrada sino la verdad: **nadie enseña a martillar
+  // dormido, y nadie aprende de alguien que está dormido.** Los otros tres
+  // siguen entrando, así que la noche no vacía el juego: le podés dejar la raíz
+  // a Odila, encargarte de lo suyo y golpearle la puerta y que te gruña.
+  //
+  // Y es lo que hace que el sol sea el reloj del mundo (DISENO §7.3) en vez de
+  // un efecto de luz: si querés que Ilde te enseñe, vas de día. Con seis horas
+  // reales por vuelta del sol y una jornada de 6 a 22, la ventana cerrada son
+  // dos horas de reloj de cada seis, y el guardia trabaja al revés — el valle
+  // nunca queda entero sin nadie a quien pedirle nada.
+  //
+  // `dialogo.ts` apaga exactamente estas dos opciones cuando la persona duerme.
+  // Las dos mitades tienen que decir lo mismo o el cliente miente: una opción
+  // gris que el servidor sí resolvería es tan mala como una opción viva que el
+  // servidor rechaza.
   const aca = (p: ConRutina) => rutinaDe(p, places).place_id === player.place_id
+  const duerme = (p: ConRutina) => rutinaDe(p, places).durmiendo
 
   switch (action.verb) {
     case 'ir': {
@@ -3740,6 +3775,41 @@ async function resolveAction(
     case 'hablar': {
       const quien = people.find((p) => norm(p.name).includes(target))
       if (!quien) return `no encontró a "${action.target}"`
+
+      // ── Hablar cuenta UNA VEZ POR DÍA DEL VALLE ────────────────────────
+      //
+      // Un tick es un día, así que el hecho es «hoy Pedro y Ilde hablaron», no
+      // «Pedro apretó E». Se midió en producción y el número es feo: **130
+      // eventos `conversacion` en diez ticks para 25 hechos reales — 5,2
+      // eventos por cada cosa que pasó.** Es el tipo más numeroso del valle por
+      // lejos, y era la misma charla contada cinco veces.
+      //
+      // Con la iniciativa esto pasa de ser feo a ser urgente: si los NPCs
+      // arrancan cosas, se les habla más, y el multiplicador crece con el
+      // rasgo. Un rasgo que se paga en ruido no se entrega así.
+      //
+      // Y arregla algo peor que el ruido, que apareció mirando esta línea:
+      // `tocarVinculo` sumaba **+2 de aprecio por cada vez que apretabas el
+      // botón**, sin tope. Dieciocho charlas seguidas en el mismo día son +36,
+      // o sea cruzar `UMBRAL_ENSENAR` (35) de una sentada. El bucle central del
+      // juego —ganarte que alguien te enseñe— se saltaba tecleando. Ahora el
+      // aprecio sube una vez por día, que es lo que dice el diseño: la
+      // confianza se gana con el tiempo y con hechos, no con repeticiones.
+      //
+      // El chequeo va contra `events` y no contra un contador en memoria porque
+      // el camino de verdad es el de la web, que resuelve **una acción por
+      // pedido** (`soloJugador`): en producción no hay ninguna tanda dentro de
+      // la cual acumular nada. Es una lectura por `hablar` contra
+      // `events_region_tick_idx`, y ahorra cuatro escrituras de cada cinco.
+      const par = `${player.id}·${quien.id}`
+      if (ctx.yaHablaron?.has(par)) return `siguió hablando con ${quien.name}`
+      const { data: yaHoy } = await db.from('events').select('id')
+        .eq('region_id', regionId).eq('tick', tick).eq('kind', 'conversacion')
+        .eq('detail->>player', player.name).eq('detail->>person', quien.name)
+        .limit(1).maybeSingle()
+      if (yaHoy) return `siguió hablando con ${quien.name}`
+      ctx.yaHablaron?.add(par)
+
       ev({ kind: 'conversacion', place_id: quien.place_id,
         summary: `${player.name} habló con ${quien.name}.`,
         detail: { player: player.name, person: quien.name } })
@@ -3841,6 +3911,10 @@ async function resolveAction(
       const maestro = people.find(
         (p) => norm(p.name).includes(target) && aca(p))
       if (!maestro) return `no hay ningún ${action.target} acá`
+      // Dormido no enseña nadie. No emite evento: que hayas golpeado la puerta
+      // a deshora no es un hecho del valle, y un `negativa` por cada intento
+      // nocturno sería una planilla con la firma del rechazo.
+      if (duerme(maestro)) return `${maestro.name} está durmiendo`
       if (!maestro.teaches) {
         ev({ kind: 'negativa', place_id: maestro.place_id,
           summary: `${maestro.name} se negó a enseñarle nada a ${player.name}.`,
@@ -3897,6 +3971,9 @@ async function resolveAction(
       const alumno = people.find(
         (p) => norm(p.name).includes(quienStr) && aca(p))
       if (!alumno) return `no hay ningún ${action.target} acá`
+      // La otra mitad de la regla de arriba: tampoco se le enseña a alguien que
+      // duerme. Sin evento, por lo mismo.
+      if (duerme(alumno)) return `${alumno.name} está durmiendo`
       const sabe = (await db
         .from('knows').select('knowledge_id')
         .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []

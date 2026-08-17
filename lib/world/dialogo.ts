@@ -129,8 +129,86 @@ import { db, getRegion } from '../db.js'
 // Los umbrales viven en tick.ts, que es quien los aplica. Importarlos y no
 // copiarlos: la copia que había en web.ts decía 10 cuando el real era 35, y el
 // juego mandaba a hacer algo que iba a fallar.
-import { UMBRAL_ENCARGO, UMBRAL_ENSENAR } from './tick.js'
+import { UMBRAL_ENCARGO, UMBRAL_ENSENAR, despiertoA, horaDelValle } from './tick.js'
+// El mismo hash chico y estable que usa la huella de los saludos. Acá es la
+// clave del enfriamiento de una iniciativa que sale de un recuerdo.
+import { hash } from './saludos.js'
 import { pedirJson } from '../modelo.js'
+
+/**
+ * Cuánto se aguanta un NPC antes de volver a empezar algo con vos: **un día del
+ * valle**, o sea un tick, o sea seis horas de reloj.
+ *
+ * El número no es de gusto y conviene dejar la cuenta escrita, porque la
+ * pregunta correcta acá es cuántas veces por día de mundo dispara:
+ *
+ *   · Una sesión de las que este juego busca dura una hora. Seis horas de
+ *     enfriamiento son más largas que la sesión, así que **cada NPC arranca
+ *     algo con vos como mucho una vez por sesión.** Con siete habitantes eso
+ *     son hasta siete arranques en una tarde: el valle te busca y ninguno te
+ *     persigue.
+ *   · Si te quedás todo el día, el cron corre cuatro veces, así que el techo
+ *     real es cuatro por persona y por día. Sigue estando lejos del vendedor.
+ *   · Y no se mide en segundos a propósito. Los 90 segundos del saludo son de
+ *     reloj porque el saludo es un cruce físico —pasás, te ven, te ven de
+ *     nuevo—. Que alguien te pida algo suyo no es un cruce, es un acto de su
+ *     vida, y su vida se mide en días. Un enfriamiento de segundos haría que
+ *     una tarde larga valiera cuarenta pedidos.
+ *
+ * Se cuenta contra `talks.iniciativa`, no contra un contador en memoria: el
+ * servidor se reinicia en cada request de Vercel.
+ */
+const ESPERA_INICIATIVA_TICKS = 1
+
+/** Y cuánto tarda en volver a salir EL MISMO motivo, por prefijo de la clave.
+ *
+ * Hace falta aparte del de arriba, y se descubrió midiendo. Con un solo día
+ * para todo, `trabada` ganaba siempre: es el motivo con más peso y el que más
+ * gente tiene abierto —siete de las nueve agendas del valle esperan una cosa—,
+ * así que volvía a estar disponible cada mañana y **los otros tres no salían
+ * nunca.** Un valle donde nadie comenta que llegó alguien por el Camino del
+ * Norte porque todos están pidiendo una piedra de afilar no es un valle vivo,
+ * es una ferretería.
+ *
+ * Los números, y la cuenta contra los cuatro ticks que entran en un día real:
+ *
+ *   · `trabada` — tres días del valle, o sea unas dieciocho horas de reloj. Te
+ *     lo pidió; si vuelves esta tarde no te lo repite, y si vuelves mañana sí.
+ *     Es el ritmo con el que un vecino insiste con algo.
+ *   · `encargo` — dos. Una deuda se cobra más seguido que un favor se pide, y
+ *     ésa es justamente la diferencia entre las dos cosas.
+ *   · `noticia` y `recuerdo` — no vuelven nunca, y no por este número: la
+ *     clave lleva el id del evento o el hash del recuerdo, así que la misma
+ *     noticia no existe dos veces. El valor está por completitud.
+ */
+const ESPERA_POR_MOTIVO: Record<string, number> = {
+  trabada: 3, encargo: 2, noticia: 1, recuerdo: 1,
+}
+
+/** Qué pasó en el valle que un habitante comentaría al día siguiente.
+ *
+ *  La lista es corta y la razón es el invariante 3, no el gusto: **una noticia
+ *  sólo puede entrar acá si es plausible que esta persona la sepa sin haber
+ *  estado.** Que se murió alguien, que nació alguien, que llegó alguien por el
+ *  Camino del Norte o que hay un bicho suelto se sabe en el valle entero en un
+ *  día; que Bruno avanzó con las bisagras, no. Por eso no están `trabajo`,
+ *  `agenda_avanza`, `hallazgo` ni `confianza`: para que fueran honestas habría
+ *  que preguntar quién estaba delante, y eso es una consulta por evento.
+ *
+ *  `conversacion` y `rumor` quedan fuera por otro motivo: son el ruido que ya
+ *  inundó la ventana del director una vez, y encima el jugador estuvo ahí. */
+const NOTICIABLE = [
+  'muerte', 'nacimiento', 'llegada', 'perdida_de_saber',
+  'amenaza', 'amenaza_muerta', 'agenda_bloqueada', 'agenda_soltada',
+]
+
+/** Las dos que pesan más que cualquier cosa que uno quiera pedir.
+ *
+ *  Alguien que acaba de enterarse de que se murió el último que sabía forjar no
+ *  te abre la boca para pedirte carbón. Es la única jerarquía escrita a mano de
+ *  todo esto y existe porque sin ella el orden lo decidía el azar de la
+ *  rotación. */
+const GRAVE = new Set(['muerte', 'perdida_de_saber'])
 
 // Acá no se declara ningún acento a propósito. Cuando el prompt decía "español
 // rioplatense", el modelo lo tomaba como la única instrucción de estilo y
@@ -350,6 +428,40 @@ const claves = (frase: string): string[] =>
  *  nombre la meta. Va sin tildes porque se prueba contra texto pelado. */
 const OFRECE = /(te ayud|ayudarte|ayudarla|ayudarlo|una mano|te falta|te hace falta|necesit|precis|te sirve|te traigo|te consigo|te traje|puedo (?:ayudar|traer|darte|conseguir|hacer|buscar)|queres que|en que anda|en que estas|que estas haciendo|que hacias|te debo|para que sirve)/
 
+/**
+ * Cierra las preguntas que el modelo dejó abiertas.
+ *
+ * El system prompt ya lo pide con todas las letras y aun así se cuela: de 60
+ * respuestas medidas hoy en `valle-pruebas`, **3 traían una pregunta abierta con
+ * ¿ y cerrada con punto** —"¿Tienes o sabes dónde hay."— y las tres eran de
+ * Marta, cuya voz dice que no usa signos de exclamación. El modelo generaliza
+ * eso a los de interrogación, que es el fallo que ya está anotado en el
+ * `cierre` del prompt.
+ *
+ * Es el mismo criterio que el colador de rioplatense de `saludos.ts`, aplicado
+ * al único caso donde se puede aplicar en el diálogo: **arreglar un carácter no
+ * es descartar la respuesta.** Ahí no se podía filtrar porque tirar una línea
+ * deja al jugador frente a alguien que no contesta; acá no se tira nada, se
+ * cambia el punto por el signo que faltaba. Cinco por ciento de todo lo que el
+ * jugador lee estaba mal escrito y el prompt no lo iba a bajar a cero.
+ *
+ * Lo que NO hace, y es a propósito: no toca una frase sin `¿` (una pregunta sin
+ * abrir es otro error y arreglarlo pide adivinar dónde empieza), ni parte una
+ * frase que ya tenga su `?`.
+ */
+function cerrarPreguntas(s: string): string {
+  let out = ''
+  let abierta = false
+  for (const c of s) {
+    if (c === '¿') abierta = true
+    else if (c === '?') abierta = false
+    else if (abierta && (c === '.' || c === '…')) { out += '?'; abierta = false; continue }
+    out += c
+  }
+  // Y la que se quedó sin nada al final: "¿Tienes hierro" a secas.
+  return abierta ? `${out}?` : out
+}
+
 /** Lo embebido supabase-js lo tipa como objeto o como array según cómo infiera
  *  la relación. Se normaliza acá y no en cada uso. */
 function embebido<T>(fila: unknown, campo: string): T | null {
@@ -371,6 +483,17 @@ const unPueblo = (fila: unknown) =>
 export type Dialogo = {
   saludo: string
   animo: string
+  /**
+   * `true` cuando **el NPC arrancó él**: te reclama un encargo, te pide lo que
+   * le falta, comenta algo que pasó en el valle o retoma lo que quedó entre
+   * ustedes.
+   *
+   * Viaja porque sin esto el cliente pinta igual una respuesta y un reclamo, y
+   * entonces la iniciativa —que es todo el punto— sólo la descubre el que
+   * igual iba a apretar E. El que pasa de largo no se entera de que Marta le
+   * estaba cobrando algo.
+   */
+  arranca: boolean
   opciones: {
     verbo: string; texto: string; posible: boolean; porque?: string
     /**
@@ -413,14 +536,80 @@ export async function hablarCon(
     // persona y no dónde está parada hoy. La diferencia importa — `place_id` lo
     // mueve el tick, y con él un aldeano que pasa por la ruina heredaría por un
     // día la versión que se cuenta ahí adentro. Ver `voces` más abajo.
-    .select('id, name, trade, disposition, teaches, place_id, home_place_id, voice, historia, procedencia, place:place_id (name, description), pueblo:people_id (name, lengua)')
+    .select('id, name, trade, disposition, teaches, place_id, home_place_id, voice, historia, procedencia, jornada_desde, jornada_hasta, place:place_id (name, description), pueblo:people_id (name, lengua)')
     .eq('region_id', region.id).eq('alive', true).ilike('name', npcName)
     .limit(1).maybeSingle()
   if (!npc) throw new Error(`No hay nadie llamado ${npcName} por aquí.`)
 
+  // ── El que no quiere hablar ────────────────────────────────────────────
+  //
+  // Un NPC que siempre está disponible no tiene vida propia: es un mostrador
+  // con horario corrido. La rutina ya sabe quién está en pie a cada hora
+  // (`jornada_desde`/`jornada_hasta`, y el guardia cruza la medianoche), y el
+  // cliente ya los dibuja durmiendo dentro de la casa — lo único que faltaba es
+  // que el servidor lo tuviera en cuenta cuando le tocás la puerta.
+  //
+  // Tres cosas hacen que esto sea contenido y no una pared:
+  //
+  //   · **Significa algo.** De noche no se aprende un oficio. El horario deja
+  //     de ser un dato del cielo y pasa a ser algo que tenés que planear: si
+  //     querés que Ilde te enseñe, vas de día. Es el sol como reloj del mundo
+  //     (DISENO §7.3) haciendo trabajo de juego.
+  //   · **Dura poco.** La jornada por defecto es de 6 a 22, así que son ocho
+  //     horas del valle de veinticuatro — dos horas reales de las seis que dura
+  //     un día. Y no todos duermen a la vez: el guardia trabaja de 18 a 6, así
+  //     que el valle nunca queda entero sin nadie con quien hablar.
+  //   · **No cuesta una llamada.** Es la única salida de este archivo que no
+  //     pasa por el modelo, y es correcto que no pase: alguien que no te abre
+  //     la puerta no necesita una voz.
+  //
+  // La línea rota con el día del valle para que no sea siempre la misma, y se
+  // guarda en `talks` igual que cualquier otra: que fueras a buscarlo de noche
+  // y no te atendiera también es algo que pasó entre ustedes.
+  const hora = horaDelValle()
+  if (!despiertoA(hora, npc.jornada_desde ?? 6, npc.jornada_hasta ?? 22)) {
+    const dormido = [
+      `${npc.name} no abre. Dentro se oye a alguien darse la vuelta.`,
+      `La puerta de ${npc.name} está cerrada y no hay luz.`,
+      `${npc.name} contesta desde dentro, sin abrir: — Mañana.`,
+    ]
+    const linea = dormido[(region.tick + npc.name.length) % dormido.length]!
+    await db.from('talks').insert({
+      region_id: region.id, person_id: npc.id, player_id: playerId,
+      tick: region.tick, said: dice.trim().slice(0, 300) || null, replied: linea,
+    })
+    // Se apagan DOS opciones y no las cinco, y el corte es exactamente el que
+    // aplica `tick.ts` en `case 'aprender'` y `case 'ensenar'`. **Las dos
+    // mitades tienen que decir lo mismo o el cliente miente**: una opción gris
+    // que el servidor sí resolvería es tan mala como una viva que rechaza.
+    //
+    // Enseñar y aprender se caen porque nadie enseña a martillar dormido.
+    // Encargarse, dar y trabajar siguen en pie porque le golpeás la puerta, le
+    // dejás la cosa, o te quedás a trabajar al lado — y porque una noche que
+    // apaga el juego entero es peor que una noche que no significa nada.
+    //
+    // Y no se llama al modelo para armarlas: las tres que quedan no dependen de
+    // nada que haya que consultar, así que esta salida no cuesta ni una lectura
+    // más de las que ya se hicieron.
+    const durmiendo = `${npc.name} está durmiendo`
+    return {
+      saludo: linea,
+      animo: 'seco',
+      // El que duerme no arranca nada: la puerta cerrada no es una iniciativa.
+      arranca: false,
+      opciones: [
+        { verbo: 'aprender', texto: 'Pedirle que te enseñe', posible: false, porque: durmiendo },
+        { verbo: 'ensenar', texto: 'Enseñarle algo tuyo', posible: false, porque: durmiendo },
+        { verbo: 'encargarse', texto: 'Ofrecerte a darle una mano', posible: true },
+        { verbo: 'dar', texto: 'Darle algo de lo que llevas', posible: true },
+        { verbo: 'trabajar', texto: 'Quedarte trabajando cerca', posible: true },
+      ],
+    }
+  }
+
   const [
     agendas, sabeNpc, sabeJug, vinculo, memorias, charlas, sucesos, saberes, llevaJug, cuantas,
-    vinculosOtros, gente, pasado, pueblos,
+    vinculosOtros, gente, pasado, pueblos, encargosMios, noticias, arranques,
   ] = await Promise.all([
     // `select('*')` y no la lista de columnas: `agendas.needs_object` entra con
     // una migración que todavía no está en producción, y pedirle a supabase-js
@@ -491,6 +680,42 @@ export async function hablarCon(
     // LADO está cada quien, y sin eso las dos versiones del incendio no se
     // pueden repartir. Ver `voces`.
     db.from('peoples').select('name, place_id').eq('region_id', region.id),
+    // ── Lo que quedó abierto entre ustedes ─────────────────────────────
+    //
+    // Los encargos vivos de ESTE jugador. La consulta ya existía en este
+    // archivo, pero estaba abajo del todo y después de la llamada al modelo,
+    // sirviendo para una sola cosa: apagar el botón de "ofrecerte a darle una
+    // mano" cuando ya te habías ofrecido. O sea que el dato de "te encargaste y
+    // no volviste" estaba en la mano y no lo leía nadie para HABLAR.
+    //
+    // Sube acá por eso y de paso ahorra el salto de red suelto que costaba
+    // estar abajo. Se filtra por jugador y estado en el servidor —nunca
+    // trayendo la tabla y filtrando en JS: PostgREST corta en 1.000 filas y no
+    // avisa— y el `agenda_id` embebido trae de quién es cada uno.
+    db.from('encargos')
+      .select('id, agenda_id, taken_tick, agenda:agenda_id (id, goal, person_id, state, needs_object)')
+      .eq('player_id', playerId).eq('state', 'activo').limit(12),
+    // ── Lo que acaba de pasar en el valle ──────────────────────────────
+    //
+    // Dos días del valle hacia atrás y nada más. La ventana es corta a
+    // propósito: una noticia de hace una semana no es una noticia, es historia,
+    // y para eso ya está `EL PASADO`. Con doce horas reales de ventana, quien
+    // entra a jugar se encuentra con gente comentando lo de anoche.
+    //
+    // `NOTICIABLE` acota los tipos a lo que se sabe sin haber estado (ver la
+    // constante). El `limit` es chico porque de acá sale UNA sola línea: traer
+    // más es pagar filas para tirarlas.
+    db.from('events').select('id, kind, summary, tick, detail')
+      .eq('region_id', region.id).in('kind', NOTICIABLE)
+      .gte('tick', region.tick - 1)
+      .order('tick', { ascending: false }).limit(10),
+    // Con qué arrancó este NPC las últimas veces. Es el enfriamiento, y vive en
+    // la base y no en memoria porque en Vercel cada charla es un proceso nuevo.
+    // El índice parcial de la migración es justo para esta consulta.
+    db.from('talks').select('iniciativa, tick')
+      .eq('person_id', npc.id).eq('player_id', playerId)
+      .not('iniciativa', 'is', null)
+      .order('created_at', { ascending: false }).limit(8),
   ])
 
   const nombres = (r: { data: unknown[] | null }) =>
@@ -578,6 +803,10 @@ export async function hablarCon(
   // pedidos de hierro viejo. Ahora la lista se separa en dos —lo que pide y de
   // qué más puede hablar— y abajo se decide cuál de las dos sale hoy.
   type Agenda = {
+    // `id` viene con el `select('*')` de arriba y hasta hoy no se usaba. Lo
+    // necesita la iniciativa: la clave del enfriamiento es por meta, no por
+    // persona, o quien tenga dos metas abiertas te aborda dos veces al día.
+    id: string
     goal: string; state: string; progress: number
     needs_kind: string | null; needs_id: string | null; needs_object?: string | null
   }
@@ -915,14 +1144,218 @@ export async function hablarCon(
   // salir sola.
   const aguantoDemasiado = hilo.length >= 3 && desdeQueLoDijo >= (urgente ? 2 : 3)
 
-  type Modo = 'pedir' | 'contestar' | 'contar'
-  const modo: Modo = pedidos.length && (abrioLaPuerta || aguantoDemasiado) ? 'pedir'
+  // ── LA INICIATIVA: que el NPC empiece él ───────────────────────────────
+  //
+  // Todo lo de arriba decide QUÉ contesta alguien a quien le hablaron. Esto
+  // decide qué EMPIEZA alguien al que no le hablaron, y es lo que faltaba
+  // entero. Quien lo jugó lo dijo así: *"ellos casi no hacen algo, que tomen
+  // iniciativas"*, y tenía razón — un tipo trabado esperando exactamente lo que
+  // vos sabés no abría la boca hasta el cuarto turno, porque la ración del
+  // pedido (`aguantoDemasiado`) pide tres charlas de piso.
+  //
+  // **No hay ningún dato nuevo acá abajo.** Las cuatro fuentes ya estaban en la
+  // base y ninguna se leía para arrancar una charla: `agendas` (qué le falta),
+  // `encargos` (de qué te hiciste cargo y no volviste), `events` (qué acaba de
+  // pasar en el valle) y `memories` (qué recuerda de vos). Lo que se agrega es
+  // el orden en que pesan y el enfriamiento.
+  //
+  // Tres reglas la sostienen, y las tres son de código y deterministas:
+  //
+  //   1. **Sólo abre el que no fue interrumpido.** Si el jugador escribió algo
+  //      que no es un saludo, la iniciativa no corre: contestar a lo que te
+  //      dijeron gana siempre. Un NPC que te ignora para soltar lo suyo es peor
+  //      que uno callado.
+  //   2. **Una por persona, por jugador y por día del valle** — ver
+  //      `ESPERA_INICIATIVA_TICKS`, donde está la cuenta.
+  //   3. **Una noticia se comenta una vez y nunca más.** La clave lleva el id
+  //      del evento, así que el enfriamiento de las noticias es infinito por
+  //      construcción y no por un número.
+  //
+  // Y el invariante no se mueve: cada motivo cita una fila de la base y ninguno
+  // promete nada. Pedir que te traigan algo, cobrar un encargo que existe y
+  // comentar un hecho que está en `events` son las tres cosas que el mundo sí
+  // sabe cumplir; lo que pasa de verdad lo siguen decidiendo las opciones, que
+  // las arma el código.
+  type Motivo = { clave: string; razon: string; peso: number }
+  const motivos: Motivo[] = []
+
+  /** Las iniciativas que ya salieron, con el día en que salieron. */
+  const yaArranco = new Map<string, number>()
+  for (const a of (arranques.data ?? []) as { iniciativa: string | null; tick: number }[]) {
+    if (a.iniciativa && !yaArranco.has(a.iniciativa)) yaArranco.set(a.iniciativa, a.tick)
+  }
+  /** El día más reciente en que este NPC arrancó algo con este jugador. Es el
+   *  enfriamiento general: uno por día, sea del motivo que sea. */
+  const ultimoArranque = Math.max(-Infinity, ...[...yaArranco.values()])
+
+  // ── 1. El encargo que tomaste y no cerraste ────────────────────────────
+  //
+  // Es la deuda más concreta que puede haber entre un jugador y un NPC, y hasta
+  // hoy el NPC no la mencionaba nunca: la fila estaba viva en `encargos` y sólo
+  // servía para apagar un botón. Que te lo cobre es lo que convierte encargarse
+  // en un compromiso y no en un clic.
+  type Enc = {
+    agenda_id: string; taken_tick: number
+    agenda: { id: string; goal: string; person_id: string; state: string; needs_object: string | null } | null
+  }
+  const mios = ((encargosMios.data ?? []) as unknown as Enc[])
+    .map((e) => ({ ...e, agenda: embebido<Enc['agenda']>(e, 'agenda') }))
+  const conmigo = mios.filter((e) => e.agenda?.person_id === npc.id)
+  for (const e of conmigo) {
+    const dias = region.tick - e.taken_tick
+    const cosa = e.agenda?.needs_object
+    // Si lo trae encima el turno ya lo resuelve `traeLoQueFalta` más abajo, y
+    // mejor: ése no tiene enfriamiento porque no es el NPC insistiendo, es el
+    // jugador apareciendo con la cosa en la mano.
+    if (cosa && lleva.includes(cosa)) continue
+    // El mismo día en que se encargó no se le cobra nada. Sería la versión
+    // insoportable de esto: te ofreciste hace un minuto y ya te está apurando.
+    if (dias < 1) continue
+    motivos.push({
+      clave: `encargo:${e.agenda_id}`,
+      peso: 2,
+      razon: `${playerName} se encargó de ${e.agenda?.goal}` +
+        `${cosa ? ` —te iba a traer ${cosa}—` : ''} hace ${dias === 1 ? 'un día' : `${dias} días`}` +
+        ' y no ha vuelto con nada. Se lo recuerdas tú, sin que te lo pregunte.' +
+        ' No lo insultas y no lo perdonas: se lo dices como se lo dirías tú.',
+    })
+  }
+
+  // ── 2. Lo que te falta, dicho al que tienes delante ────────────────────
+  //
+  // La iniciativa más barata y más fuerte que hay en la base, y la que el
+  // jugador nombró: si estás trabado esperando algo y entra justo el que lo
+  // sabe o el que te lo puede traer, hablas tú.
+  //
+  // El umbral de confianza parte esto en dos, y no es un detalle de tono: es lo
+  // que hace audible una regla que ya existe. Por debajo de `UMBRAL_ENCARGO` el
+  // mundo no te deja encargarte de lo de nadie, así que el NPC tampoco te lo
+  // puede pedir — se queja delante tuyo y basta. Por arriba, te lo pide. El
+  // jugador aprende dónde está el umbral sin que nadie le muestre un número.
+  for (const a of abiertas) {
+    if (!a.id) continue
+    const trabada = a.state === 'bloqueada'
+    if (a.needs_kind === 'knowledge' && a.needs_id) {
+      const n = nombreSaber.get(a.needs_id)
+      // Que el que tienes delante sepa justo lo que te falta ver es el bucle
+      // entero del juego, y no depende de la confianza: pedir que te muestren
+      // algo no es pedir un favor de los que abre `UMBRAL_ENCARGO`.
+      if (n && saberesJug.includes(n)) {
+        motivos.push({
+          clave: `trabada:${a.id}`, peso: 3,
+          razon: `Estás detrás de ${a.goal} y te falta ver ${n}. ${playerName} lo sabe hacer.` +
+            ' Se lo pides tú, hoy, nada más verlo.',
+        })
+      }
+      continue
+    }
+    if (a.needs_kind === 'object' && a.needs_object) {
+      // Una meta que va bien no es una urgencia. Sólo arranca quien está
+      // trabado de verdad o quien lleva días sin moverse — si no, cualquiera
+      // con una lista de la compra te aborda al pasar.
+      if (!trabada && a.progress > 40) continue
+      motivos.push({
+        clave: `trabada:${a.id}`, peso: trabada ? 1 : 4,
+        razon: v >= UMBRAL_ENCARGO
+          ? `Te falta ${a.needs_object} para ${a.goal}${trabada ? ', y estás trabado con eso' : ''}.` +
+            ` De ${playerName} te fías lo bastante para pedírselo, así que se lo pides:` +
+            ' que te lo traiga, o que te diga de dónde sacarlo.'
+          : `Te falta ${a.needs_object} para ${a.goal}${trabada ? ', y estás trabado con eso' : ''}.` +
+            ` A ${playerName} no lo conoces lo suficiente para pedirle nada, así que no se lo pides:` +
+            ' te quejas de que falta y sigues con lo tuyo. Que se entere si quiere.',
+      })
+    }
+  }
+
+  // ── 3. Lo que acaba de pasar en el valle ───────────────────────────────
+  //
+  // Los eventos existían y no los comentaba nadie. Se manda UNO, el más nuevo
+  // que esta persona pueda saber, y se comenta una sola vez en la vida.
+  //
+  // Dos filtros y los dos son del invariante 3, no de gusto: se va lo que ya
+  // está en `LO QUE TE OCURRIÓ ÚLTIMAMENTE` (si la nombra a ella, no es una
+  // noticia, es su vida) y se va lo que hizo el jugador delante suyo (estuvo
+  // ahí; contárselo es de máquina).
+  const noticia = ((noticias.data ?? []) as
+    { id: string; kind: string; summary: string; tick: number; detail: Record<string, unknown> | null }[])
+    .filter((e) => !e.summary.includes(npc.name))
+    .filter((e) => e.detail?.player !== playerName)
+    .find((e) => !yaArranco.has(`noticia:${e.id}`))
+  if (noticia) {
+    motivos.push({
+      clave: `noticia:${noticia.id}`,
+      // Una muerte o un saber que se perdió del valle pesan más que cualquier
+      // cosa que uno quiera pedir. Es la única jerarquía escrita a mano acá.
+      peso: GRAVE.has(noticia.kind) ? 0 : 5,
+      razon: `Te enteraste hace poco: ${noticia.summary}` +
+        ' Es de oídas: no estabas, no lo viste, y no sabes más que eso.' +
+        ` Lo sacas tú, porque es lo que se comenta. No le agregues un nombre,` +
+        ' ni un motivo, ni un detalle que no esté en esa línea.',
+    })
+  }
+
+  // ── 4. Lo que quedó entre ustedes ──────────────────────────────────────
+  //
+  // Le regalaste algo, le enseñaste algo, te metiste a defenderlo. `memories`
+  // lo tiene y hasta hoy entraba como material de fondo —"recuerdas de X"— que
+  // el modelo usaba si le sobraba media frase. Acá es el motivo de abrir la
+  // boca.
+  //
+  // Sólo lo reciente: un recuerdo de hace veinte días no se retoma, se sabe. Y
+  // el hash de la clave es del TEXTO, no del id, porque lo que no se puede
+  // repetir es la cosa que se dice.
+  const fresco = ((memorias.data ?? []) as { what: string; tick: number }[])
+    .filter((m) => region.tick - m.tick <= 2)
+    .find((m) => !yaArranco.has(`recuerdo:${hash(m.what)}`))
+  if (fresco) {
+    motivos.push({
+      clave: `recuerdo:${hash(fresco.what)}`, peso: 6,
+      razon: `No has olvidado esto y hoy lo sacas tú: ${fresco.what}.` +
+        ' Lo dices como lo dirías tú —agradecido, incómodo, seco, lo que seas—,' +
+        ' una vez, y sin pedir nada a cambio.',
+    })
+  }
+
+  // ── Cuál sale, y si sale alguna ────────────────────────────────────────
+  //
+  // Cuatro puertas cerradas antes de que salga nada:
+  //
+  //   · el jugador dijo algo de verdad → se le contesta a él;
+  //   · trae justo lo que le falta → ese camino ya existe y es mejor;
+  //   · este NPC ya arrancó algo hoy → mañana;
+  //   · el motivo que tocaba ya salió hoy → se prueba con el siguiente.
+  //
+  // El desempate entre motivos del mismo peso va por `rota` y no por azar: dos
+  // charlas iguales tienen que dar lo mismo, o se siente una tragamonedas.
+  const puedeArrancar = (!dicho_por_el_jugador || solo_saludo) && !traeLoQueFalta
+    && region.tick - ultimoArranque >= ESPERA_INICIATIVA_TICKS
+  const candidatos = motivos
+    .filter((m) => region.tick - (yaArranco.get(m.clave) ?? -Infinity)
+      >= (ESPERA_POR_MOTIVO[m.clave.split(':')[0]!] ?? ESPERA_INICIATIVA_TICKS))
+    .sort((a, b) => a.peso - b.peso)
+  const mejor = candidatos.length
+    ? candidatos.filter((m) => m.peso === candidatos[0]!.peso)[
+        rota % candidatos.filter((m) => m.peso === candidatos[0]!.peso).length]!
+    : null
+  const iniciativa = puedeArrancar ? mejor : null
+
+  type Modo = 'empezar' | 'pedir' | 'contestar' | 'contar'
+  const modo: Modo = iniciativa ? 'empezar'
+    : pedidos.length && (abrioLaPuerta || aguantoDemasiado) ? 'pedir'
     : dicho_por_el_jugador && !solo_saludo ? 'contestar'
     : 'contar'
 
   // La rotación sigue existiendo para los turnos en que sí hay varios pedidos o
   // varios temas: el mismo contexto dos veces da la misma respuesta.
   const sucesosFiltrados = modo === 'pedir' ? sucesosPropios
+    // En el turno de la iniciativa se van todos, y por el mismo motivo por el
+    // que se va la lista de temas: es la otra fuente de la que el modelo saca
+    // una apertura alternativa. Medido con Marta, que teniendo la orden de
+    // sacar lo que le falta abrió contando que Tobio había aprendido la runa —
+    // un suceso suyo, verdadero, y que nadie le había pedido. La sección existe
+    // para justificar que alguien CAMBIE de idea entre charlas; en el turno en
+    // que arranca él no hace falta, y lo único que hace es competir.
+    : modo === 'empezar' ? []
     : sucesosPropios.filter((s) => !clavesArr.some((k) => pelar(s).includes(k)))
 
   const pedido = (pedidos.find((p) => p.leSirveEste) ?? pedidos[rota % Math.max(pedidos.length, 1)])?.texto
@@ -1007,7 +1440,19 @@ export async function hablarCon(
       '  eso, aunque también esté en tu historia y aunque te queme. Mañana.'
     : ''
 
-  const hoy = modo === 'pedir'
+  const hoy = modo === 'empezar'
+    // El bloque de la iniciativa REEMPLAZA al de pedir y no se suma: es una
+    // razón sola, escrita, en lugar de la lista entera de lo que le falta. Sale
+    // más barato que un turno de `pedir` y es más específico — y eso importa,
+    // porque el turno en que alguien arranca es el que el jugador va a leer con
+    // atención.
+    ? 'EMPIEZAS TÚ, Y SALE ESTO Y NADA MÁS. No esperas a que te hablen, no\n' +
+      '  saludas primero y no lo dejas para el final: es lo primero que dices.\n' +
+      `  ${iniciativa!.razon}\n` +
+      '  Es lo único de lo que hablas en este turno. Si se te ocurre otra cosa\n' +
+      '  que contar, hoy no la cuentas. Una vez, a tu manera, sin adornarlo y\n' +
+      '  sin prometer nada a cambio.' + noVuelvas
+    : modo === 'pedir'
     ? (desdeQueLoDijo === 0
       // Le preguntaron justo por lo que acaba de decir. Repetirlo igual es lo
       // que se sintió como "repiten mucho las charlas": dos turnos seguidos
@@ -1084,8 +1529,17 @@ export async function hablarCon(
       ? 'LO QUE TE FALTA (es tuyo, no te lo pidió nadie, y no se cuenta todo el tiempo):\n' +
         pedidos.map((p) => `  - ${p.texto}`).join('\n')
       : null,
-    'DE QUÉ PUEDES HABLAR (tienes más de un tema; tu problema es sólo uno de ellos):\n' +
-      temas.map((t) => `  - ${t}`).join('\n'),
+    // En el turno en que arranca él, la lista de temas NO SE MANDA, y esto se
+    // aprendió midiendo: con la lista puesta, Marta —que tenía una meta trabada
+    // y la orden de sacarla— abrió con «Tobio aprendió la Runa. Ya son tres los
+    // que la saben», que es un tema de la lista. Es exactamente la lección que
+    // ya está escrita dos renglones más abajo para los pedidos: **una lista de
+    // alternativas en el prompt es una lista de alternativas, diga lo que diga
+    // la instrucción de arriba.** El que empieza algo no está eligiendo tema:
+    // ya lo eligió.
+    modo === 'empezar' ? null
+      : 'DE QUÉ PUEDES HABLAR (tienes más de un tema; tu problema es sólo uno de ellos):\n' +
+        temas.map((t) => `  - ${t}`).join('\n'),
     // Sin esta sección el NPC no tiene con qué justificar un cambio, y un
     // cambio sin motivo es el modelo improvisando, no el personaje moviéndose.
     //
@@ -1103,7 +1557,20 @@ export async function hablarCon(
     saberesJug.length
       ? `${playerName} sabe: ${saberesJug.join(', ')}.`
       : `${playerName} no sabe ningún oficio todavía.`,
-    lleva.length ? `${playerName} lleva encima: ${lleva.join(', ')}.` : null,
+    // Y lo que lleva encima tampoco, en el turno en que arranca él. Es la
+    // tercera fuente de aperturas alternativas y la más pegajosa de las tres:
+    // con la línea puesta, Marta —que tenía la orden de pedir una piedra de
+    // afilar— abrió con «La raíz que llevas. ¿De dónde la sacaste», y Tobio
+    // igual. Un objeto concreto en las manos del otro le gana a cualquier
+    // instrucción, y se entiende: es lo más vívido del prompt.
+    //
+    // No se pierde nada, y esto es lo que lo hace seguro: el caso en que lo que
+    // lleva SÍ importa —trae justo lo que le falta— nunca llega hasta acá,
+    // porque `traeLoQueFalta` apaga la iniciativa entera y manda el turno por
+    // el camino de `pedir`, donde la línea sigue puesta. En `empezar` lo que
+    // lleva es, por construcción, algo que a esta persona no le sirve.
+    lleva.length && modo !== 'empezar'
+      ? `${playerName} lleva encima: ${lleva.join(', ')}.` : null,
     // Contra la repetición de forma. No van las respuestas enteras —ésas ya
     // están abajo en el hilo— sino cómo ARRANCÓ cada una, que es lo que se le
     // pega.
@@ -1166,6 +1633,10 @@ export async function hablarCon(
     prompt: contenido,
     respaldo: { saludo: '…', animo: 'neutral' },
   })
+  // Se arregla antes de guardarlo, no sólo antes de devolverlo: lo que queda en
+  // `talks` es lo que el NPC va a leer en la próxima charla como «esto ya lo
+  // dijiste», y guardarlo mal le enseña a escribirlo mal.
+  const loQueDijo = cerrarPreguntas(dicho.saludo)
   // Con `VER_PROMPT=1` sale por consola lo que se le mandó y lo que costó. No
   // es debug olvidado: cada charla es una llamada, el prompt creció de ~2100 a
   // ~2900 tokens al meterle las ganas, y la próxima vez que alguien quiera
@@ -1194,7 +1665,13 @@ export async function hablarCon(
     player_id: playerId,
     tick: region.tick,
     said: dicho_por_el_jugador || null,
-    replied: dicho.saludo,
+    replied: loQueDijo,
+    // Con qué arrancó, o null si la charla la abrió el jugador. Es el
+    // enfriamiento —la próxima charla lo lee de vuelta— y de paso la única
+    // instrumentación que hay de esto: `select iniciativa, count(*) from talks
+    // group by 1` dice si los NPCs están empezando cosas o volvieron a ser un
+    // mostrador, sin agregar una sola fila a `events`.
+    iniciativa: iniciativa?.clave ?? null,
   })
   if (errCharla) console.error(`No pude guardar la charla con ${npc.name}:`, errCharla.message)
 
@@ -1208,18 +1685,15 @@ export async function hablarCon(
   // juego: existían en el mundo y sólo se podían agarrar por API.
   const conObjeto = abiertas.find((a) =>
     a.needs_object && (a.state === 'activa' || a.state === 'bloqueada'))
-  // Se busca por la meta y no por el id de la agenda: `Agenda` acá no trae el
-  // id, y pedirlo obligaría a tocar la consulta de arriba, que es de otro.
-  const yaEncargado = conObjeto
-    ? ((await db.from('encargos')
-        .select('id, agenda:agenda_id (goal, person_id)')
-        .eq('player_id', playerId).eq('state', 'activo')).data ?? [])
-        .some((e) => {
-          // PostgREST tipa el embed como array aunque la relación sea a uno.
-          const a = (e as unknown as { agenda: { goal: string; person_id: string } | null }).agenda
-          return a?.goal === conObjeto.goal && a?.person_id === npc.id
-        })
-    : false
+  // Sale de `conmigo`, que ya se calculó arriba para la iniciativa: son los
+  // encargos vivos de este jugador con esta persona. Antes esta consulta vivía
+  // acá abajo, después de la llamada al modelo, y era un salto de red suelto en
+  // la ruta crítica; ahora entra en la tanda de arriba y sirve para dos cosas.
+  //
+  // Y se compara por `agenda_id` y no por el texto de la meta: ahora que
+  // `Agenda` trae el id, buscar por prosa era la versión frágil de lo mismo
+  // —dos metas con el mismo texto se pisaban— y ya no hace falta.
+  const yaEncargado = !!conObjeto && conmigo.some((e) => e.agenda_id === conObjeto.id)
 
   // Y dar: sólo si lo que llevás encima es justo lo que le falta. No ofrecer
   // "darle algo" en abstracto es a propósito — una opción que aparece siempre
@@ -1285,5 +1759,5 @@ export async function hablarCon(
     { verbo: 'trabajar', texto: 'Quedarte trabajando cerca', posible: true },
   ]
 
-  return { saludo: dicho.saludo, animo: dicho.animo, opciones }
+  return { saludo: loQueDijo, animo: dicho.animo, opciones, arranca: iniciativa !== null }
 }

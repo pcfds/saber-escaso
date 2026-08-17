@@ -123,7 +123,14 @@ REGLAS QUE NO SE ROMPEN:
 - Nada de números, porcentajes ni nombres de sistemas.
 - No prometas nada nunca. Un saludo no puede ofrecer un trato.
 - No preguntes "¿en qué puedo ayudarte?". Nadie habla así.
-- No uses el nombre de la otra persona más de una vez entre las tres.`
+- No uses el nombre de la otra persona más de una vez entre las tres.
+
+SI TE PIDO EL GRUPO "urgente": son las tres líneas de cuando le falta algo
+concreto y se le escapa al pasar. **Nombra la cosa que falta**, tal como te la
+doy. No es un pedido con todas las letras —el que pasa no se detuvo— es lo que
+se dice en voz alta trabajando: una queja, un cálculo a media voz, una pregunta
+al aire. Sirven para cualquiera que pase, así que no hablan de esa persona ni le
+piden nada a nadie en particular. Y siguen siendo un cruce: cortas, sin escena.`
 
 /** Los seis grados en una sola llamada.
  *
@@ -139,17 +146,31 @@ const lista = (que: string) => ({
   type: 'array', items: { type: 'string' },
   description: `Tres variantes para cuando ${que}.`,
 })
+const BASE = {
+  teme: lista('esa persona le da miedo'),
+  bronca: lista('le tiene bronca a esa persona'),
+  nadie: lista('no sabe quién es'),
+  ubica: lista('la ubica pero no confía'),
+  confia: lista('empieza a confiar'),
+  fe: lista('le tiene fe y le confiaría lo suyo'),
+} as const
+const REQUERIDOS = ['teme', 'bronca', 'nadie', 'ubica', 'confia', 'fe']
 const SCHEMA = {
+  type: 'object', properties: BASE, required: REQUERIDOS, additionalProperties: false,
+} as const
+/** El mismo, más el séptimo grupo: lo que se le escapa al que está trabado.
+ *
+ *  Es un esquema aparte y no un campo opcional a propósito. Un `urgente`
+ *  opcional se lo pediríamos al modelo también a quien no necesita nada, y ahí
+ *  las tres líneas salen igual —inventadas— porque un esquema es una orden y no
+ *  una pregunta. Se pide sólo cuando hay algo que pedir. */
+const SCHEMA_URGENTE = {
   type: 'object',
   properties: {
-    teme: lista('esa persona le da miedo'),
-    bronca: lista('le tiene bronca a esa persona'),
-    nadie: lista('no sabe quién es'),
-    ubica: lista('la ubica pero no confía'),
-    confia: lista('empieza a confiar'),
-    fe: lista('le tiene fe y le confiaría lo suyo'),
+    ...BASE,
+    urgente: lista('le falta algo concreto y se le nota al pasar'),
   },
-  required: ['teme', 'bronca', 'nadie', 'ubica', 'confia', 'fe'],
+  required: [...REQUERIDOS, 'urgente'],
   additionalProperties: false,
 } as const
 
@@ -163,12 +184,18 @@ type Persona = {
 /** La versión de la RECETA, no de los datos. Subirla rehace los saludos de todo
  *  el mundo sin tener que tocar ninguna fila: es la salida cuando lo que cambió
  *  es el prompt de acá arriba y no la persona. */
-const RECETA = 'v3'   // v3: el saludo es un cruce, no una escena
+const RECETA = 'v4'   // v4: el séptimo grupo, el del que está trabado
 
 /** Hash chico y estable. La huella se guarda en `people.saludos_de` y se lee en
  *  cada barrido del cron: meterle adentro los cuatrocientos caracteres de una
- *  voz sería pagar el texto entero por persona para comparar igualdad. */
-function hash(s: string): string {
+ *  voz sería pagar el texto entero por persona para comparar igualdad.
+ *
+ *  Se exporta porque `dialogo.ts` necesita exactamente lo mismo por otro
+ *  motivo: la clave del enfriamiento de una iniciativa que sale de un recuerdo
+ *  es el hash del TEXTO del recuerdo —lo que no se puede repetir es la cosa que
+ *  se dice—, y meter cien caracteres de prosa en una columna indexada para
+ *  compararlos por igualdad es lo mismo que se evita acá. */
+export function hash(s: string): string {
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i)
@@ -258,14 +285,46 @@ export async function refrescarSaludos(regionId: string, limite = 3): Promise<{
   for (const q of gente) {
     if (rehechos >= limite) break
 
-    const metas = ((await db.from('agendas')
-      .select('goal, state').eq('person_id', q.id)
-      .in('state', ['activa', 'bloqueada'])).data ?? [])
+    const abiertas = ((await db.from('agendas')
+      .select('goal, state, progress, needs_object').eq('person_id', q.id)
+      .in('state', ['activa', 'bloqueada'])).data ?? []) as {
+        goal: string; state: string; progress: number; needs_object: string | null
+      }[]
+    const metas = abiertas
       .map((a) => a.goal + (a.state === 'bloqueada' ? ' (y está trabado)' : ''))
 
+    // ── Lo que le falta y se le escapa al pasar ────────────────────────
+    //
+    // Es la iniciativa más barata que hay en todo el juego: entrás a la fragua,
+    // Ilde no levanta la vista y suelta que no hay carbón, y te enteraste de
+    // que hay algo que hacer sin abrir un menú ni frenarte a conversar.
+    //
+    // El dato ya estaba: `agendas.needs_object` dice qué le falta. Lo que
+    // faltaba era un grupo de líneas propio. Antes esto dependía de que el
+    // modelo se acordara solo de la instrucción «que se le note en qué anda»
+    // repartida entre dieciocho líneas de seis grados distintos, y en la
+    // práctica salía diluida en casi todas.
+    //
+    // El corte es el mismo que usa la iniciativa de `dialogo.ts` y tiene que
+    // serlo: una meta que va bien no es una urgencia, y si cualquiera con algo
+    // pendiente te lo dijera al pasar, el valle entero sería una lista de la
+    // compra.
+    const falta = [...new Set(abiertas
+      .filter((a) => a.needs_object && (a.state === 'bloqueada' || a.progress <= 40))
+      .map((a) => a.needs_object!))]
+
     const escalones: Escalon[] = ['teme', 'bronca', 'nadie', 'ubica', 'confia', 'fe']
-    const h = huella(metas, q.voice, q.procedencia)
-    if (q.saludos_de === h && q.saludos && Object.keys(q.saludos).length === escalones.length) {
+    // Lo que falta entra en la huella igual que las metas, y por el mismo
+    // motivo: una línea que pide carbón el día después de conseguirlo es peor
+    // que una genérica. Y va con el prefijo `falta:` para que no se confunda
+    // con una meta que se llame igual.
+    const h = huella([...metas, ...falta.map((f) => `falta:${f}`)], q.voice, q.procedencia)
+    // Los seis grados tienen que estar los seis; el séptimo puede faltar aunque
+    // toque —si las tres líneas urgentes salieron con voseo se caen todas y no
+    // se guarda ninguna— y eso no es motivo para rehacer a esta persona en cada
+    // barrido, para siempre y pagando cada vez. La huella guardada es la que
+    // manda; el conteo sólo protege contra un guardado a medias.
+    if (q.saludos_de === h && q.saludos && escalones.every((e) => q.saludos?.[e]?.length)) {
       continue
     }
 
@@ -280,9 +339,15 @@ export async function refrescarSaludos(regionId: string, limite = 3): Promise<{
       metas.length
         ? `Ahora vas detrás de: ${metas.join('; ')}.`
         : 'No persigues nada en particular.',
+      falta.length ? `Y te falta, para seguir: ${falta.join(', ')}.` : '',
       '',
       'Los seis grados, en orden:',
       ...escalones.map((e) => `- ${e}: alguien de quien ${COMO_TE_TRATA[e]}.`),
+      falta.length
+        ? `Y el séptimo grupo, "urgente": tres líneas de las que se te escapan ` +
+          `trabajando, nombrando lo que te falta (${falta.join(', ')}). Valen para ` +
+          `cualquiera que pase, así que no hablan de nadie en concreto.`
+        : '',
       // El recordatorio del idioma se repite al final, igual que el `cierre` de
       // `dialogo.ts`. Dicho una sola vez arriba del system prompt se diluye:
       // en la primera tanda, ocho de las dieciocho líneas de Tobio salieron en
@@ -293,8 +358,13 @@ export async function refrescarSaludos(regionId: string, limite = 3): Promise<{
       'y "aquí", nunca "acá".',
     ].filter(Boolean).join('\n')
 
-    const r = await pedirJson<Record<Escalon, string[]>>({
-      system: SYSTEM, prompt: ctx, schema: SCHEMA, maxTokens: 1400,
+    const r = await pedirJson<Record<string, string[]>>({
+      system: SYSTEM, prompt: ctx,
+      schema: falta.length ? SCHEMA_URGENTE : SCHEMA,
+      // Veintiuna líneas en vez de dieciocho cuando hay algo que falta. Sigue
+      // siendo UNA llamada por persona: el grueso del prompt es quién es, y eso
+      // se paga una vez.
+      maxTokens: falta.length ? 1650 : 1400,
       modelo: process.env.DIALOGO_MODEL ?? 'claude-haiku-4-5',
       respaldo: Object.fromEntries(
         escalones.map((e) => [e, [`${q.name} levanta la vista un segundo.`]]),
@@ -304,7 +374,7 @@ export async function refrescarSaludos(regionId: string, limite = 3): Promise<{
 
     const juego: Record<string, string[]> = {}
     let coladas = 0
-    for (const e of escalones) {
+    for (const e of [...escalones, ...(falta.length ? ['urgente' as const] : [])]) {
       // Si devolvió de menos, se sirve igual: tres es lo ideal, una es mejor
       // que ninguna. Y lo mismo con las que caza el colador: se van y se sirve
       // con las que quedan.
@@ -312,7 +382,14 @@ export async function refrescarSaludos(regionId: string, limite = 3): Promise<{
         .map((l) => String(l).trim()).filter((l) => l.length > 0).slice(0, 5)
       const limpias = todas.filter((l) => !RIOPLATENSE.test(l))
       coladas += todas.length - limpias.length
-      juego[e] = limpias.length ? limpias : [`${q.name} levanta la vista un segundo.`]
+      // El respaldo es para los seis grados, que tienen que existir sí o sí: un
+      // saludo vacío deja al que pasa sin nada. Con `urgente` es al revés — si
+      // se cayeron las tres, la clave NO se guarda y quien pasa recibe la línea
+      // del grado que le toca, que es peor pero nunca está mal. Rellenarlo con
+      // «levanta la vista un segundo» sería servir un cartel de urgencia con un
+      // gesto vacío adentro.
+      if (limpias.length) juego[e] = limpias
+      else if (e !== 'urgente') juego[e] = [`${q.name} levanta la vista un segundo.`]
     }
     // Se guarda la huella aunque se hayan caído líneas. Si no, el cron
     // reintentaría a esta persona en cada barrido, para siempre y pagando cada
@@ -334,14 +411,42 @@ export async function refrescarSaludos(regionId: string, limite = 3): Promise<{
  * dice cosas distintas de un día para otro, y a dos jugadores distintos les
  * dice cosas distintas el mismo día. Es determinista a propósito — dos veces
  * el mismo día tiene que ser la misma, o se siente una máquina tragamonedas.
+ *
+ * ── Y a veces sale lo que le falta ────────────────────────────────────────
+ *
+ * Si esta persona está trabada esperando algo, tiene un séptimo grupo de
+ * líneas (`urgente`) que nombran la cosa. **Uno de cada tres días del valle
+ * sale ésa en lugar de la del grado de confianza**, y eso es lo que convierte
+ * el saludo en un enganche: entrás a la fragua, Ilde no levanta la vista y
+ * suelta que no hay carbón, y ya sabés que hay algo que hacer.
+ *
+ * Uno de cada tres, y no siempre, por lo mismo que la iniciativa de
+ * `dialogo.ts` tiene enfriamiento: **alguien que cada vez que lo cruzás te
+ * recuerda lo que le falta es un cartel, no una persona.** La cuenta: el
+ * sorteo es por día del valle, así que en un día real —cuatro ticks— la línea
+ * urgente sale una o dos veces, y el resto del tiempo Ilde es Ilde.
+ *
+ * Y no se le dice al que te teme ni al que te guarda rencor. Los problemas
+ * propios se cuentan delante de quien no te va a usar en contra, y ésa es la
+ * primera cosa que hacen los dos ejes de `bonds` cuando se los deja hablar.
  */
 export function elegirSaludo(
   saludos: Record<string, string[]> | null,
   escalon: Escalon, tick: number, nombreJugador: string,
 ): string | null {
-  const lineas = saludos?.[escalon]
-  if (!lineas?.length) return null
   let h = tick
   for (const c of nombreJugador) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  const urgentes = saludos?.urgente
+  if (urgentes?.length && escalon !== 'teme' && escalon !== 'bronca' && h % 3 === 0) {
+    // El índice sale de `h / 3` y no de `h`, y esa división es un arreglo, no
+    // un adorno. Con `h % urgentes.length` sobre las mismas tres líneas, la
+    // rama sólo entra cuando `h % 3 === 0` y entonces el índice era SIEMPRE
+    // cero: Ilde repetía la misma línea de carbón por los siglos de los siglos.
+    // Es exactamente el fallo con el que arranca este archivo —«un saludo que
+    // no cambia es un cartel»— reinventado por un módulo mal elegido.
+    return urgentes[Math.floor(h / 3) % urgentes.length]!
+  }
+  const lineas = saludos?.[escalon]
+  if (!lineas?.length) return null
   return lineas[h % lineas.length]!
 }
