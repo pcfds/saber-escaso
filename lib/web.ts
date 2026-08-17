@@ -14,7 +14,7 @@ import { narrate, type Cronica } from './world/director.js'
 import { hablarCon } from './world/dialogo.js'
 import { pelear, recibirGolpe, levantarse } from './world/combate.js'
 import { escalonDe, elegirSaludo } from './world/saludos.js'
-import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta } from './world/magia.js'
+import { preparar, lanzar, grimorioDe, marcasDe, estaQuieta, loQueLleva } from './world/magia.js'
 // Los umbrales y cómo se dicen en palabras viven en tick.ts, que es quien los
 // aplica. Importarlos y no copiarlos no es prolijidad: la copia que había acá
 // decía "ya confía en vos, pedile que te enseñe" con 10 de aprecio, cuando el
@@ -589,6 +589,11 @@ export async function handler(
             amenazas: amenazas.data ?? [], objetos: objetos.data ?? [],
             saberes: saberes.data ?? [], vinculos: vinculos.data ?? [],
             player,
+            // Lo que lleva colgado hoy. Es una consulta más en la ruta que el
+            // cliente pega cada pocos segundos, y se banca porque es la MISMA
+            // que ya hace `/grimorio`: dos filas por `holder_id`, sin join
+            // pesado. Si algún día pesa, se cachea con el tick.
+            colgadas: await loQueLleva({ kind: 'player', id: player.id }),
           }),
           // `nombre` no es adorno: los que no son humanos no son mobs, son
           // pueblos, y matar a alguien con nombre pesa distinto que matar a
@@ -984,6 +989,8 @@ function pasos(m: {
   saberes: unknown[]
   vinculos: { person_id: string; valued: number; feared: number }[]
   player: { name: string; place_id: string | null }
+  /** Lo que lleva colgado HOY. Ver el bloque 1b. */
+  colgadas: { nombre: string; slug: string }[]
 }): Paso[] {
   const out: Paso[] = []
   const slug = (id: string | null) => m.places.find((p) => p.id === id)?.slug ?? ''
@@ -992,6 +999,16 @@ function pasos(m: {
     .map((k) => (k as { knowledge: { name: string; makes: string | null; makes_at: string | null } | null }).knowledge)
     .filter((k): k is { name: string; makes: string; makes_at: string } => !!k?.makes)
   const aprecio = (id: string) => m.vinculos.find((v) => v.person_id === id)?.valued ?? 0
+  // Todos los saberes por nombre, no sólo los que fabrican algo: `recetas` de
+  // acá arriba filtra por `makes`, y una runa no fabrica nada — así que las
+  // runas no aparecían en ninguna parte de esta función.
+  const recetasYSaberes = m.saberes
+    .map((k) => (k as { knowledge: { name: string } | null }).knowledge?.name)
+    .filter((n): n is string => !!n)
+  /** «el calor, la quietud y el aliento». Con coma no se lee como una lista de
+   *  cosas que llevás encima, se lee como una enumeración de inventario. */
+  const yLista = (xs: string[]) => xs.length <= 1 ? (xs[0] ?? '')
+    : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
 
   // 1. Sin saberes no hay juego: todo lo demás sale de que alguien te enseñe.
   if (recetas.length === 0) {
@@ -1005,13 +1022,45 @@ function pasos(m: {
       // querer: primero te piden algo, después te enseñan.
       out.push({
         texto: v >= UMBRAL_ENSENAR
-          ? `${quien.name} ${comoTeVe(v)}. Pedile que te enseñe su oficio.`
+          ? `${quien.name} ${comoTeVe(v)}. Pídele que te enseñe su oficio.`
           : v >= UMBRAL_ENCARGO
-          ? `${quien.name} ${comoTeVe(v)}: encargate de algo que necesite y va a ser otra cosa.`
-          : `Nadie te enseña nada todavía. Buscá a ${quien.name}, ${quien.trade}, y ganátelo: hablale y quedate trabajando cerca.`,
+          ? `${quien.name} ${comoTeVe(v)}: encárgate de algo que necesite y será otra cosa.`
+          : `Nadie te enseña nada todavía. Busca a ${quien.name}, ${quien.trade}, y gánatelo: háblale y quédate trabajando cerca.`,
         donde: slug(quien.place_id),
       })
     }
+  }
+
+  // 1b. Las runas, que es el sistema más grande del juego y el que nadie
+  // entiende.
+  //
+  // No es una suposición: quien lo jugó dijo textual **"no entiendo cómo hacen
+  // las runas para usarse"**, teniendo las cuatro en la cabeza. Y el motivo es
+  // que el sistema son DOS pasos y la pantalla sólo anunciaba el primero: hay
+  // un renglón que dice "P — colgarte las runas de hoy" y después, nada. Te
+  // colgás tres, se cierra el panel, y volvés a un valle idéntico sin que nada
+  // te diga que ahora se mantiene R y se suelta sobre algo.
+  //
+  // Así que acá va el eslabón que faltaba, y va en dos formas distintas según
+  // en cuál de los dos pasos estés parado. Sale del estado como todo lo demás:
+  // si no sabés ninguna runa no aparece nunca, y si ya te colgaste las de hoy
+  // deja de decirte que te las cuelgues.
+  const runas = recetasYSaberes.filter((n) => /^runa de /i.test(n))
+  if (runas.length > 0) {
+    out.push(m.colgadas.length === 0
+      ? {
+        // El "cada mañana" no es adorno: explica por qué el panel de ayer no
+        // sirve hoy, que es la parte del ritual que no se deduce sola.
+        texto: `Sabes trazar. Cada mañana eliges tres runas para llevar encima: pulsa P.`,
+        donde: '',
+      }
+      : {
+        // Se nombra lo que lleva HOY, no "tus runas": el jugador tiene que
+        // reconocer en la frase lo que acaba de elegir.
+        texto: `Llevas ${yLista(m.colgadas.map((c) => c.nombre))} encima.`
+          + ' Manten pulsada R, elige el trazo y suelta sobre lo que quieras alcanzar.',
+        donde: '',
+      })
   }
 
   // 2. Si ya sabés hacer algo, hacelo — practicar es lo que mejora la mano.
