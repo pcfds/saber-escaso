@@ -27,6 +27,27 @@ const pick = <T>(xs: T[]): T | undefined => xs[roll(xs.length)]
  *  parte de lo que alguien sabe, y se muere con esa persona. */
 type Receta = { name: string; makes: string; makes_at: string }
 
+/** Cuánto sube la destreza esta vez.
+ *
+ * Rendimientos decrecientes a propósito. Las primeras diez veces que forjás
+ * mejorás muchísimo; de 80 para arriba cada punto cuesta. Sin esa curva,
+ * practicar se vuelve una tarea con barra de progreso — o sea, grindeo — y lo
+ * que queremos es que valga la pena las primeras veces y después sea oficio.
+ */
+function mejora(destreza: number): number {
+  return Math.max(1, Math.round((100 - destreza) * 0.11))
+}
+
+/** La calidad de lo que sale de tus manos.
+ *
+ * Es donde la destreza se vuelve visible para los demás: una hoja mejor pega
+ * más fuerte y el que la recibe ve quién la hizo. El azar queda —un día te
+ * sale mejor que otro— pero centrado en lo que sabés hacer, no reemplazándolo.
+ */
+function calidad(destreza: number): number {
+  return Math.max(5, Math.min(100, Math.round(destreza * 0.85 + 8 + Math.random() * 22)))
+}
+
 export async function step() {
   const region = await getRegion()
   const nextTick = region.tick + 1
@@ -384,28 +405,46 @@ async function resolveAction(
       // un objeto del valle existe porque alguien vivo supo hacerlo. Ésa es la
       // regla entera, y es la que hace que un muerto se lleve cosas del mundo.
       const saberes = (await db
-        .from('knows').select('knowledge:knowledge_id (name, makes, makes_at)')
+        .from('knows')
+        .select('id, destreza, veces, knowledge:knowledge_id (name, makes, makes_at)')
         .eq('holder_kind', 'player').eq('holder_id', player.id)).data ?? []
-      const recetas = saberes
-        .map((k) => (k as unknown as { knowledge: Receta | null }).knowledge)
-        .filter((k): k is Receta => !!k?.makes && k.makes_at === lugar?.kind)
-      const receta = pick(recetas)
+      const aplicables = saberes.filter((k) => {
+        const c = (k as unknown as { knowledge: Receta | null }).knowledge
+        return !!c?.makes && c.makes_at === lugar?.kind
+      })
+      const elegido = pick(aplicables)
+      const receta = elegido
+        ? (elegido as unknown as { knowledge: Receta }).knowledge
+        : undefined
 
-      if (receta) {
-        const calidad = 35 + roll(45)
+      if (receta && elegido) {
+        // Practicar mejora. No es un contador que sube: es que la próxima
+        // hoja te va a salir mejor, y eso lo ve todo el que la use.
+        const antes: number = elegido.destreza
+        const ahora = Math.min(100, antes + mejora(antes))
+        await db.from('knows')
+          .update({ destreza: ahora, veces: elegido.veces + 1 })
+          .eq('id', elegido.id)
+
+        const q = calidad(antes)
         await db.from('objects').insert({
-          region_id: regionId, kind: receta.makes, quality: calidad,
+          region_id: regionId, kind: receta.makes, quality: q,
           made_by: player.name, made_tick: tick,
           holder_kind: 'player', holder_id: player.id,
         })
+        // Que se note cuando das un salto: es el momento en que sentís que
+        // aprendiste algo, y si no se dice en ningún lado, no pasó.
+        const salto = ahora - antes >= 6 && elegido.veces < 12
         ev({ kind: 'fabricacion', place_id: player.place_id,
-          summary: `${player.name} hizo ${receta.makes} en ${lugar?.name ?? 'el valle'}.`,
-          detail: { player: player.name, object: receta.makes, quality: calidad } })
+          summary: salto
+            ? `${player.name} hizo ${receta.makes} en ${lugar?.name ?? 'el valle'}, y le salió mejor que la vez anterior.`
+            : `${player.name} hizo ${receta.makes} en ${lugar?.name ?? 'el valle'}.`,
+          detail: { player: player.name, object: receta.makes, quality: q, destreza: ahora } })
         for (const t of testigos) {
           await recordar(t.id, player, `${player.name} sabe hacer ${receta.makes}`, tick)
           await tocarVinculo(t.id, player.id, { valued: 6 })
         }
-        return `hizo ${receta.makes}`
+        return `hizo ${receta.makes} (destreza ${ahora})`
       }
 
       ev({ kind: 'trabajo', place_id: player.place_id,
@@ -499,7 +538,7 @@ async function resolveAction(
       await db.from('knows').insert({
         holder_kind: 'player', holder_id: player.id,
         knowledge_id: nuevo.knowledge_id, learned_from: maestro.id,
-        how: 'aprendido', learned_tick: tick,
+        how: 'aprendido', learned_tick: tick, destreza: 0, veces: 0,
       })
       ev({ kind: 'ensenanza', place_id: maestro.place_id,
         summary: `${maestro.name} le enseñó ${info?.name} a ${player.name}.`,
@@ -525,10 +564,13 @@ async function resolveAction(
 
       const { data: info } = await db
         .from('knowledge').select('name').eq('id', nuevo.knowledge_id).single()
+      // Sin destreza: recibe el saber, no la mano. Va a tener que hacerlo un
+      // montón de veces para que le salga como a vos. Por eso enseñar no te
+      // clona — el oficio sobrevive y el maestro sigue siendo el maestro.
       await db.from('knows').insert({
         holder_kind: 'person', holder_id: alumno.id,
         knowledge_id: nuevo.knowledge_id, learned_from: null,
-        how: 'aprendido', learned_tick: tick,
+        how: 'aprendido', learned_tick: tick, destreza: 0, veces: 0,
       })
       ev({ kind: 'ensenanza', place_id: alumno.place_id,
         summary: `${player.name} le enseñó ${info?.name} a ${alumno.name}. Ahora lo saben dos.`,

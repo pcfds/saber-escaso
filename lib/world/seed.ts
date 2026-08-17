@@ -87,7 +87,10 @@ const PEOPLE = [
     agenda: { goal: 'morirse sin haberle enseñado la runa de quietud a nadie', needs: null } },
   { name: 'Tobio', trade: 'chico del camino', place: 'camino', teaches: false,
     disposition: 'Sabe quién entró y quién salió de la región. Lo cuenta gratis, que es peor.',
-    voice: 'Habla rápido y encima del otro. Cuenta antes de que le pregunten y agrega el detalle que nadie le pidió. Se entusiasma con lo que no entiende. Muchas frases le arrancan con "ayer" o "el otro día". Cuando quiere algo lo pide de una, sin rodeo, y se le nota en la cara.',
+    // Una voz no puede pedir un tipo de frase que obligue a inventar hechos:
+    // la primera versión de ésta decía "arranca con ayer o el otro día" y el
+    // modelo se fabricaba noticias que no estaban en la base para cumplirla.
+    voice: 'Habla rápido y encima del otro: arranca una pregunta, la deja por la mitad y hace otra. Pregunta tres cosas seguidas y no espera ninguna respuesta. Se entusiasma con lo que no entiende y lo repite en voz alta. Cuando quiere algo lo pide de una, sin rodeo. Nunca inventa noticias: si no vio nada, pregunta.',
     historia: 'Tiene doce o trece, nadie llevó la cuenta, y vive en el Camino del Norte porque ahí pasa lo único que pasa. Vio a alguien trazar una runa una vez, de lejos, y no se lo pudo sacar más de la cabeza. Reparte gratis todo lo que sabe y todavía no se dio cuenta de que eso le va a costar caro.',
     knows: [],
     agenda: { goal: 'ver de cerca a alguien que sepa magia', needs: 'runa-de-brasa' } },

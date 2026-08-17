@@ -56,8 +56,8 @@ jugable esa misma noche.**
 ### Los oficios y el saber
 - **Cualquiera puede aprender cualquier cosa.** Un mago que quiere ser herrero
   se pone a hacer y aprende, o absorbe el conocimiento de alguien.
-- El linaje, la sangre y los stats dan **afinidad o aura**, no exclusividad.
-  Uno tendrá más aura que otro; ninguno tiene una puerta cerrada.
+- El linaje, la sangre y la afinidad hacen que a uno le salga más rápido o con
+  más aura que a otro. **Nunca son una puerta cerrada.**
 - El saber se aprende de una persona, se enseña a una persona, y **se pierde
   con la última persona que lo tenía**.
 - **Un objeto sólo existe si alguien sabe hacerlo.** No hay tienda, no hay
@@ -106,14 +106,30 @@ jugable esa misma noche.**
   juego. El servidor ya está pensado así: el cliente es reemplazable, el mundo
   no. La primera versión jugable fue web y se tiró; el mundo siguió igual.
 
-### Stats
-- Hay stats, y mejoran. **Pero no son la progresión.** La progresión es lo que
-  sabés y a quién conocés. Un personaje con stats altos y sin saberes no puede
-  hacer nada; uno con saberes y stats bajos hace todo, peor.
-- Un stat alto es **afinidad**: aprendés más rápido, te sale más limpio, tenés
-  más aura. Nunca es una puerta cerrada.
-- Esto es a propósito y va contra lo que hace el género: si la progresión son
-  los números, el juego es grindeo. Si es el conocimiento, el juego es la gente.
+### Aprender y mejorar — son dos cosas distintas
+Esto es el corazón del sistema y es fácil de entender mal.
+
+- **El saber se aprende de una persona.** Es la puerta: sin que alguien te
+  enseñe, no podés forjar. Es lo social, lo escaso, y lo que se pierde del
+  mundo cuando muere el último que lo tenía.
+- **La destreza se gana haciéndolo.** Si cortás mucha leña, cortás mejor. Si
+  forjás mucho, te salen mejores hojas. Es tuya, la practicaste vos, y no te
+  la puede enseñar nadie.
+
+No están enfrentados: **el saber da stats, y practicar los mejora.** Un
+personaje con mucha destreza y sin saberes no tiene qué practicar; uno recién
+enseñado hace todo, mal, hasta que lo hace un montón de veces.
+
+**Por qué esto no es grindeo.** Grindear es repetir para que suba un número
+sin techo y sin significado. Acá lo que sube es **la calidad de lo que hacés**,
+y la calidad ya importa para todos: una hoja mejor pega más fuerte, y el que la
+recibe ve quién la hizo. No estás farmeando un contador: te estás volviendo
+bueno en un oficio que alguien te enseñó.
+
+**La consecuencia que hace que todo cierre:** cuando le enseñás algo a alguien,
+recibe el SABER, no tu destreza. Arranca de cero y tiene que practicarlo. Por
+eso enseñar no te clona: el oficio sobrevive, el maestro sigue siendo el
+maestro.
 
 ### Regenerativo
 - El mundo se recompone. Un valle que perdió a su herrera puede volver a tener

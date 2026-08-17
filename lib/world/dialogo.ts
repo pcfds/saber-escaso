@@ -37,6 +37,10 @@ algo largo.
 
 REGLAS:
 - Sólo podés mencionar cosas que están en los datos que te doy. Nada inventado.
+  En particular no cuentes sucesos que no estén: nada de "ayer pasó alguien",
+  nada de gente ni de noticias que no aparezcan acá. Preguntar sí podés.
+- No repitas una frase ni una pregunta que ya esté en LO QUE YA SE DIJERON. Si
+  preguntaste algo y no te contestaron, insistís de otra forma o lo dejás.
 - No hables como narrador ni te describas desde afuera. No pongas acotaciones
   entre asteriscos ni entre paréntesis. Sale sólo lo que decís en voz alta.
 - Si no confiás en esta persona, se nota. Si te cae bien, también.
@@ -128,32 +132,56 @@ export async function hablarCon(
     : v === 0 ? 'no te conoce'
     : 'no le caés bien'
 
+  // Vienen del final para atrás (las más nuevas primero) y acá se dan vuelta:
+  // el modelo tiene que leer la charla en el orden en que pasó o se confunde
+  // quién dijo qué primero.
+  const hilo = (charlas.data ?? []).slice().reverse()
+
   const ctx = [
-    `Sos ${npc.name}, ${npc.trade}. ${npc.disposition}`,
+    `QUIÉN SOS: ${npc.name}, ${npc.trade}. ${npc.disposition}`,
+    // La voz va temprano y se repite al final del prompt. Es la instrucción que
+    // más se diluye cuando abajo hay diez líneas de estado.
+    `CÓMO HABLÁS: ${npc.voice ?? 'Como alguien en el medio de su día que levanta la vista. Sin adornos.'}`,
+    npc.historia ? `DE DÓNDE VENÍS: ${npc.historia}` : null,
     `Te habla: ${playerName}.`,
     `Con ${playerName}: ${confianza}${f > 20 ? ', y te da un poco de miedo' : ''}.`,
     saberesNpc.length ? `Sabés: ${saberesNpc.join(', ')}.` : 'No tenés ningún oficio registrado.',
     npc.teaches ? 'Enseñás a quien se lo gana.' : 'No enseñás lo tuyo a nadie.',
     (agendas.data ?? []).length
-      ? `Estás persiguiendo: ${(agendas.data ?? []).map((a) =>
+      ? `LO QUE PERSEGUÍS: ${(agendas.data ?? []).map((a) =>
           a.goal + (a.state === 'bloqueada' ? ' (y estás trabado)' : '')).join('; ')}.`
       : 'No estás persiguiendo nada en particular.',
+    // Sin esta sección el NPC no tiene con qué justificar un cambio, y un
+    // cambio sin motivo es el modelo improvisando, no el personaje moviéndose.
+    (sucesos.data ?? []).length
+      ? 'LO QUE TE PASÓ ÚLTIMAMENTE (por acá y sólo por acá podés haber cambiado):\n' +
+        (sucesos.data ?? []).slice().reverse().map((e) => `  - ${e.summary}`).join('\n')
+      : null,
     (memorias.data ?? []).length
       ? `Recordás de ${playerName}:\n` + (memorias.data ?? []).map((m) => `  - ${m.what}`).join('\n')
       : `No recordás nada puntual de ${playerName}.`,
     saberesJug.length
       ? `${playerName} sabe: ${saberesJug.join(', ')}.`
       : `${playerName} no sabe ningún oficio todavía.`,
-  ].join('\n')
+    // Una charla en la que sólo se acercaron también cuenta: que alguien te
+    // ronde tres veces sin decir nada es información sobre esa persona.
+    hilo.length
+      ? `LO QUE YA SE DIJERON (de lo más viejo a lo más nuevo, esto pasó de verdad):\n` +
+        hilo.map((t) => (t.said
+          ? `  ${playerName}: "${t.said}"\n  Vos: "${t.replied}"`
+          : `  (${playerName} se acercó sin decir nada)\n  Vos: "${t.replied}"`)).join('\n')
+      : `Es la primera vez que hablan.`,
+  ].filter(Boolean).join('\n')
 
   // Lo que el jugador escribió, si escribió algo. El NPC responde a eso, pero
   // sigue atado a los mismos hechos: puede negarse, puede no entender, puede
   // mandarlo a pasear — lo que no puede es inventar que sabe algo que no sabe
   // ni prometer nada que el mundo no vaya a cumplir.
   const dicho_por_el_jugador = dice.trim().slice(0, 300)
+  const cierre = `Hablá exactamente como dice CÓMO HABLÁS. No suenes como cualquier habitante del valle: soná como ${npc.name}.`
   const contenido = dicho_por_el_jugador
-    ? `${ctx}\n\n${playerName} te dice: "${dicho_por_el_jugador}"\nContestale a eso, en personaje.`
-    : ctx
+    ? `${ctx}\n\n${playerName} te dice: "${dicho_por_el_jugador}"\nContestale a eso, en personaje. ${cierre}`
+    : `${ctx}\n\n${playerName} se te acercó y no dijo nada todavía. ${cierre}`
 
   const res = await anthropic.messages.create({
     model: process.env.DIALOGO_MODEL ?? 'claude-haiku-4-5',
@@ -167,6 +195,29 @@ export async function hablarCon(
   const dicho = raw && raw.type === 'text'
     ? (JSON.parse(raw.text) as { saludo: string; animo: string })
     : { saludo: '…', animo: 'neutral' }
+
+  // Guardar el intercambio es lo que convierte al NPC en alguien y no en un
+  // botón que devuelve texto. Va después del modelo y no antes porque recién
+  // acá existe la respuesta.
+  //
+  // Esto NO rompe el invariante de que el diálogo no escribe estado del mundo:
+  // `talks` no mueve a nadie, no reparte saberes y no cambia vínculos. Es el
+  // registro de que la conversación ocurrió — y por la regla de que lo que no
+  // llega al servidor no pasó, tiene que quedar guardado.
+  //
+  // Si el insert falla, la charla igual se devuelve: dejar al jugador sin
+  // respuesta por no poder anotarla es peor. Pero se grita en el log, porque el
+  // modo de falla silencioso acá es "el NPC dejó de acordarse" y así nadie lo
+  // ve hasta que un jugador se queja.
+  const { error: errCharla } = await db.from('talks').insert({
+    region_id: region.id,
+    person_id: npc.id,
+    player_id: playerId,
+    tick: region.tick,
+    said: dicho_por_el_jugador || null,
+    replied: dicho.saludo,
+  })
+  if (errCharla) console.error(`No pude guardar la charla con ${npc.name}:`, errCharla.message)
 
   // Las opciones no las inventa el modelo: salen del estado. Así una respuesta
   // nunca promete algo que el mundo no puede cumplir.
