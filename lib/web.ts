@@ -237,10 +237,23 @@ export async function handler(
         const found = await byToken(token)
         if (!found) return send(page('No existe', '<h1>No existe</h1>'), 404)
         const { region, player } = found
-        const [places, people] = await Promise.all([
+        const [places, people, amenazas, objetos] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
+          // Las muertas quedan en la tabla porque el director las narra después
+          // ("mató a X"), pero el cliente no tiene que plantar el cadáver otra vez.
+          db.from('threats').select('id, kind, health, max_health, place_id')
+            .eq('region_id', region.id).eq('alive', true),
+          db.from('objects').select('kind, quality, made_by')
+            .eq('holder_kind', 'player').eq('holder_id', player.id),
         ])
+
+        // El cliente ubica todo por slug — los uuid de la base no le dicen nada
+        // y el nombre cambia si algún día traducimos el valle. Se resuelve acá
+        // y no con un embed de PostgREST para no pagar un join por amenaza:
+        // los places ya vinieron en la misma tanda.
+        const slugDe = (id: string | null) => places.data?.find((p) => p.id === id)?.slug ?? ''
+
         return json({
           region: {
             name: region.name, tick: region.tick,
