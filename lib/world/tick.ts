@@ -2446,6 +2446,60 @@ export async function step() {
     }
   }
 
+  // ── 4c. El pueblo se defiende solo ────────────────────────
+  //
+  // **Hasta hoy nadie defendía nada.** La única defensa que existía saltaba
+  // cuando un bicho mordía a UN JUGADOR, y defendía al jugador — o sea que una
+  // cosa podía quedarse parada en el medio de Vado Bajo para siempre y la
+  // gente que vive ahí seguía con lo suyo. Y Sarn es **guardia**: tenía el
+  // oficio escrito en la fila y no guardaba nada.
+  //
+  // Lo pidió la dirección con dos frases: *"las ciudades pueden invadirse"* y
+  // *"habrá seguridad"*. Y la mitad ya pasaba sola: en producción hay tres
+  // amenazas paradas en La Casa Quemada y en el valle viejo una bajó hasta el
+  // vado. **Bajan; lo que faltaba era que alguien hiciera algo.**
+  //
+  // Quién pelea, en este orden y por un motivo:
+  //
+  //   1. **El que tiene el oficio.** Un guardia que ve algo en su pueblo y no
+  //      se mueve no es un guardia, es un vecino con título.
+  //   2. Si no hay, **el que vive ahí** — porque es su casa.
+  //
+  // Y **no pelea el que está de paso**: si te cruzás una jauría en el
+  // Sotobosque yendo a buscar raíz, eso ya lo resuelve la pasada 2 y con otras
+  // reglas. Acá se defiende lo propio.
+  //
+  // Usa `pelear()`, la MISMA función del jugador. Ver el encabezado de
+  // `combate.ts`: hubo dos copias del golpe una vez y costó caro.
+  for (const a of amenazas) {
+    if (!a.place_id) continue
+    // Los que tienen la casa ahí. `home_place_id` y no `place_id`: el que pasa
+    // caminando no defiende un pueblo que no es suyo.
+    const suyos = people.filter((p) =>
+      p.home_place_id === a.place_id && p.place_id === a.place_id)
+    if (suyos.length === 0) continue
+
+    const guardias = suyos.filter((p) => /guard|solda|centinel/i.test(p.trade ?? ''))
+    const quien = guardias[0] ?? suyos[0]!
+    // No todos los días. Un pueblo que mata todo lo que aparece el mismo día
+    // en que aparece es un pueblo sin amenazas — y la mitad de por qué un
+    // bicho da miedo es que sigue ahí mañana.
+    if (Math.random() > (guardias.length ? 0.55 : 0.30)) continue
+
+    const golpe = await pelear({
+      regionId: region.id, tick: nextTick, quien: 'person',
+      player: { id: quien.id, name: quien.name, place_id: quien.place_id },
+      threatId: a.id, ev,
+      alVerNpc: async (t, npc, mato) => {
+        await recordarEntre(t.id, npc.id, `${npc.name} mató a ${mato} en el pueblo`, nextTick)
+        await tocarVinculoEntre(t.id, npc.id, 10)
+      },
+    })
+    // El bicho contesta. Si no, defender sale gratis y deja de ser una
+    // decisión del mundo para ser un trámite.
+    if (golpe.ok && !golpe.muerta) a.health = golpe.health
+  }
+
   // ── 5. El chusmerío mueve la reputación ───────────────────
   // La gente se cuenta lo que vio. Así viaja la fama — mal y despacio.
   const recientes = (await db
