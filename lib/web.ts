@@ -242,7 +242,15 @@ export async function handler(
           db.from('people').select('id, name, trade, place_id').eq('region_id', region.id).eq('alive', true),
         ])
         return json({
-          region: { name: region.name, tick: region.tick },
+          region: {
+            name: region.name, tick: region.tick,
+            // La hora del valle, en segundos. Un tick es un día y el cron
+            // corre uno por hora, así que la hora del valle es cuánto va
+            // corrida la hora del servidor. Sale de acá y no del reloj de
+            // cada máquina a propósito: dos personas conectadas al mismo
+            // tiempo tienen que ver el mismo atardecer.
+            momento_del_dia: (Date.now() % 3_600_000) / 1000,
+          },
           player: { name: player.name, place_id: player.place_id },
           places: places.data ?? [], people: people.data ?? [],
         })
