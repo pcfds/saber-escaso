@@ -1340,14 +1340,38 @@ fácil lo rompe.** Hablar con los muertos toca el único clavo que sostiene todo
 te devuelva a Ilde para que te enseñe a forjar **no agrega un hechizo: borra el
 juego.**
 
-Y hay una forma de que sume en vez de romper, y es una sola línea:
+Mi primera regla fue *"un muerto puede contarte, no puede enseñarte"*, y la
+dirección la corrigió — **DECIDIDO**:
 
-> **Un muerto puede contarte, no puede enseñarte.**
+> *"Pero puedes aprender si te da algunos conceptos y viendo esa pieza con el
+> muerto. **No debe ser fácil pero posible.**"*
 
-Ilde te puede decir dónde escondió la última hoja, quién más aprendió de ella,
-por qué el temple le salía una de cada tres, qué le debía a Bruno. **Lo que no
-puede es ponerte la mano encima**, y eso ya está en el diseño: la destreza es
-tuya y no se transmite, y aprender es una cosa que pasa entre dos cuerpos.
+Y es mejor, porque encaja con un escalón que este documento ya tiene y que yo
+no había conectado. §8.1 dice que hay tres niveles y que **lo que aprendés solo
+tiene techo**: entrás al oficio y nunca sos bueno; lo que te enseña alguien
+vivo es lo que levanta ese techo.
+
+**Un muerto es exactamente el escalón del medio.** No te pone la mano encima
+—eso sigue siendo cierto y es lo que hace que un maestro vivo valga—, pero te
+da los conceptos, y con la pieza delante alcanza para empezar. Aprendés mal, y
+mal es infinitamente más que nada.
+
+Y hay algo que esto habilita y es lo mejor de todo: **hace falta la pieza.** No
+podés aprender a templar hablando con Ilde en el aire — necesitás una hoja que
+ella haya hecho, en la mano, para mirarla mientras te la explica. Eso convierte
+en oro todo lo que se construyó estas horas:
+
+- **Los objetos arrastran el nombre de quien los hizo** (`made_by`), y ahora ese
+  nombre no es sabor: es **la mitad de una lección**.
+- **Las cosas quedan tiradas en el suelo** y **lo que llevaba un muerto queda
+  donde se murió.** Una hoja en la ruina que dice *"la hizo Ilde, hace treinta
+  días"* pasa de ser una postal a ser **la única forma que queda de recuperar
+  la forja en este valle**.
+- Y **sigue siendo escaso**, que es lo que salva la tesis: si nadie guardó nada
+  de Ilde, o si la última hoja se rompió, o si alguien la vendió del otro lado
+  del valle — **no hay lección posible**. El saber sigue muriéndose con la
+  gente; lo que cambia es que ahora deja huellas, y las huellas se pueden
+  perder también.
 
 Con ese candado puesto, es el contenido más cargado que este juego puede tener:
 
@@ -1360,10 +1384,16 @@ Con ese candado puesto, es el contenido más cargado que este juego puede tener:
 - Y le da a la magia un para qué que no es daño, que es justo lo que a las
   cuatro runas les falta.
 
-> **INFERIDO, y hay que pelearlo antes de construirlo:** que cueste una sola
-> pregunta, y que el muerto responda con lo que el mundo tiene escrito de él —
-> sus eventos, su historia, lo que sabía— y **nada más**. Un fantasma que
-> improvisa es un chatbot con sábana, y §9.4 ya dice qué pasa con eso.
+> **INFERIDO, y hay que pelearlo antes de construirlo:** que el muerto responda
+> con lo que el mundo tiene escrito de él —sus eventos, su historia, lo que
+> sabía— y **nada más**. Un fantasma que improvisa es un chatbot con sábana, y
+> §9.4 ya dice qué pasa con eso.
+>
+> **Y que aprender así entre por la puerta del medio de §8.1**: te deja adentro
+> del oficio con destreza baja y con el techo del autodidacta puesto. Sale una
+> hoja torcida, y para que salga bien vas a necesitar a alguien vivo — o mucho
+> tiempo. Si aprender de un muerto rinde lo mismo que aprender de un vivo,
+> morirse deja de costar y volvimos al principio.
 
 ### 9.4 El diálogo — lo que NO se hace
 
