@@ -270,15 +270,22 @@ export function landing(): string {
   <p>Es una demo temprana de verdad, no un demo de prensa. Esto es lo que ya
   funciona y se puede jugar:</p>
   <ul class="lista">
-    <li>Caminar el valle en 3D, con día y noche: <b>seis horas reales son un
-    día del valle</b>, y el sol que ves es el mismo que ven todos los
-    conectados. La fase de la luna te dice qué día va el valle.</li>
+    <li>Caminar el valle en 3D, con bosque, río y montañas, y con día y noche:
+    <b>seis horas reales son un día del valle</b>, y el sol que ves es el mismo
+    que ven todos los conectados. La fase de la luna te dice qué día va.</li>
     <li>Hablarles a los habitantes <b>escribiéndoles lo que se te cante</b>, y
-    que te contesten en personaje, acordándose de lo anterior.</li>
-    <li>Aprender un oficio de alguien que confíe en vos, y enseñárselo a otro.</li>
-    <li>Fabricar cosas — y sólo podés fabricar lo que alguien te enseñó.</li>
-    <li>Pelear con lo que ronda el bosque, con lo que hayas forjado.</li>
-    <li>Leer la crónica de lo que pasó en el valle mientras no estabas.</li>
+    que te contesten en personaje, acordándose de lo anterior. Y que te
+    reconozcan al pasar, cada uno según cuánto te conoce.</li>
+    <li>Aprender un oficio de alguien que confíe en vos — y ganarte esa
+    confianza primero, que no es gratis. Después enseñárselo a otro.</li>
+    <li>Fabricar cosas. Sólo podés hacer lo que alguien te enseñó, y
+    <b>cuanto más lo hacés, mejor te sale</b>: tu primera hoja es un fierro
+    torcido.</li>
+    <li>Pelear con lo que ronda el bosque, con lo que hayas forjado — y que se
+    metan a defenderte los que te aprecian de verdad.</li>
+    <li><b>Cruzarte con los otros jugadores</b> que estén en el valle en ese
+    momento.</li>
+    <li>Leer la crónica de lo que pasó mientras no estabas.</li>
   </ul>
   <div class="marco">${bannerCielo()}
     <p class="epigrafe">Dos lunas y un gigante gaseoso. El cielo no es decoración: es el reloj compartido del valle.</p>
@@ -298,9 +305,13 @@ export function landing(): string {
   <ul class="lista falta">
     <li>Mazmorras.</li>
     <li>Construir.</li>
-    <li>Tomar las metas de los NPCs como quests tuyas.</li>
-    <li>Ver a los otros jugadores caminando por el valle.</li>
+    <li><b>Tomar las metas de los NPCs como quests tuyas.</b> Existe en el
+    mundo —Odila anda buscando raíz del Sotobosque hace días— pero todavía no
+    se puede agarrar desde el juego.</li>
+    <li>Que los NPCs caminen. Persiguen sus metas, pero no se mueven del lugar
+    donde están.</li>
     <li>Hablar la lengua de los pueblos que te atacan.</li>
+    <li>Entrar a las casas.</li>
     <li>Cuentas: por ahora el link de jugador se saca a mano.</li>
     <li>Inglés.</li>
   </ul>

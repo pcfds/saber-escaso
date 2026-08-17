@@ -24,6 +24,37 @@
  * formulario con acento; el estado tiene que ser el motor de lo que dice, no
  * el decorado que lo rodea. El invariante no se mueve: puede pedir, no puede
  * prometer.
+ *
+ * Y esa cuarta se pasó de largo, también con evidencia. Cinco turnos con Ilde,
+ * cinco preguntas distintas, y tres terminaban pidiendo hierro viejo. Quien lo
+ * jugó lo dijo así: *"repiten mucho las charlas"* — y tenía razón aunque las
+ * palabras cambiaran, porque el TEMA no cambiaba nunca. De ahí salen las dos
+ * reglas que ahora sostienen este archivo:
+ *
+ *   **1. La gana se raciona.** Una persona con un problema no te lo dice cada
+ *   vez que abrís la boca. Lo dice cuando viene al caso —le preguntaste, o
+ *   trajiste justo eso— o cuando ya no aguanta más de callada. Eso se decide
+ *   ACÁ, en código y determinista (`abrioLaPuerta`, `desdeQueLoDijo`,
+ *   `urgente`), y no se le delega al modelo con un "no repitas": ya sabemos que
+ *   pedirle variedad al modelo con el mismo contexto devuelve la misma
+ *   respuesta con otras palabras.
+ *
+ *   **2. Tiene que haber otra cosa de qué hablar.** Rotar el foco no alcanza si
+ *   todos los focos son pedidos. Por eso ahora hay dos listas: `pedidos` (lo
+ *   que quiere del otro) y `temas` (su oficio, el lugar, lo que le pasó, lo que
+ *   recuerda del jugador, con quién se lleva mal). Los turnos en que no toca
+ *   pedir se llenan con un tema — o con nada, que también es una opción: se
+ *   puede simplemente contestar.
+ *
+ * Del mismo lote salió un hallazgo sobre las voces, y vale como regla general:
+ * **una voz pide un REGISTRO, nunca un conteo de palabras.** "Frases de tres o
+ * cuatro palabras" no produce castellano seco, produce telegramas
+ * agramaticales —"Algo hacés vos", "Sacás de algún lado"—, porque el modelo
+ * tira artículos y preposiciones para cumplir el número. "Habla poco y va al
+ * grano" produce lo mismo que se quería y en castellano. Es el pariente del
+ * límite viejo (una voz no puede pedir un tipo de frase que obligue a inventar
+ * hechos): una voz tampoco puede pedir una forma que obligue a romper el
+ * idioma.
  */
 import { db, getRegion } from '../db.js'
 import { pedirJson } from '../modelo.js'
@@ -42,32 +73,52 @@ qué perseguís, qué sabés, qué recordás de esta persona y qué se dijeron l
 
 Decí UNA o DOS frases, salvo que CÓMO HABLÁS diga otra cosa.
 
-CÓMO HABLÁS manda sobre todo lo demás. El largo de la frase, el registro, las
-muletillas, el trato, y sobre todo de qué NO hablás, salen de ahí y de ningún
-otro lado. No hay un tono neutro del valle al que volver. Si tu voz dice que
-contestás con tres palabras, contestás con tres palabras aunque te pregunten
-algo largo.
+CÓMO HABLÁS manda sobre todo lo demás. El registro, el trato, las muletillas,
+qué preguntás y sobre todo de qué NO hablás salen de ahí y de ningún otro lado.
+No hay un tono neutro del valle al que volver.
 
-QUERÉS ALGO DE ESTA CHARLA. No estás esperando a que te pregunten.
-- LO QUE QUERÉS DE ESTA CHARLA es tuyo y es de hoy. Cuando el otro no trae
-  nada —te saluda y ya—, ese silencio es tu oportunidad: metés lo tuyo, pedís,
-  reclamás, insistís, te quejás. El que sólo reacciona no es una persona, es un
-  formulario.
-- EMPUJÁ ESTO HOY dice cuál de esas cosas te sale por la boca esta vez.
-  Arrancá por ahí. Las otras están para que se te crucen, no para listarlas.
-- Nunca le devuelvas la pregunta. Ni "¿hay algo que querés?", ni "¿qué andás
-  buscando?", ni "¿en qué puedo ayudarte?", ni "¿necesitás algo?". Nadie habla
-  así, y además es la forma de no decir nada. Si no sabés qué quiere el otro,
-  no importa: decí lo tuyo.
+CÓMO ESCRIBÍS. Esto tu voz no lo cambia, porque no es estilo: es el idioma.
+- Castellano rioplatense bien escrito. Vos, no tú. Y el voseo lleva su tilde:
+  mirá, contá, tenés, trabajás, decí, vení, sabés. "Mira", "trabajas" y "ven"
+  son de otro idioma y no los dice nadie acá.
+- Hablar seco es decir MENOS COSAS, no decir una cosa a la que le faltan
+  palabras. Una frase corta sigue siendo una frase: tiene su verbo, sus
+  artículos y sus preposiciones. "Algo hacés vos" y "Sacás de algún lado" no
+  son hablar seco, son telegramas rotos, y así no habla nadie.
+- Si no te entra, decí menos, no la mutiles. "Falta hierro." está bien.
+  "Hierro falta vos" no es más corto: está mal escrito.
+- Toda pregunta abre con ¿ y CIERRA con ?. "¿Tenés hierro." está mal escrito:
+  es "¿Tenés hierro?". Si tu voz dice que no usás signos de exclamación, eso
+  vale para ¡!, nunca para ¿?: una pregunta sin cerrar no es sequedad, es una
+  falta de ortografía.
+- No hables como narrador ni te describas desde afuera. Nada de acotaciones
+  entre asteriscos ni entre paréntesis. Sale sólo lo que decís en voz alta.
+
+DE QUÉ HABLÁS HOY. Tenés más de un tema y hoy te toca uno: el renglón HOY dice
+cuál, y manda.
+- Tenés un problema propio, y cuando toca sacarlo te llega en LO QUE TE FALTA.
+  Pero una persona no te lo suelta cada vez que abrís la boca: lo dice cuando
+  viene al caso —porque le preguntaron, porque el otro trajo justo eso— o
+  cuando ya no aguanta más de callada. El resto del tiempo habla de otra cosa:
+  de lo que está haciendo, de dónde está, de lo que le pasó, del otro. O se
+  queja y ya.
+- **Si no ves una sección LO QUE TE FALTA, hoy tu problema no es tema y no lo
+  nombrás.** Ni de costado, ni con un "igual me falta…" al final. No es que lo
+  escondas: es que hoy no salió, como no sale cada vez que hablás con alguien.
+- **Podés no pedir nada.** Contestar lo que te preguntaron y callarte también es
+  hablar. El que pide algo en cada frase es un cartel, no una persona.
+- Nunca le devuelvas la pregunta vacía. Ni "¿hay algo que querés?", ni "¿qué
+  andás buscando?", ni "¿en qué puedo ayudarte?", ni "¿necesitás algo?". Nadie
+  habla así, y además es la forma de no decir nada. Preguntar sí podés —por él,
+  por lo que sabe, por lo que vino a hacer—; el vacío es lo que no va.
 - **Pedir sí, prometer no.** Podés pedir que te muestren algo, que te traigan
   algo, que te den una mano, que no le cuenten a nadie. No podés ofrecer nada a
   cambio ni asegurar nada para después —ni "traeme esto y te doy aquello"—:
   eso el mundo no tiene cómo cumplirlo. Lo único que pasa de verdad son las
   opciones que el juego le ofrece a esta persona, y esas no las escribís vos.
-- Pedís del modo en que hablás vos. El que habla poco lo nombra y se calla; el
-  que habla de más lo rodea y termina pidiéndolo igual; el que no pregunta
-  nunca, lo deja dicho y espera. CÓMO HABLÁS manda; lo que querés es de qué
-  hablás.
+- Pedís y contás del modo en que hablás vos. El que habla poco lo nombra y se
+  calla; el que habla de más lo rodea y llega igual; el que no pregunta nunca,
+  lo deja dicho y espera. CÓMO HABLÁS manda; HOY dice de qué.
 
 REGLAS:
 - Sólo podés mencionar cosas que están en los datos que te doy. Nada inventado.
@@ -115,6 +166,48 @@ const SCHEMA = {
   additionalProperties: false,
 } as const
 
+// ── Reconocer de qué se está hablando ────────────────────────────────────
+//
+// Todo esto existe para una sola decisión, y es la del arreglo: ¿el jugador
+// abrió la puerta al problema del NPC, o no? Se hace con texto pelado y
+// palabras clave, que es tosco, y está bien que lo sea: el precio de un falso
+// positivo es que el NPC saque su tema una vez de más, y el de un falso
+// negativo es que no lo saque cuando se lo pidieron. Ninguno de los dos vale
+// una llamada más al modelo por turno.
+
+/** Minúscula y sin tildes. Comparar "¿qué te falta?" contra "que te falta" no
+ *  puede depender de que el jugador haya escrito el acento. */
+const pelar = (s: string): string =>
+  s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+/** Palabras que aparecen en cualquier frase y no dicen de qué se habla. Si se
+ *  colaran, "para" en una meta haría que cualquier cosa abra la puerta. */
+const VACIAS = new Set([
+  'para', 'ante', 'antes', 'sobre', 'desde', 'como', 'hasta', 'entre', 'cada',
+  'todo', 'toda', 'todos', 'todas', 'pero', 'porque', 'donde', 'cuando', 'esta',
+  'este', 'esto', 'esos', 'esas', 'otro', 'otra', 'algo', 'nada', 'alguien',
+  'mucho', 'poco', 'bien', 'tener', 'hacer', 'poder', 'decir', 'haber', 'sean',
+])
+
+/** Las palabras con carga de una frase. Cuatro letras o más: abajo de eso son
+ *  artículos y preposiciones que hacen ruido. */
+const claves = (frase: string): string[] =>
+  pelar(frase).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !VACIAS.has(w))
+
+/** Ofrecer una mano o preguntar qué le falta abre la puerta aunque no se
+ *  nombre la meta. Va sin tildes porque se prueba contra texto pelado. */
+const OFRECE = /(te ayud|ayudarte|ayudarla|ayudarlo|una mano|te falta|te hace falta|necesit|precis|te sirve|te traigo|te consigo|te traje|puedo (?:ayudar|traer|darte|conseguir|hacer|buscar)|queres que|en que anda|en que estas|que estas haciendo|que hacias|te debo|para que sirve)/
+
+/** El lugar viene embebido y supabase-js lo tipa como objeto o como array
+ *  según cómo infiera la relación. Se normaliza acá y no en cada uso. */
+function unLugar(fila: unknown): { name: string; description: string } | null {
+  const p = (fila as { place?: unknown }).place
+  const uno = Array.isArray(p) ? p[0] : p
+  return uno && typeof uno === 'object' && 'name' in uno
+    ? (uno as { name: string; description: string })
+    : null
+}
+
 export type Dialogo = {
   saludo: string
   animo: string
@@ -129,14 +222,19 @@ export async function hablarCon(
   // `.limit(1)` antes del maybeSingle porque el ilike puede pescar dos: con más
   // de una fila supabase-js devuelve error y `data` viene null, y el jugador
   // vería "no hay nadie llamado Ilde" justo cuando hay dos.
+  // El lugar viene embebido y no en una consulta aparte porque es un salto de
+  // red más antes de poder empezar los diez de abajo. Dónde está parada es uno
+  // de los temas que la salvan de hablar siempre de lo que le falta: lo que ve,
+  // el ruido, el olor del sitio.
   const { data: npc } = await db.from('people')
-    .select('id, name, trade, disposition, teaches, place_id, voice, historia')
+    .select('id, name, trade, disposition, teaches, place_id, voice, historia, place:place_id (name, description)')
     .eq('region_id', region.id).eq('alive', true).ilike('name', npcName)
     .limit(1).maybeSingle()
   if (!npc) throw new Error(`No hay nadie llamado ${npcName} por acá.`)
 
   const [
     agendas, sabeNpc, sabeJug, vinculo, memorias, charlas, sucesos, saberes, llevaJug, cuantas,
+    vinculosOtros, gente,
   ] = await Promise.all([
     // `select('*')` y no la lista de columnas: `agendas.needs_object` entra con
     // una migración que todavía no está en producción, y pedirle a supabase-js
@@ -179,6 +277,18 @@ export async function hablarCon(
     // idéntico charla tras charla, la salida también lo es.
     db.from('talks').select('id', { count: 'exact', head: true })
       .eq('person_id', npc.id).eq('player_id', playerId),
+    // Con quién se lleva bien y con quién no. Es tema de conversación puro: la
+    // gente habla de otra gente, y en DISENO el chusmerío ES la interfaz de la
+    // reputación. Hoy puede venir vacío (los vínculos entre NPCs los crea el
+    // tick y en una región joven no hay ninguno) y por eso no se depende de él:
+    // es un tema más de la lista, no el único.
+    db.from('bonds').select('toward_id, valued, feared')
+      .eq('person_id', npc.id).eq('toward_kind', 'person')
+      .order('valued', { ascending: false }).limit(4),
+    // Siete filas. Sirve para ponerle nombre a los vínculos de arriba —
+    // `bonds.toward_id` es polimórfico y no tiene FK, así que no hay embed
+    // posible y el join se hace acá.
+    db.from('people').select('id, name').eq('region_id', region.id).eq('alive', true),
   ])
 
   const nombres = (r: { data: unknown[] | null }) =>
@@ -215,6 +325,18 @@ export async function hablarCon(
       .filter((e) => e.kind !== 'conversacion').map((e) => e.summary),
   )].reverse()
 
+  // Lo que el jugador escribió, si escribió algo. Sube hasta acá porque ahora
+  // decide cosas: de lo que dijo sale si le abrió o no la puerta al problema
+  // del NPC, y de eso sale de qué se habla hoy.
+  const dicho_por_el_jugador = dice.trim().slice(0, 300)
+
+  // Un "hola" pelado no es contenido: es un turno vacío. Si no se lo dice, el
+  // modelo trata el saludo como el tema de la charla y contesta saludando —
+  // que es literalmente lo que pasó las cinco veces que alguien probó esto.
+  const solo_saludo = /^[¡!¿?.,\s]*(hola+|holis|buenas|buen d[íi]a|buenas tardes|buenas noches|ey|hey|qu[ée] tal|saludos|hi)[\s!¡.,]*$/i
+    .test(dicho_por_el_jugador)
+  const pelado = pelar(dicho_por_el_jugador)
+
   // ── Lo que el NPC quiere de esta charla ────────────────────────────────
   //
   // Es el arreglo de fondo de este archivo. Un NPC al que le pasás su estado
@@ -231,6 +353,11 @@ export async function hablarCon(
   // el mundo sabe hacer (las opciones de abajo, `aprender` / `ensenar` /
   // `trabajar`). Nada de "traeme esto y te doy aquello": eso lo sigue
   // prohibiendo el system prompt.
+  //
+  // Lo que cambió: antes esta lista era lo único que se le mandaba y SIEMPRE
+  // había un `EMPUJÁ ESTO HOY`. Con eso, cinco turnos con Ilde daban tres
+  // pedidos de hierro viejo. Ahora la lista se separa en dos —lo que pide y de
+  // qué más puede hablar— y abajo se decide cuál de las dos sale hoy.
   type Agenda = {
     goal: string; state: string; progress: number
     needs_kind: string | null; needs_id: string | null; needs_object?: string | null
@@ -240,57 +367,218 @@ export async function hablarCon(
     ((saberes.data ?? []) as { id: string; name: string }[]).map((k) => [k.id, k.name]),
   )
   const lleva = [...new Set(((llevaJug.data ?? []) as { kind: string }[]).map((o) => o.kind))]
-  const ganas: string[] = []
+
+  /** Un pedido, más la marca de si el que está enfrente es JUSTO el que lo
+   *  puede resolver. Esa marca gana sobre la rotación: si venís con el hierro
+   *  en la mano, el hierro es el tema, no el que le tocaba por turno. */
+  const pedidos: { texto: string; leSirveEste: boolean }[] = []
+  /** Las palabras con las que se reconoce "esto es su tema" — se usan en las
+   *  dos direcciones: para ver si el jugador lo trajo, y para ver si el NPC ya
+   *  lo dijo hace poco. */
+  const clavesMeta = new Set<string>()
+  let urgente = false
 
   for (const a of abiertas) {
     // El progreso no se dice nunca como número (regla del prompt), pero sí
     // como urgencia: estar al 94% de pagar una deuda es una persona apurada.
+    // Y la urgencia ahora hace algo más que colorear la frase: acorta cuánto
+    // se la aguanta callada antes de volver a sacar el tema.
+    const apura = a.state === 'bloqueada' || a.progress >= 75
+    if (apura) urgente = true
     const empuje = a.state === 'bloqueada' ? ' (estás trabado con esto)'
       : a.progress >= 75 ? ' (te falta poquito)'
       : ''
+    for (const c of claves(a.goal)) clavesMeta.add(c)
     let falta = ''
+    let leSirveEste = false
     if (a.needs_kind === 'object' && a.needs_object) {
-      falta = lleva.includes(a.needs_object)
+      for (const c of claves(a.needs_object)) clavesMeta.add(c)
+      leSirveEste = lleva.includes(a.needs_object)
+      falta = leSirveEste
         ? `: te falta ${a.needs_object}, y ${playerName} lleva ${a.needs_object} encima AHORA. Pedíselo.`
         : `: te falta ${a.needs_object}. Preguntale si tiene o de dónde sacarlo.`
     } else if (a.needs_kind === 'knowledge' && a.needs_id) {
       const n = nombreSaber.get(a.needs_id)
       if (n) {
-        falta = saberesJug.includes(n)
+        for (const c of claves(n)) clavesMeta.add(c)
+        leSirveEste = saberesJug.includes(n)
+        falta = leSirveEste
           ? `: te falta ver ${n} — y ${playerName} lo sabe. Pedile que te lo muestre, hoy.`
           : `: te falta ver ${n}, y ${playerName} no lo sabe. Preguntale si conoce a alguien que sí.`
       }
     }
-    ganas.push(`${a.goal}${empuje}${falta || '. Contá en qué andás con eso, o pedí una mano.'}`)
+    pedidos.push({
+      texto: `${a.goal}${empuje}${falta || '. Contá en qué andás con eso, o pedí una mano.'}`,
+      leSirveEste,
+    })
   }
 
   // Que el otro sepa algo que vos no es una gana por sí sola, tenga o no
   // agenda que lo pida. Es el bucle del juego: el saber se pide a una persona.
   const teFalta = saberesJug.find((s) => !saberesNpc.includes(s))
-  if (teFalta && !ganas.some((g) => g.includes(teFalta))) {
-    ganas.push(`Que ${playerName} te muestre ${teFalta}: lo sabe y vos no.`)
+  if (teFalta && !pedidos.some((p) => p.texto.includes(teFalta))) {
+    pedidos.push({ texto: `Que ${playerName} te muestre ${teFalta}: lo sabe y vos no.`, leSirveEste: true })
+    for (const c of claves(teFalta)) clavesMeta.add(c)
   }
-  // El que enseña y todavía no te ubica no quiere darte nada: quiere ver si
-  // valés la pena. Eso también es querer algo de la charla.
-  if (npc.teaches && v < 10 && saberesNpc.some((s) => !saberesJug.includes(s))) {
-    ganas.push(`Ver si ${playerName} sirve para algo antes de mostrarle nada tuyo.`)
-  }
-  // Que el otro no tenga oficio conocido es una gana en sí misma, y es la que
-  // salva al forastero recién llegado: sin esto, el que todavía no sabe nada ni
-  // trae nada no le despierta nada a nadie, y ahí volvemos al saludo vacío.
-  if (!saberesJug.length) {
-    ganas.push(`Averiguar qué sabe hacer ${playerName}, si es que sabe algo: no le conocés oficio.`)
-  }
-  if (!recuerdos.length) {
-    ganas.push(`Saber quién es ${playerName} y a qué vino: no sabés nada suyo.`)
-  }
-  ganas.push(`Que ${playerName} se quede y te dé una mano con lo tuyo.`)
 
-  // Cuál empuja HOY. Rota con la cantidad de charlas por una razón medida: con
-  // el mismo contexto exacto, el modelo devuelve la misma respuesta con otras
-  // palabras. Cambiar qué se le manda es lo único que rompe eso de verdad; una
-  // regla más de "no repitas" no alcanza.
-  const foco = ganas[(cuantas.count ?? 0) % ganas.length]
+  // ── De qué más puede hablar ────────────────────────────────────────────
+  //
+  // La otra mitad del arreglo, y la que faltaba entera. Racionar el pedido sin
+  // darle otra cosa deja a alguien mirándote en silencio: el turno hay que
+  // llenarlo con algo. Todo lo de acá abajo ya estaba en el prompt —oficio,
+  // historia, lugar, memoria, sucesos— pero como DATO, tapado por la orden de
+  // empujar la meta. Nombrarlo como tema es lo que lo pone en juego.
+  //
+  // Ninguno de estos temas obliga a inventar un hecho: son cosas que el NPC
+  // tiene delante o que están en la base. El tema es un permiso para hablar de
+  // eso, nunca un pedido de que invente contenido nuevo.
+  const donde = unLugar(npc)
+  const nombrePersona = new Map<string, string>(
+    ((gente.data ?? []) as { id: string; name: string }[]).map((p) => [p.id, p.name]),
+  )
+  const conOtros = ((vinculosOtros.data ?? []) as
+    { toward_id: string; valued: number; feared: number }[])
+    .map((b) => {
+      const n = nombrePersona.get(b.toward_id)
+      if (!n || n === npc.name) return null
+      return b.feared >= 25 ? `${n}, que no te da confianza`
+        : b.valued >= 15 ? `${n}, con quien te llevás bien`
+        : b.valued < 0 ? `${n}, a quien no tragás`
+        : `${n}, a quien ubicás y poco más`
+    })
+    .filter(Boolean) as string[]
+
+  const temas: string[] = []
+  temas.push(`Lo que tenés en las manos ahora mismo: sos ${npc.trade}` +
+    (donde ? ` y estás en ${donde.name}. ${donde.description}` : '.'))
+  if (saberesNpc.length) {
+    temas.push(`Tu oficio: ${saberesNpc.join(', ')}. Cómo se hace, qué sale mal, cuánto lleva.`)
+  }
+  if (npc.historia) {
+    temas.push('Algo de DE DÓNDE VENÍS, un pedazo chico. No lo cuentes entero ni de una.')
+  }
+  if (sucesosPropios.length) {
+    temas.push(`Lo que te pasó últimamente: ${sucesosPropios[sucesosPropios.length - 1]}`)
+  }
+  if (recuerdos.length) temas.push(`Algo que recordás de ${playerName}, y qué te pareció.`)
+  else temas.push(`Quién es ${playerName} y a qué vino. Preguntale por él, no por lo que te falta a vos.`)
+  if (saberesJug.length) temas.push(`Que ${playerName} sabe ${saberesJug.join(', ')}: qué opinás de eso.`)
+  else temas.push(`Que ${playerName} no tiene oficio conocido: qué te parece alguien así por acá.`)
+  if (lleva.length) temas.push(`Lo que ${playerName} lleva encima: ${lleva.join(', ')}.`)
+  if (conOtros.length) temas.push(`La gente de por acá: ${conOtros.join('; ')}.`)
+  // El único tema que no sale de una fila de la base, y por eso va acotado a lo
+  // que se siente y nunca a lo que pasó: el frío es una sensación, "anoche se
+  // heló el río" sería un suceso inventado.
+  temas.push('El frío, el ruido, el humo, el cansancio: lo que se siente donde estás. ' +
+    'Una queja corta alcanza. Sin contar que pasó nada.')
+  if (npc.teaches && v < 10) {
+    temas.push(`Que todavía no sabés si ${playerName} vale la pena. Podés decírselo en la cara.`)
+  }
+
+  // ── Cuándo sale el problema y cuándo no ────────────────────────────────
+  //
+  // Esta decisión es de código y determinista a propósito. Ya sabemos —está
+  // medido en este archivo— que pedirle variedad al modelo con el mismo
+  // contexto devuelve la misma respuesta con otras palabras: lo único que
+  // cambia la salida es cambiar lo que se le manda. Así que "hoy no toca" no
+  // es una sugerencia en el system prompt, es una sección que directamente no
+  // aparece.
+  //
+  // Tres puertas, y ninguna es "porque sí".
+  //
+  //   1. Le preguntaron. Ofrecer una mano, preguntar qué le falta o nombrar lo
+  //      que persigue abre la puerta; callarse ahí no es discreción, es raro.
+  const preguntaPorLoTuyo = Boolean(dicho_por_el_jugador) && !solo_saludo &&
+    (OFRECE.test(pelado) || [...clavesMeta].some((k) => pelado.includes(k)))
+  //   2. Le trajeron justo eso. No hace falta que digan nada: si venís con el
+  //      hierro en la mano, el hierro es el tema.
+  const traeLoQueFalta = abiertas.some((a) =>
+    a.needs_kind === 'object' && a.needs_object && lleva.includes(a.needs_object))
+  const abrioLaPuerta = traeLoQueFalta || preguntaPorLoTuyo
+
+  //   3. Ya no aguanta más. Hace cuántos turnos que el tema no aparece.
+  //
+  // Un turno "tocó el tema" por cualquiera de los dos lados: porque en la
+  // respuesta están las palabras de la meta, o porque en ese turno le
+  // preguntaron y por lo tanto salió sí o sí. Las dos hacen falta y por
+  // separado fallan: las palabras solas no alcanzan cuando la meta es vaga
+  // ("curtir lo de esta semana" no deja ninguna palabra reconocible en "que se
+  // vaya el humo"), y la puerta sola no ve las veces que lo sacó ella.
+  const clavesArr = [...clavesMeta]
+  const dichas = hilo.map((t) => pelar(String(t.replied ?? '')))
+  const pedidos_previos = hilo.map((t, i) =>
+    clavesArr.some((k) => dichas[i]!.includes(k)) ||
+    (Boolean(t.said) && (OFRECE.test(pelar(String(t.said))) ||
+      clavesArr.some((k) => pelar(String(t.said)).includes(k)))))
+  let desdeQueLoDijo = Number.POSITIVE_INFINITY
+  for (let i = pedidos_previos.length - 1; i >= 0; i--) {
+    if (pedidos_previos[i]) { desdeQueLoDijo = pedidos_previos.length - 1 - i; break }
+  }
+  // El piso de tres charlas es aparte del contador y es el que evita lo peor:
+  // a nadie le tirás tu problema apenas te saluda por primera vez. Después,
+  // tres turnos de silencio (dos si está trabada o casi lo termina) y vuelve a
+  // salir sola.
+  const aguantoDemasiado = hilo.length >= 3 && desdeQueLoDijo >= (urgente ? 2 : 3)
+
+  type Modo = 'pedir' | 'contestar' | 'contar'
+  const modo: Modo = pedidos.length && (abrioLaPuerta || aguantoDemasiado) ? 'pedir'
+    : dicho_por_el_jugador && !solo_saludo ? 'contestar'
+    : 'contar'
+
+  // La rotación sigue existiendo para los turnos en que sí hay varios pedidos o
+  // varios temas: el mismo contexto dos veces da la misma respuesta.
+  const sucesosFiltrados = modo === 'pedir' ? sucesosPropios
+    : sucesosPropios.filter((s) => !clavesArr.some((k) => pelar(s).includes(k)))
+
+  const rota = cuantas.count ?? 0
+  const pedido = (pedidos.find((p) => p.leSirveEste) ?? pedidos[rota % Math.max(pedidos.length, 1)])?.texto
+  const tema = temas[rota % temas.length]!
+
+  // Lo último que dijo, entero. Va acá arriba porque las tres ramas de abajo lo
+  // usan para lo mismo: contestar dos veces seguidas la misma cosa es de
+  // máquina, y la regla genérica de "no repitas" no alcanzó — se midió.
+  const ultimaSuya = hilo.length ? String(hilo[hilo.length - 1]!.replied ?? '').trim() : ''
+  const noVuelvas = ultimaSuya
+    ? `\n  Recién dijiste: "${ultimaSuya}". Eso ya está dicho. Hoy sale otra cosa.`
+    : ''
+
+  // Sacar la meta del prompt no siempre alcanza, porque a veces la meta también
+  // está en la historia: Sarn persigue "dormir una noche entera" y su historia
+  // dice que hace tres noches que duerme mal. Ahí el tema entra igual por la
+  // ventana. Para esos casos hace falta nombrarlo para prohibirlo — es feo, y
+  // es el único lugar donde el prompt dice la meta en un turno en que no toca.
+  const nombraLaMeta = abiertas.map((a) => a.goal).join('; ')
+  const hoyNo = nombraLaMeta
+    ? `\n  Y hoy NO sale el tema de: ${nombraLaMeta}. Ni eso, ni una versión más suave de\n` +
+      '  eso, aunque también esté en tu historia y aunque te pique. Mañana.'
+    : ''
+
+  const hoy = modo === 'pedir'
+    ? (desdeQueLoDijo === 0
+      // Le preguntaron justo por lo que acaba de decir. Repetirlo igual es lo
+      // que se sintió como "repiten mucho las charlas": dos turnos seguidos
+      // pidiendo hierro viejo con otras palabras.
+      ? `HOY LO TRAÉS OTRA VEZ, PERO YA LO DIJISTE RECIÉN: ${pedido}\n` +
+        `  Lo acabás de decir ("${ultimaSuya}") y te lo volvieron a preguntar. Repetirlo\n` +
+        '  igual es de máquina. Elegí una: das el dato que faltaba, te impacientás porque\n' +
+        '  ya lo dijiste, o lo das por dicho y seguís con otra cosa.'
+      : `HOY SÍ LO TRAÉS: ${pedido}\n` +
+        '  Viene al caso: te preguntaron por eso, o el otro trae justo eso, o ya te lo\n' +
+        '  callaste demasiadas veces. Lo decís UNA vez, a tu manera, y no lo repetís\n' +
+        `  dos veces en la misma respuesta.${noVuelvas}`)
+    : modo === 'contestar'
+      ? 'HOY NO PEDÍS NADA' + (pedidos.length ? ' Y NO NOMBRÁS LO QUE TE FALTA' : '') +
+        '. Ni de costado, ni con un\n' +
+        '  "igual…" al final. Contestá lo que te dijeron, con lo tuyo y como hablás vos.\n' +
+        `  Si te sobra media frase, que vaya por acá: ${tema}\n` +
+        `  Y si con contestar alcanza, alcanza: no todo turno tiene que empujar algo.${hoyNo}${noVuelvas}`
+      : 'NADIE TRAJO NADA, así que el turno lo llenás vos' +
+        (pedidos.length ? ' — pero NO con lo que te falta, que hoy no toca' : '') + '.\n' +
+        `  Sale por acá: ${tema}\n` +
+        '  Puede ser lo que estás haciendo, una queja, algo que ves, o una pregunta sobre\n' +
+        '  ÉL —quién es, de dónde salió, qué sabe hacer, por qué anda por acá—. Nunca\n' +
+        '  "¿necesitás algo?" ni "¿hay algo que buscás?": eso no es una pregunta, es un\n' +
+        `  mostrador. No hace falta que pidas nada.${hoyNo}${noVuelvas}`
 
   // Las primeras palabras de lo último que dijo. Es contra la repetición de
   // FORMA: la regla vieja evitaba repetir el contenido y no la estructura, y
@@ -312,14 +600,33 @@ export async function hablarCon(
     // Esto reemplazó a un renglón que decía "LO QUE PERSEGUÍS: pagar lo que
     // debe" y nada más. Era estado como decorado: cierto, y sin ninguna
     // consecuencia sobre lo que el tipo abría la boca para decir.
-    `LO QUE QUERÉS DE ESTA CHARLA (es tuyo, no te lo pidió nadie):\n` +
-      ganas.map((g) => `  - ${g}`).join('\n'),
-    `EMPUJÁ ESTO HOY: ${foco}`,
+    //
+    // Y el renglón de abajo —de qué MÁS puede hablar— es lo que evita el
+    // exceso contrario: con una sola lista, y siendo toda de pedidos, el NPC
+    // pedía en los cinco turnos.
+    //
+    // Ojo con el `modo === 'pedir'`: en los turnos en que no toca, la lista NO
+    // SE MANDA. Decirle "esto es lo que te falta, pero hoy no lo nombres" no
+    // alcanza y está medido — Haiku abría con las bisagras del granero en un
+    // turno marcado como "no toca". Lo que no está en el prompt no se puede
+    // decir; es el mismo principio por el que las opciones las arma el código y
+    // no el modelo. De paso, seis de cada diez turnos salen más baratos.
+    modo === 'pedir' && pedidos.length
+      ? 'LO QUE TE FALTA (es tuyo, no te lo pidió nadie, y no se cuenta todo el tiempo):\n' +
+        pedidos.map((p) => `  - ${p.texto}`).join('\n')
+      : null,
+    'DE QUÉ PODÉS HABLAR (tenés más de un tema; tu problema es sólo uno de ellos):\n' +
+      temas.map((t) => `  - ${t}`).join('\n'),
     // Sin esta sección el NPC no tiene con qué justificar un cambio, y un
     // cambio sin motivo es el modelo improvisando, no el personaje moviéndose.
-    sucesosPropios.length
+    //
+    // Los sucesos que hablan de la meta se van con la meta. Guardar la lista de
+    // pedidos y dejar entrar "Ilde avanzó bastante con rehacer las bisagras"
+    // sería taparse un ojo: el tema vuelve a estar en el prompt y el modelo lo
+    // levanta igual.
+    sucesosFiltrados.length
       ? 'LO QUE TE PASÓ ÚLTIMAMENTE (por acá y sólo por acá podés haber cambiado):\n' +
-        sucesosPropios.map((s) => `  - ${s}`).join('\n')
+        sucesosFiltrados.map((s) => `  - ${s}`).join('\n')
       : null,
     recuerdos.length
       ? `Recordás de ${playerName}:\n` + recuerdos.map((m) => `  - ${m}`).join('\n')
@@ -343,27 +650,32 @@ export async function hablarCon(
           ? `  ${playerName}: "${t.said}"\n  Vos: "${t.replied}"`
           : `  (${playerName} se acercó sin decir nada)\n  Vos: "${t.replied}"`)).join('\n')
       : `Es la primera vez que hablan.`,
+    // `hoy` va último a propósito. Es la instrucción que decide el turno y la
+    // que más se diluye si queda enterrada entre diez renglones de estado: acá
+    // abajo es lo último que lee antes de la línea del jugador.
+    hoy,
   ].filter(Boolean).join('\n')
 
-  // Lo que el jugador escribió, si escribió algo. El NPC responde a eso, pero
-  // sigue atado a los mismos hechos: puede negarse, puede no entender, puede
-  // mandarlo a pasear — lo que no puede es inventar que sabe algo que no sabe
-  // ni prometer nada que el mundo no vaya a cumplir.
-  const dicho_por_el_jugador = dice.trim().slice(0, 300)
-
-  // Un "hola" pelado no es contenido: es un turno vacío. Si no se lo dice, el
-  // modelo trata el saludo como el tema de la charla y contesta saludando —
-  // que es literalmente lo que pasó las cinco veces que alguien probó esto.
-  const solo_saludo = /^[¡!¿?.,\s]*(hola+|holis|buenas|buen d[íi]a|buenas tardes|buenas noches|ey|hey|qu[ée] tal|saludos|hi)[\s!¡.,]*$/i
-    .test(dicho_por_el_jugador)
-
-  const cierre = `Hablá exactamente como dice CÓMO HABLÁS. No suenes como cualquier habitante del valle: soná como ${npc.name}.`
-  const vacio = `El turno es tuyo: empujá lo que querés, no le devuelvas la pregunta. ${cierre}`
+  // El NPC responde a lo que le dijeron, pero sigue atado a los mismos hechos:
+  // puede negarse, puede no entender, puede mandarlo a pasear — lo que no puede
+  // es inventar que sabe algo que no sabe ni prometer nada que el mundo no vaya
+  // a cumplir.
+  // El recordatorio de ortografía se repite acá abajo, y no es redundancia
+  // gratuita: es la instrucción que más se pierde entre el system prompt y el
+  // final del contexto. Haiku dejaba preguntas abiertas —"¿Tenés hierro."—
+  // sobre todo en las voces que dicen "no usa signos de exclamación", que el
+  // modelo generaliza a los de interrogación.
+  const cierre = `Hablá exactamente como dice CÓMO HABLÁS, en castellano bien escrito y con las preguntas cerradas con "?". No suenes como cualquier habitante del valle: soná como ${npc.name}.`
+  // Antes este renglón decía "el turno es tuyo: empujá lo que querés". Era la
+  // otra mitad de por qué pedían en los cinco turnos: cualquier saludo vacío
+  // disparaba un pedido. Ahora el turno vacío se llena con lo que diga `hoy`,
+  // que la mayoría de las veces no es un pedido.
+  const vacio = `El turno es tuyo, y HOY dice con qué lo llenás. No le devuelvas la pregunta. ${cierre}`
   const contenido = !dicho_por_el_jugador
     ? `${ctx}\n\n${playerName} se te acercó y no dijo nada todavía. ${vacio}`
     : solo_saludo
       ? `${ctx}\n\n${playerName} te dice "${dicho_por_el_jugador}" y nada más: no trajo nada. ${vacio}`
-      : `${ctx}\n\n${playerName} te dice: "${dicho_por_el_jugador}"\nContestale a eso, en personaje. ${cierre}`
+      : `${ctx}\n\n${playerName} te dice: "${dicho_por_el_jugador}"\nContestale a eso, en personaje, respetando HOY. ${cierre}`
 
   // Cada charla es una llamada suelta y barata: sin `esfuerzo`, porque una o
   // dos frases en personaje no mejoran por pensarlas más, y con `respaldo`,

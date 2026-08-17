@@ -38,9 +38,22 @@ const KNOWLEDGE = [
 // `disposition` es el carácter en una línea, para el director. `voice` y
 // `historia` son otra cosa y por eso están aparte:
 //
-//   voice    — cómo suena. Registro, largo de frase, muletillas y, lo que más
-//              rinde, de qué NO habla nunca. Sin esto el modelo aplica un
-//              acento parejo a todo el valle y salen siete porteños iguales.
+//   voice    — cómo suena. Registro, muletillas y, lo que más rinde, de qué NO
+//              habla nunca. Sin esto el modelo aplica un acento parejo a todo
+//              el valle y salen siete porteños iguales.
+//
+//              **Registro, nunca un conteo de palabras.** Es una regla dura y
+//              salió midiendo: la voz de Ilde decía "frases de tres o cuatro
+//              palabras" y producía telegramas agramaticales —"Algo hacés
+//              vos", "Sacás de algún lado"—, porque para cumplir el número el
+//              modelo tira artículos y preposiciones. "Habla poco y va al
+//              grano" da el mismo efecto y en castellano. Lo mismo vale para
+//              prohibir una clase de palabra ("sin adjetivos") o fijar un
+//              tiempo verbal ("en pasado"): eso es gramática, no voz.
+//              Junto con el límite viejo —una voz no puede pedir un tipo de
+//              frase que obligue a inventar hechos— quedan dos: no pidas una
+//              forma que obligue a inventar, ni una que obligue a romper el
+//              idioma.
 //   historia — de dónde viene y qué le pasó. Es lo que sostiene la línea entre
 //              una charla y la siguiente: si el NPC cambia de idea, tiene que
 //              ser porque pasó algo en `events`, no porque el modelo tiró otro
@@ -51,7 +64,7 @@ const KNOWLEDGE = [
 const PEOPLE = [
   { name: 'Ilde', trade: 'herrera', place: 'fragua', teaches: true,
     disposition: 'Habla poco y trabaja de espaldas a la puerta. Enseña a quien se queda tres días sin pedir nada.',
-    voice: 'Frases de tres o cuatro palabras. No saluda, no se despide, no repite lo que ya dijo. Contesta con el oficio: si algo se puede o no se puede, y cuánto tarda. Nunca habla de lo que siente ni de gente que no está presente. Cuando algo le importa se nota en que hace una pregunta corta, una sola. No usa signos de exclamación.',
+    voice: 'Habla poco y va al grano: una frase corta, bien dicha, y se calla. No saluda ni se despide, y no repite lo que ya dijo. Contesta con el oficio — si algo se puede o no se puede, cuánto lleva, y qué hace falta para que salga bien. Nunca habla de lo que siente ni de gente que no está presente. Cuando algo le importa hace una pregunta corta, una sola. No usa signos de exclamación.',
     historia: 'Aprendió de su padre, que le pegaba, y se quedó con la fragua el día que él se murió. Tuvo un aprendiz antes de Bruno; se fue un invierno y no lo nombra. El yunque se le partió y lo tiene atado con fleje: todo lo que forja mientras tanto le sale peor de lo que ella sabe hacerlo, y eso la tiene de mal humor hace meses.',
     knows: ['forja-simple', 'temple-de-rio'],
     agenda: { goal: 'rehacer el yunque partido antes de que baje el frío', needs: 'forja-simple' } },
@@ -63,7 +76,10 @@ const PEOPLE = [
     agenda: { goal: 'que Ilde le muestre el temple de río', needs: 'temple-de-rio' } },
   { name: 'Marta', trade: 'cazadora', place: 'bosque', teaches: true,
     disposition: 'Entra al Sotobosque sola y vuelve. Le molesta que se lo pregunten.',
-    voice: 'Contesta lo justo y después se queda callada; el silencio lo tiene que romper el otro. Frases sin adjetivos, en pasado, sobre lo que tiene delante. Si le preguntan algo del Sotobosque, contesta otra cosa o no contesta. No pregunta nada de vuelta y nunca usa el nombre de quien le habla. No explica lo que hace ni por qué lo hace.',
+    // "Frases sin adjetivos, en pasado" era el defecto de Ilde en otra forma:
+    // prohibir una clase de palabra y fijar un tiempo verbal es gramática, no
+    // registro, y salían frases rotas ("Viste algo en el camino que viniste").
+    voice: 'Contesta lo justo y después se calla; el silencio lo tiene que romper el otro. Frases enteras pero peladas, sin adorno, sobre lo que tiene delante: el monte, el frío, lo que vio hoy. Si le preguntan algo del Sotobosque, contesta otra cosa o no contesta. No pregunta nada de vuelta y nunca usa el nombre de quien le habla. No explica lo que hace ni por qué lo hace.',
     historia: 'Entró al Sotobosque con su hermano hace nueve años y volvió sola. Esa parte no la cuenta. Vio una vez un claro con luz que no venía de arriba y no lo volvió a encontrar; desde entonces entra igual, cada semana, y vuelve. Lee las sendas mejor que nadie del valle y eso la mantiene viva y sola.',
     knows: ['lectura-de-sendas'],
     agenda: { goal: 'encontrar el claro que vio una vez y no volvió a encontrar', needs: null } },
