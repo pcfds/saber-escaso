@@ -1222,6 +1222,27 @@ decirlo.
 un contador de crímenes. La consecuencia es social y ya está construida; lo que
 falta es conectarla.
 
+> **ESTÁ CONSTRUIDO** (18 de agosto). `people.health` existe, el verbo es
+> `golpear` —no `pelear`, ver abajo— y vive en `golpearPersona()` de
+> `combate.ts`. Medido en `valle-pruebas`, no supuesto:
+>
+> · **Ocho golpes para matar** (vida 100, daño 8–16). No se llega ahí
+>   distraído, que era la regla 3.
+> · **Pide que pares al segundo golpe y se va del lugar al cuarto**, escribiendo
+>   `people.place_id`: el resto del valle la ve donde se fue y el que la buscaba
+>   para que le enseñara tampoco la encuentra. La regla 1 en una columna.
+> · Los testigos terminan en `valued −100 / feared +100`.
+> · Del lado del cliente, **el primer clic no pega**: amaga, nombra a quién y
+>   dice si enseña.
+>
+> Y una que casi se escapa: **pedir y huir colgaban del mismo umbral**, así que
+> la frase «te pidió que pares» —el único aviso que da el mundo antes de que
+> esto sea irreversible— no salió ni una vez en ocho golpes. La prueba habría
+> pasado igual. Se separaron los umbrales (0,75 y 0,50).
+>
+> No es `pelear` y la distinción es el diseño entero: `pelear` sube el aprecio
+> de los que te ven, porque matar un bicho es defender al valle. Esto lo baja.
+
 ### 9.3d Estamentos, carácter y la reputación del pueblo entero
 
 Pedido de la dirección del proyecto, textual:
