@@ -478,6 +478,46 @@ export async function handler(
       return send(landing())
     }
 
+    // El nombre de un jugador NO es un dato del sistema: es el nombre de una
+    // persona del valle. El director lo trata como tal —su SYSTEM dice "tampoco
+    // 'jugador': los demás del valle son gente"— y hace bien. El agujero estaba
+    // acá: entraba cualquier cosa de 24 caracteres.
+    //
+    // Pasó de verdad y está en producción: un jugador llamado `Prueba3D`, y
+    // crónicas que le llegan a TODOS diciendo «Prueba3D anduvo revuelto todo el
+    // día» o «la vieja Ren empezó a confiar en Prueba3D». No es que el director
+    // narre mal: narra bien un nombre que nunca debió existir. La regla de no
+    // usar vocabulario del sistema estaba escrita sólo para el modelo, y nadie
+    // previó que **el nombre de otro jugador puede ser vocabulario del sistema**.
+    //
+    // Se rechaza por el MUNDO y no por una regla técnica: el que entra lee una
+    // frase del valle, no un error de formulario. Y se rechaza poco: esto no es
+    // un filtro de nombres feos —de esos no protege nada— sino de los cuatro o
+    // cinco que rompen la ficción para todos los demás.
+    const nombreDelValle = (n: string): string | null => {
+      const limpio = n.trim()
+      if (limpio.length < 2) return 'Un nombre así no lo repite nadie. Poné uno que se pueda decir.'
+      // Sin dígitos: `Prueba3D`, `Pedro123`, `xXx_2_xXx`. En el valle nadie se
+      // llama con un número, y es lo que más lo delata como nombre de prueba.
+      if (/\d/.test(limpio)) return 'Acá nadie se llama con números. Poné un nombre de persona.'
+      // Letras, espacios y lo que lleva un nombre castellano. Nada de _ ni de
+      // signos: eso es un usuario de sistema, no alguien del valle.
+      if (!/^[\p{L}][\p{L}\s'·-]*$/u.test(limpio)) return 'Sólo letras. Es un nombre, no un usuario.'
+      // Las palabras que rompen la ficción cuando el director las narra como
+      // gente. Cortas y en el medio de una frase, así que se comparan contra el
+      // nombre entero y contra cada palabra suelta.
+      const RESERVADAS = new Set([
+        'prueba', 'pruebas', 'test', 'testing', 'debug', 'admin', 'root',
+        'null', 'undefined', 'system', 'sistema', 'bot', 'npc', 'jugador',
+        'player', 'director', 'anonimo', 'anónimo',
+      ])
+      const palabras = limpio.toLowerCase().split(/[\s'·-]+/)
+      if (palabras.some((w) => RESERVADAS.has(w))) {
+        return 'Ese nombre no es de nadie del valle. Poné uno que puedan decir en voz alta.'
+      }
+      return null
+    }
+
     if (url.pathname === '/entrar' && !url.searchParams.get('name')) {
       const region = await getRegion()
       const { count } = await db.from('players')
@@ -500,6 +540,18 @@ export async function handler(
     if (url.pathname === '/entrar') {
       const name = (url.searchParams.get('name') ?? '').trim().slice(0, 24)
       if (!name) { res.writeHead(303, { location: '/' }); return res.end() }
+      const mal = nombreDelValle(name)
+      if (mal) {
+        return send(page('Entrar al valle', `
+          <h1>Entrar al valle</h1>
+          <div class="warn">${esc(mal)}</div>
+          <form method="get" action="/entrar"><div class="row">
+            <input name="name" placeholder="tu nombre" required autofocus maxlength="24"
+              value="${esc(name)}">
+            <button>Entrar al valle</button>
+          </div></form>
+        `))
+      }
       const { player } = await ensurePlayer(name)
       return back(player.token, undefined, '?nuevo=1')
     }
