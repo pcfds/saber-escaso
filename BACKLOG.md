@@ -633,6 +633,74 @@ Dos cosas separadas: **sacar o renombrar a `Prueba3D` de producción** (higiene 
 datos, y es lo urgente porque sale en las crónicas de todos) y **decidir qué se
 valida al crear un personaje** (diseño).
 
+### JUG.9 · Descubrir un saber por tus medios `economia` + `simulacion`
+`lib/world/tick.ts`, `supabase/migrations/`, y una corrección a `DISENO.md` §8.1
+
+> **DECIDIDO por la dirección**, y con dos límites puestos por ella misma:
+> *"debe haber por lo menos dos excepciones, pero lo bueno es que se puedan
+> aprender a tu manera... **lo que ya existe no se puede volver a aprender, eso
+> sí que siga la premisa madre.**"*
+
+Hoy los saberes del valle existen porque `seed.ts` los escribió. **Nadie
+descubrió ninguno nunca**, y no hay ninguna puerta por la que entre saber que no
+venía de fábrica: los tres `insert` en `knows` copian lo que ya está, y la muerte
+resta. **El catálogo sólo puede bajar.**
+
+Esto abre esa puerta, y la abre chica.
+
+**Choca con §8.1 y hay que corregirlo ahí, en el mismo PR.** Hoy el documento
+dice: *"lo que no vas a descubrir solo: las cuatro runas, templar en agua
+corriente. Podés martillar diez años y no te sale."* La corrección no borra esa
+regla —sigue valiendo para casi todo— sino que abre **dos excepciones**.
+
+**Y no es "aprendido haciendo".** Esa categoría ya existe en §8.1 y es otra cosa:
+cortar leña, levantar una pared, lo ordinario que sale de repetir. Esto es una
+cuarta vía —**descubrir por intuición algo que nadie sabe**— y por eso necesita
+casillero propio.
+
+**La regla que no se negocia, y es la premisa madre:** un saber que ya existió y
+se perdió **no vuelve por esta vía**. Que se muriera la vieja Ren y la runa de
+quietud desapareciera tiene que seguir siendo cierto para siempre. **Lo que se
+descubre es saber nuevo, no saber recuperado.** Si esta tarea hace que la muerte
+deje de doler, salió mal.
+
+**El ejemplo que dio la dirección, y es el bueno:** *"carpintería es buenísimo
+para aprender si en algún momento aprendemos cómo cortar árboles, cómo
+moldearlos, y luego vamos intentando armar cosas."* Fijate la forma: **no es un
+dado ni una receta escondida.** Es que el saber salga de la combinación de cosas
+que ya sabés hacer, más el intento repetido, más el lugar. Cortar + moldear +
+probar → carpintería. Y encaja con lo que ya está en la base: `knows.destreza` y
+`knows.veces` existen y se usan en 86 lugares de `tick.ts`.
+
+Verificado hoy contra producción: **en el valle no hay carpintero y la
+carpintería no está en el catálogo** —los oficios son aprendiz, cazadora, chico
+del camino, curandera, destiladora, guardia, herrera, tejedor, vadeador—. O sea
+que el ejemplo no es hipotético: es un oficio que el mundo no tiene y que nadie
+puede traer.
+
+Y lo mejor es lo que pasa **después** de descubrirlo, que es donde el juego ya
+funciona: lo sabés vos y nadie más, así que **o se lo enseñás a alguien o se
+muere con vos**. Es la trampa de la vieja Ren, con la diferencia de que la
+elegiste.
+
+**Lo que decide la dirección:**
+
+- **Cuáles son las dos excepciones.** Carpintería es una. La otra está abierta.
+- **Qué hace falta para que salte** — cuántos saberes previos, cuánta destreza,
+  cuántos intentos, si el lugar importa.
+- **Si el saber nuevo es una fila nueva en `knowledge`** (el mundo estrena
+  vocabulario) **o una de una lista de descubribles ya escrita pero apagada**
+  (más barato, y no necesita que nada lo invente). La segunda no roza el
+  invariante 1; la primera hay que mirarla con cuidado, porque algo tiene que
+  redactar ese saber y el tick no puede llamar al modelo.
+- **Si cuesta más que aprenderlo de alguien** — se cruza con C.2 y la regla de
+  ahí vale igual: si descubrir sale más barato que buscar un maestro, nadie busca
+  maestros y el juego se vuelve single-player.
+
+**Terminado cuando:** un jugador sin maestro puede llegar a saber algo que nadie
+en el valle sabía, le cuesta más que habérselo pedido a alguien, y un saber que
+se perdió sigue sin poder volver por esta vía.
+
 ### JUG.8 · El cliente en macOS — **resuelto, queda como registro** `escena`
 
 Primera vez que el cliente corrió fuera de WSL/Windows (Godot 4.7.1, M1, Metal).
