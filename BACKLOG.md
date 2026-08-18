@@ -440,6 +440,247 @@ dueño claro todavía.
 
 ---
 
+## Lo que salió de jugarlo — 18 de agosto `varios`
+
+> **Todo este bloque salió de una sesión de juego, no de leer el código.** Es
+> deliberado que estén juntas: cada una es invisible desde adentro del repo —el
+> texto está bien escrito, la auditoría de la crónica da limpio, el cliente
+> dibuja exactamente lo que el servidor le manda— y todas aparecen en los
+> primeros minutos de alguien que entra sin saber nada.
+>
+> Se numeran **JUG.n** para no pisar los `J.n`, `N.1` y `P.6` que ya existen
+> arriba con otro sentido.
+>
+> Dos de la misma sesión ya se arreglaron solas mientras se escribía esto —la
+> primera crónica (*"La llegada"*) y la reposición de población—, así que
+> **verificá contra `master` antes de despachar**: este archivo se mueve rápido.
+
+### JUG.1 · Un objetivo que se entienda sin contexto `jugabilidad` + `director`
+`lib/web.ts` (la función `pasos()`), `scripts/interfaz.gd`
+
+Quien lo jugó sin saber nada del proyecto: *"sin un objetivo claro es difícil qué
+hacer. Una persona X sin ningún contexto no entiende qué puede y qué no hacer."*
+
+**Y es la segunda vez.** El código ya cita a otro que lo jugó —*"no entiendo cómo
+hacen las runas para usarse"*, teniendo las cuatro en la cabeza— y el comentario
+de `web.ts:1387` diagnostica ese caso bien: *"el sistema son DOS pasos y la
+pantalla sólo anunciaba el primero"*. Dos personas distintas, el mismo problema,
+la misma semana.
+
+`pasos()` existe y está bien pensado: sale del estado real, tiene escalones por
+aprecio, manda a ganarse a alguien. **El problema no es que falte la guía: es que
+la guía dice el siguiente paso y nunca el juego.** El jugador sabe qué tocar y no
+sabe para qué, ni qué es posible, ni cuándo terminó algo.
+
+- **Nada dice qué se puede hacer.** El HUD lista `E hablar · B buscar · I bolsa ·
+  M mapa · C quién eres · R trazar · P runas · G grimorio · T mercado`: es una
+  lista de teclas, no de posibilidades.
+- **No hay cierre.** El aprecio se esconde a propósito —*"no le digas al jugador
+  qué tan cerca está alguien de conseguir algo"*—, decisión coherente, pero sin
+  ninguna señal en su lugar el jugador no sabe si progresa.
+- **Lo que sí funciona es el bloque de runas de `web.ts:1387`**: explica el
+  eslabón que falta, cambia según el estado, y desaparece cuando ya no hace
+  falta. **La tarea es aplicar ese criterio al resto**, no inventar un sistema.
+
+Es lo más caro de la lista y **lo que decide la Fase 0**: el test pregunta si el
+jugador vuelve al otro día, y el que no entendió qué podía hacer no vuelve. Es la
+otra mitad del riesgo Dwarf Fortress — no alcanza con que el mundo sea
+perceptible si no se sabe qué hacerle.
+
+**Terminado cuando:** alguien que nunca oyó hablar del proyecto entra y a los
+cinco minutos puede decir qué está tratando de conseguir y cómo se daría cuenta
+de que lo consiguió.
+
+### JUG.2 · Pedir trabajo: ganarse el oficio estando `economia` + `simulacion`
+`lib/world/tick.ts`, `lib/world/dialogo.ts`, `supabase/migrations/`
+
+Pedido de la dirección: *"me gustaría encontrar un carpintero o un cazador y
+poder ir a pedirle trabajo u ofrecerte, para que te termine enseñando esa
+habilidad."*
+
+La escalera ya es la correcta —`UMBRAL_ENCARGO = 5`, `UMBRAL_ENSENAR = 35`, y
+`pasos()` la dice en tres—. Falta el escalón del medio hecho de **tiempo**, no de
+recados.
+
+**Está a mitad de camino:** el diálogo ya ofrece *«Quedarte trabajando cerca — con
+el tiempo te va conociendo»* (`dialogo.ts:627` y `:1834`), pero esa opción mapea
+al verbo `trabajar` genérico —fabricar algo que ya sabés hacer—, **no a trabajar
+PARA esa persona**. El texto promete una relación y el verbo entrega una acción
+solitaria. Y el que recién llega no sabe hacer nada, así que para él `trabajar`
+no hace nada.
+
+El embudo del primer minuto, con números: `hablar` da **+2** (`tick.ts:4221`) y
+hacen falta **35**. Diecisiete conversaciones, o traer objetos. **No hay una vía
+que sea estar al lado de alguien haciendo lo suyo** — que es lo que la premisa
+promete: *"se aprende quedándose cerca de quien lo tiene"*.
+
+- **Ofrecerte de ayudante de un oficio concreto**, no un verbo genérico: lo que se
+  aprende es ese oficio.
+- **Cuesta tiempo de mundo, no clics** — misma regla que §10.1 (*"nunca juntás
+  cuatro mil troncos: contratás"*).
+- **El NPC puede decir que no**: no te conoce, te teme, o no enseña
+  (`people.teaches`). Un sí garantizado convierte el saber en una compra.
+- **La tensión intacta, vista desde el maestro:** el que te toma de ayudante gana
+  manos y arriesga que le aprendas el oficio.
+
+**Decide la dirección:** verbo nuevo o `trabajar` con destinatario; cuánto aprecio
+por tick; y si ser ayudante da **destreza** además de aprecio —o sea, si se
+aprende haciendo antes de que te enseñen (§8.1).
+
+**Terminado cuando:** alguien sin ningún oficio puede ofrecerse y llegar a que le
+enseñen sin traer un solo objeto.
+
+### JUG.3 · Nadie vuelve a su casa a dormir `simulacion`
+`lib/world/tick.ts`
+
+**Medido en producción, dos veces, a fracción 0.976 y 0.062:**
+
+```
+Odila   está_en = El Sotobosque   casa = Vado Bajo   durmiendo_afuera = true
+Marta   está_en = El Sotobosque   casa = Vado Bajo   durmiendo_afuera = true
+```
+
+Odila es la destiladora de la aldea, tiene casa, y duerme tirada en el bosque.
+
+**El campo está bien calculado** —`web.ts:221`, `donde !== (home_place_id ??
+place_id)`—; lo que falta es que alguien la mande a su casa. La causa está
+documentada hace días en el `CLAUDE.md` del cliente y sigue abierta: *"Nadie
+camina de un lugar a otro... cuando el servidor dice que alguien se mudó, se
+planta en el lugar nuevo."*
+
+El daño no es cosmético: **`durmiendo_afuera` dejó de significar lo que el diseño
+quería** —*"quien no tiene casa duerme a la intemperie"*, que es una historia— y
+pasó a significar *"lo agarró la noche lejos"*, que es un accidente. Y el cliente
+hace lo correcto con ese dato, así que el resultado es que **el diálogo dice "La
+puerta de Odila está cerrada y no hay luz" mientras Odila está parada delante
+tuyo en el medio del bosque.** El texto y la escena describen mundos distintos.
+
+**Terminado cuando:** nadie con `home_place_id` amanece tirado afuera, y lo que
+dice el diálogo coincide con lo que se ve en pantalla.
+
+### JUG.4 · La puerta cerrada como interfaz `arquitectura` + `jugabilidad`
+`scripts/valle.gd`, `scripts/mapa.gd` — **va después de JUG.3**
+
+Pedido de la dirección: *"si no te conoce o no tenés afinidad no podés entrar a
+verla; sólo sabés que hay una casa con la luz apagada y una persona durmiendo,
+quizá."*
+
+**Convierte la exclusión en información.** Hoy que no puedas hablarle es un
+renglón gris en un panel; así es una puerta que ves desde afuera: sabés que hay
+alguien adentro, sabés que no te van a abrir, y entrar pasa a ser algo que te
+ganaste. Es la regla de la escena al revés — si *"una ventana encendida dice
+'adentro hay alguien' más fuerte que todo el cielo junto"*, una apagada dice que
+está durmiendo. `bonds.valued` ya existe y ya tiene umbrales.
+
+Y lo que quedó pendiente de lo visual:
+
+- **En el mapa el verde apagado no dice nada.** Sin leyenda, cruzás el valle de
+  noche hasta alguien que no te va a atender — y de noche, sin luz, es la peor
+  forma de enterarse.
+- **El que duerme afuera de verdad** (sin casa, que es la historia que el diseño
+  quería) **tiene que verse acostado**, no parado como cualquiera. Silueta (§6).
+
+**Terminado cuando:** desde afuera se distingue una casa con alguien durmiendo de
+una casa vacía, y desde el mapa se sabe a quién no vale la pena ir a buscar.
+
+### JUG.5 · «Me presenté ayer» — el NPC habla en tiempo de tick `npc-voz`
+`lib/world/dialogo.ts`
+
+Pasó jugando: le hablé a Sarn para aprender ganadería, dijo que volviera al otro
+día, **le hablé de nuevo enseguida y contestó que me había presentado "ayer"**.
+
+`dialogo.ts:494` traduce `dias === 1 → 'ayer'`, y esos días son **días del
+valle**. Dos minutos reales pueden ser un día, así que el NPC dice "ayer" por
+algo que acaba de pasar.
+
+No es cosmético: **rompe la conversación justo cuando el jugador está probando si
+el NPC tiene memoria de verdad.** Te dice "volvé mañana", volvés, y te trata como
+si hubiera pasado el día — pero no te enseña, porque el sistema sabe que no pasó
+suficiente. **El NPC habla en tiempo de mundo y actúa en tiempo real.**
+
+Misma clase de error que el que este archivo ya documenta: un NPC que contestó
+*"hace cuarenta inviernos"* por una muerte de hacía seis meses.
+
+**Terminado cuando:** hablarle dos veces seguidas al mismo NPC no produce una
+referencia temporal que el jugador pueda desmentir con lo que acaba de vivir.
+
+### JUG.6 · La mitad del tiempo el valle está oscuro `simulacion` + `jugabilidad`
+`lib/world/tick.ts`, `scripts/ciclo.gd`
+
+El ciclo **no sale del tick: sale del reloj de pared** (`web.ts:632`,
+`Date.now() % DIA_REAL_MS`, seis horas). Gira solo, y da ~3 h de luz y ~3 de
+noche, siempre. Que hoy coincida con el cron es coincidencia, no construcción: si
+el cron se atrasa, los dos relojes se desfasan.
+
+Medido el 17/08, las ventanas de luz caen **22:11–01:11, 04:12–07:11,
+10:11–13:11 y 16:11–19:11** hora argentina.
+
+De noche los NPCs siguen ahí y el juego lo maneja bien. **Lo que la noche saca no
+es la gente: son los dos escalones que llevan al saber** —enseñar y aprender
+quedan en gris—, que es justo lo único que puede hacer el que recién llega. Y a
+cada jugador le toca una mitad distinta según su huso horario y a qué hora puede
+jugar: **el que sólo entra de 21 a 23 encuentra noche casi siempre.** Para un
+test de cuatro personas y siete días, eso puede decidir el resultado sin que
+nadie lo note.
+
+El ciclo compartido es de lo mejor del proyecto y se conserva. Lo que hay que
+decidir es qué se hace con la mitad oscura:
+
+- **Que la noche tenga su propio juego.** Ya hay piezas: curarse durmiendo
+  (§10.2), sentarse, las luciérnagas. Falta algo que **sólo** se pueda de noche.
+- **Acortarla** — que la vuelta no sea 50/50 sino 70/30. Barato, no toca la idea.
+- **Decirlo** — hoy nada avisa cuándo amanece. Un renglón convierte una espera
+  opaca en una espera con forma.
+
+### JUG.7 · `Prueba3D` es un jugador y el director lo narra como gente `esquema`
+`lib/web.ts`
+
+Hay un jugador llamado `Prueba3D` en `valle-primero` y la crónica dice *"Prueba3D
+anduvo revuelto todo el día"*, *"la vieja Ren empezó a confiar en Prueba3D"*.
+
+**El director hace lo correcto** —el `SYSTEM` dice *"tampoco 'jugador': los demás
+del valle son gente"*—, así que el nombre entra como el de una persona más. El
+problema no es la narración: es el nombre.
+
+`web.ts:430` acepta cualquier nombre de hasta 24 caracteres. La regla de no usar
+vocabulario de sistema está escrita **sólo para el modelo**, y nadie previó que
+**el nombre de otro jugador puede ser vocabulario de sistema**: un `Test`, un
+`asdasd` o un `xXx_Dark_xXx` rompen la ficción igual.
+
+Dos cosas separadas: **sacar o renombrar a `Prueba3D` de producción** (higiene de
+datos, y es lo urgente porque sale en las crónicas de todos) y **decidir qué se
+valida al crear un personaje** (diseño).
+
+### JUG.8 · El cliente no arranca en macOS `escena`
+`project.godot`, `scripts/api.gd`
+
+Primera vez que el cliente corre fuera de WSL/Windows. **Tres cosas lo hacen
+injugable en Mac, en orden de aparición:**
+
+1. **TLS.** `mbedtls` rechaza el certificado de Vercel: `TLS handshake error:
+   -27648` y todas las llamadas devuelven 0, así que el mundo nunca llega y la
+   pantalla queda gris. `curl` al mismo endpoint desde la misma máquina da 200
+   con la cadena verificada, o sea que es Godot y no la red. **Se arregla con
+   `network/tls/certificate_bundle_override` en `project.godot`** apuntando a un
+   bundle del sistema — probado y funcionando.
+2. **El foco del teclado.** El panel de bienvenida tiene un `Button` que toma el
+   foco al abrirse; un Control con foco se come las teclas antes de
+   `_unhandled_input`, así que **Escape nunca llegaba** y el WASD quedaba muerto
+   con el valle ya a la vista. Es lo mismo que ya avisa el comentario del botón
+   de la charla —*"un control con foco empieza a comerse las teclas"*—, y hay que
+   **soltar el foco a mano al cerrar el panel**.
+3. **Correrlo desde el editor no sirve**: el editor se queda el teclado. Va con
+   `godot --path <proyecto>`.
+
+Y una de mipmaps en `paleta.gd` que **ya se arregló sola** en otra rama: en Metal
+las texturas del kit llegan con mipmaps y `get_data()` devolvía 1.398.100 bytes
+donde `create_from_data` esperaba 1.048.576.
+
+**Terminado cuando:** alguien con una Mac clona, corre `godot --path` y camina
+por el valle sin tocar nada.
+
+---
+
 ## Tramo 00 — contestar la pregunta
 
 ### 00.1 · Panel de métricas del test `esquema`
