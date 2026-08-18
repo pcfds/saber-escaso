@@ -451,9 +451,13 @@ dueño claro todavía.
 > Se numeran **JUG.n** para no pisar los `J.n`, `N.1` y `P.6` que ya existen
 > arriba con otro sentido.
 >
-> Dos de la misma sesión ya se arreglaron solas mientras se escribía esto —la
-> primera crónica (*"La llegada"*) y la reposición de población—, así que
-> **verificá contra `master` antes de despachar**: este archivo se mueve rápido.
+> **Verificá contra `master` antes de despachar: este archivo se mueve rápido.**
+> Cuatro hallazgos de esta misma sesión ya se arreglaron solos mientras se
+> escribía —la primera crónica (*"La llegada"*), la reposición de población, la
+> noche corta y el foco del teclado del cliente—, y en tres de los cuatro la
+> causa que encontraron era mejor que el diagnóstico de acá. **La noche era un
+> seno: día y noche medían exactamente la mitad cada uno.** Lo que queda ya se
+> volvió a comprobar contra el código de hoy.
 
 ### JUG.1 · Un objetivo que se entienda sin contexto `jugabilidad` + `director`
 `lib/web.ts` (la función `pasos()`), `scripts/interfaz.gd`
@@ -467,10 +471,16 @@ de `web.ts:1387` diagnostica ese caso bien: *"el sistema son DOS pasos y la
 pantalla sólo anunciaba el primero"*. Dos personas distintas, el mismo problema,
 la misma semana.
 
-`pasos()` existe y está bien pensado: sale del estado real, tiene escalones por
-aprecio, manda a ganarse a alguien. **El problema no es que falte la guía: es que
-la guía dice el siguiente paso y nunca el juego.** El jugador sabe qué tocar y no
-sabe para qué, ni qué es posible, ni cuándo terminó algo.
+**Lo que ya se hizo y hay que reconocer:** el panel de objetivos dibuja los
+`encargos` y los separa de «QUÉ HACER AHORA», con el argumento correcto —*"un
+consejo se ignora sin costo; un encargo se pierde"*—. Eso cierra la mitad de
+**el cierre**: ahora hay algo que el jugador sabe que le pidieron.
+
+**Lo que sigue faltando es la otra mitad: qué se puede hacer.** `pasos()` sale
+del estado real y tiene escalones por aprecio, y el panel dice qué te pidieron —
+pero **ninguno de los dos dice qué es posible**. El jugador sabe qué tocar y qué
+le encargaron; no sabe qué puede lograr, ni con qué, ni cuándo terminó algo que
+nadie le pidió.
 
 - **Nada dice qué se puede hacer.** El HUD lista `E hablar · B buscar · I bolsa ·
   M mapa · C quién eres · R trazar · P runas · G grimorio · T mercado`: es una
@@ -604,34 +614,6 @@ Misma clase de error que el que este archivo ya documenta: un NPC que contestó
 **Terminado cuando:** hablarle dos veces seguidas al mismo NPC no produce una
 referencia temporal que el jugador pueda desmentir con lo que acaba de vivir.
 
-### JUG.6 · La mitad del tiempo el valle está oscuro `simulacion` + `jugabilidad`
-`lib/world/tick.ts`, `scripts/ciclo.gd`
-
-El ciclo **no sale del tick: sale del reloj de pared** (`web.ts:632`,
-`Date.now() % DIA_REAL_MS`, seis horas). Gira solo, y da ~3 h de luz y ~3 de
-noche, siempre. Que hoy coincida con el cron es coincidencia, no construcción: si
-el cron se atrasa, los dos relojes se desfasan.
-
-Medido el 17/08, las ventanas de luz caen **22:11–01:11, 04:12–07:11,
-10:11–13:11 y 16:11–19:11** hora argentina.
-
-De noche los NPCs siguen ahí y el juego lo maneja bien. **Lo que la noche saca no
-es la gente: son los dos escalones que llevan al saber** —enseñar y aprender
-quedan en gris—, que es justo lo único que puede hacer el que recién llega. Y a
-cada jugador le toca una mitad distinta según su huso horario y a qué hora puede
-jugar: **el que sólo entra de 21 a 23 encuentra noche casi siempre.** Para un
-test de cuatro personas y siete días, eso puede decidir el resultado sin que
-nadie lo note.
-
-El ciclo compartido es de lo mejor del proyecto y se conserva. Lo que hay que
-decidir es qué se hace con la mitad oscura:
-
-- **Que la noche tenga su propio juego.** Ya hay piezas: curarse durmiendo
-  (§10.2), sentarse, las luciérnagas. Falta algo que **sólo** se pueda de noche.
-- **Acortarla** — que la vuelta no sea 50/50 sino 70/30. Barato, no toca la idea.
-- **Decirlo** — hoy nada avisa cuándo amanece. Un renglón convierte una espera
-  opaca en una espera con forma.
-
 ### JUG.7 · `Prueba3D` es un jugador y el director lo narra como gente `esquema`
 `lib/web.ts`
 
@@ -654,8 +636,9 @@ valida al crear un personaje** (diseño).
 ### JUG.8 · El cliente no arranca en macOS `escena`
 `project.godot`, `scripts/api.gd`
 
-Primera vez que el cliente corre fuera de WSL/Windows. **Tres cosas lo hacen
-injugable en Mac, en orden de aparición:**
+Primera vez que el cliente corre fuera de WSL/Windows. **Lo que queda es el
+punto 1**; el 2 se resolvió upstream mientras esto se escribía y el 3 es de
+entorno. Van los tres porque el orden de aparición es la mitad del diagnóstico:
 
 1. **TLS.** `mbedtls` rechaza el certificado de Vercel: `TLS handshake error:
    -27648` y todas las llamadas devuelven 0, así que el mundo nunca llega y la
@@ -663,12 +646,13 @@ injugable en Mac, en orden de aparición:**
    con la cadena verificada, o sea que es Godot y no la red. **Se arregla con
    `network/tls/certificate_bundle_override` en `project.godot`** apuntando a un
    bundle del sistema — probado y funcionando.
-2. **El foco del teclado.** El panel de bienvenida tiene un `Button` que toma el
-   foco al abrirse; un Control con foco se come las teclas antes de
-   `_unhandled_input`, así que **Escape nunca llegaba** y el WASD quedaba muerto
-   con el valle ya a la vista. Es lo mismo que ya avisa el comentario del botón
-   de la charla —*"un control con foco empieza a comerse las teclas"*—, y hay que
-   **soltar el foco a mano al cerrar el panel**.
+2. **El foco del teclado — ya resuelto upstream, queda como registro.** El panel
+   de bienvenida tomaba el foco con su `Button` y un Control con foco se come las
+   teclas antes de `_unhandled_input`: **Escape nunca llegaba** y el WASD quedaba
+   muerto con el valle ya a la vista. `interfaz.gd` ya tiene `release_focus()` y
+   el síntoma no se reprodujo. Se deja escrito porque es la clase de bug que
+   vuelve: es lo mismo que avisa el comentario del botón de la charla —*"un
+   control con foco empieza a comerse las teclas"*.
 3. **Correrlo desde el editor no sirve**: el editor se queda el teclado. Va con
    `godot --path <proyecto>`.
 
