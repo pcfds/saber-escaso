@@ -633,35 +633,35 @@ Dos cosas separadas: **sacar o renombrar a `Prueba3D` de producción** (higiene 
 datos, y es lo urgente porque sale en las crónicas de todos) y **decidir qué se
 valida al crear un personaje** (diseño).
 
-### JUG.8 · El cliente no arranca en macOS `escena`
-`project.godot`, `scripts/api.gd`
+### JUG.8 · El cliente en macOS — **resuelto, queda como registro** `escena`
 
-Primera vez que el cliente corre fuera de WSL/Windows. **Lo que queda es el
-punto 1**; el 2 se resolvió upstream mientras esto se escribía y el 3 es de
-entorno. Van los tres porque el orden de aparición es la mitad del diagnóstico:
+Primera vez que el cliente corrió fuera de WSL/Windows (Godot 4.7.1, M1, Metal).
+**Las tres cosas que lo hacían injugable ya no se reproducen**, y se dejan
+escritas porque son la clase de bug que vuelve y porque el orden de aparición es
+la mitad del diagnóstico.
 
-1. **TLS.** `mbedtls` rechaza el certificado de Vercel: `TLS handshake error:
-   -27648` y todas las llamadas devuelven 0, así que el mundo nunca llega y la
-   pantalla queda gris. `curl` al mismo endpoint desde la misma máquina da 200
-   con la cadena verificada, o sea que es Godot y no la red. **Se arregla con
-   `network/tls/certificate_bundle_override` en `project.godot`** apuntando a un
-   bundle del sistema — probado y funcionando.
-2. **El foco del teclado — ya resuelto upstream, queda como registro.** El panel
-   de bienvenida tomaba el foco con su `Button` y un Control con foco se come las
-   teclas antes de `_unhandled_input`: **Escape nunca llegaba** y el WASD quedaba
-   muerto con el valle ya a la vista. `interfaz.gd` ya tiene `release_focus()` y
-   el síntoma no se reprodujo. Se deja escrito porque es la clase de bug que
-   vuelve: es lo mismo que avisa el comentario del botón de la charla —*"un
-   control con foco empieza a comerse las teclas"*.
-3. **Correrlo desde el editor no sirve**: el editor se queda el teclado. Va con
-   `godot --path <proyecto>`.
+1. **TLS — el más grave, y no era de código.** `mbedtls` rechazaba el
+   certificado de Vercel: `TLS handshake error: -27648`, todas las llamadas
+   devolvían 0, el mundo nunca llegaba y la pantalla quedaba gris. `curl` al
+   mismo endpoint desde la misma máquina daba 200 con la cadena verificada, o
+   sea que era Godot y no la red. **Volviendo a probar hoy sin ningún parche, el
+   handshake funciona y el mundo llega** — `10 personas de /mundo`, la hora del
+   valle, la fauna. No hay commit que lo haya tocado: era transitorio.
+   **Si vuelve a pasar**, el arreglo probado es
+   `network/tls/certificate_bundle_override` en `project.godot` apuntando a un
+   bundle del sistema; y ojo, **editar `project.godot` desde el editor de Godot
+   le borra todos los comentarios** — hay que tocarlo a mano.
+2. **El foco del teclado.** El panel de bienvenida tomaba el foco con su
+   `Button`, y un Control con foco se come las teclas antes de
+   `_unhandled_input`: Escape nunca llegaba y el WASD quedaba muerto con el valle
+   ya a la vista. Ya está `release_focus()` en `interfaz.gd` y no se reprodujo.
+3. **Desde el editor no anda:** el editor se queda el teclado. Va con
+   `godot --path <proyecto>`, y el token por `user://config.json` o `--token=`.
 
-Y una de mipmaps en `paleta.gd` que **ya se arregló sola** en otra rama: en Metal
-las texturas del kit llegan con mipmaps y `get_data()` devolvía 1.398.100 bytes
-donde `create_from_data` esperaba 1.048.576.
-
-**Terminado cuando:** alguien con una Mac clona, corre `godot --path` y camina
-por el valle sin tocar nada.
+**Lo único que queda es de documentación:** ni el `README` ni el `CLAUDE.md` del
+cliente dicen cómo correrlo fuera de WSL. `desplegar.sh` está cableado a rutas
+de Windows (`/mnt/c/Users/PEDRO/Desktop`, `taskkill.exe`), así que quien lo clone
+en otro lado no tiene por dónde empezar.
 
 ---
 
