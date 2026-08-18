@@ -18,6 +18,15 @@ const PLACES = [
     description: 'Se incendió antes de que nadie vivo estuviera acá. Nadie la reconstruye.' },
   { slug: 'camino', name: 'El Camino del Norte', kind: 'camino',
     description: 'Por acá llegan los que llegan. No llega mucha gente.' },
+  // EL SEGUNDO PUEBLO. Ver `20260818030000_sauce_quebrado.sql`, que lo mete en
+  // los valles que ya existían; esto es para los que nazcan de cero.
+  //
+  // ⚠ `kind` es 'sauce' y NO 'aldea', y no es cosmético: `makes_at` se compara
+  //   contra `places.kind` (`lugarPorKind` en `tick.ts`), así que con kind
+  //   'aldea' el emplasto sería imposible de fabricar en todo el valle, sin un
+  //   error en ninguna parte. Es el primer lugar donde slug y kind no coinciden.
+  { slug: 'sauce', name: 'Sauce Quebrado', kind: 'sauce',
+    description: 'Cinco casas río arriba, entre sauces partidos por el hielo. Se hierve corteza todo el año y el olor no se va.' },
 ]
 
 const KNOWLEDGE = [
@@ -39,6 +48,11 @@ const KNOWLEDGE = [
     description: 'Tres trazos. Prende lo que ya estaba seco. Se aprende mirando, no leyendo.' },
   { slug: 'runa-de-quietud', name: 'Runa de quietud', kind: 'magia',
     description: 'Cinco trazos. Aquieta lo que se mueve, un momento. Nadie sabe de dónde salió.' },
+  // Lo único que hay en Sauce Quebrado y no en Vado Bajo, o sea la razón por la
+  // que caminarías noventa y siete metros. `makes` y `makes_at` los pone la
+  // migración, igual que para los cinco de arriba.
+  { slug: 'emplasto-de-sauce', name: 'Emplasto de sauce', kind: 'receta',
+    description: 'Hervir corteza de sauce hasta que suelta el amargo, y atarla en un paño mientras está caliente. Se hace en Sauce Quebrado porque es donde están los sauces; con corteza traída de otro lado sale flojo y nadie sabe bien por qué.' },
 ]
 
 // ── De dónde es cada uno, y cómo se le nota al hablar ──────────────────────
@@ -63,7 +77,7 @@ const KNOWLEDGE = [
 // para los nacidos en el valle como marca local, y se descartó porque el voseo
 // es el marcador rioplatense más fuerte que hay y dejarlo en cuatro de siete
 // habría conservado justo lo que se pidió sacar.
-type Origen = 'valle' | 'rio-abajo' | 'compania' | 'casa-quemada'
+type Origen = 'valle' | 'rio-abajo' | 'compania' | 'casa-quemada' | 'sauce'
 
 const PROCEDENCIAS: Record<Origen, string> = {
   valle:
@@ -72,6 +86,8 @@ const PROCEDENCIAS: Record<Origen, string> = {
     'Se crió río abajo, en una casa donde eran seis y todo se repartía. Cuenta las cosas antes de nombrarlas —una vez, medio día, un rato nada más—, porque en su casa todo venía contado. Dice "en casa" para hablar de aquella casa y nunca aclara cuál. Los nombres de aquí los usa enteros y con cuidado, como quien los aprendió de mayor y teme decirlos mal. Se disculpa antes de pedir cualquier cosa, que es la costumbre del último de seis.',
   compania:
     'Vino con una compañía que se deshizo tres valles atrás y no es de ningún sitio. No usa los nombres del valle: nunca dice "Vado Bajo", ni "El Sotobosque", ni "La Fragua de Ilde". Dice el pueblo, el bosque ese, la fragua, el camino de arriba, porque los aprendió tarde y no son suyos. Los sitios los describe por lo que sirven —un valle con dos salidas, un río que no se cruza en invierno—, que es como se los enseñaron. Mide en marchas, en pagas y en inviernos pasados en algún sitio, nunca en días. Se le escapan las palabras de la compañía en cosas que no son la guardia: relevo, turno, paga, orden, columna. Nunca habla de este valle como si fuera suyo: dice el valle, este sitio, nunca mi tierra.',
+  sauce:
+    'Se crió en Sauce Quebrado, río arriba, donde son cinco casas y se conocen todos. Nombra a la gente por el oficio y no por el nombre —el herrero, la que cura, el del vado—, que es como se nombra donde nadie hace falta distinguirlo de otro. Mide las distancias en cruces del río y en cuánto tarda el agua en bajar, nunca en leguas. Habla de Vado Bajo como de un sitio grande y algo ajeno: dice abajo, el pueblo grande, allá. Menciona los sauces y la corteza sin explicarlos, como quien habla de algo que hay en todas partes. Y no da nada por sabido de quien viene de afuera: pregunta de dónde es antes de contestar.',
   'casa-quemada':
     'Es de una casa que ya no existe. Nombra los lugares por lo que fueron y no por lo que son, y no aclara la diferencia. Cuenta en inviernos, nunca en años, y los cuenta hacia atrás. Habla con fórmulas y dichos que aprendió de gente que ya no está, y los suelta enteros, sin explicarlos. De lo que hay ahora en el valle habla como de algo reciente, aunque lleve treinta años.',
 }
@@ -204,6 +220,41 @@ const PEOPLE = [
     historia: 'Tiene doce o trece, nadie llevó la cuenta, y vive en el Camino del Norte porque ahí pasa lo único que pasa. Vio a alguien trazar una runa una vez, de lejos, y no se lo pudo sacar más de la cabeza. Reparte gratis todo lo que sabe y todavía no se dio cuenta de que eso le va a costar caro.',
     knows: [],
     agenda: { goal: 'ver de cerca a alguien que sepa magia', needs: 'runa-de-brasa' } },
+
+  // ── SAUCE QUEBRADO ────────────────────────────────────────────────────────
+  //
+  // Tres, no once. Un pueblo se lee por la gente que tiene adentro y no por la
+  // cantidad de techos; el cliente le pone cinco casas y **las dos que sobran
+  // quedan cerradas**, que es lo que este juego quiere decir: acá vivía más
+  // gente.
+  //
+  // Las dos agendas piden un OBJETO y no un saber, y las dos se resuelven
+  // abajo: el frasco lo hace Odila en la aldea y la hoja la hace Ilde en la
+  // fragua. Es a propósito y es la mitad de por qué existe el pueblo — **el
+  // primer objetivo del juego que no se resuelve donde te lo dan.**
+  { name: 'Nevia', trade: 'curandera', place: 'sauce', home: 'sauce', teaches: true,
+    disposition: 'Cura a cualquiera que llegue caminando y no pregunta de qué se cayó. Enseña, pero tarde: primero quiere ver si volvés.',
+    voice: 'Da instrucciones en vez de opiniones: qué hacer, en qué orden y cuánto esperar. Pregunta por el cuerpo antes que por el nombre — dónde duele, desde cuándo, si podés apoyarlo. No consuela y no se alarma; lo peor y lo mejor los dice con el mismo tono. Cuando alguien exagera, lo corta con un dato. Trata de usted a los que no conoce y pasa al tú cuando ya te curó una vez.',
+    procedencia: 'sauce',
+    historia: 'Hierve corteza desde que tiene memoria porque su madre hervía corteza. Tuvo el frasco de Odila una sola vez y le rindió el doble; desde entonces guarda el emplasto en paños, que se secan, y lo dice cada vez que alguien se lo pregunta. No sale de Sauce Quebrado ni para ir a buscarlo.',
+    knows: ['emplasto-de-sauce'],
+    agenda: { goal: 'guardar el emplasto en algo que no lo seque', needs: null,
+      objeto: 'frasco de raíz' } },
+  { name: 'Tolmo', trade: 'vadeador', place: 'sauce', home: 'sauce', teaches: false,
+    disposition: 'Conoce el paso del río con el agua alta y cobra por cruzar a los que no. Se guarda las dos cosas que sabe del vado y no piensa enseñarlas.',
+    voice: 'Habla del tiempo y del agua todo el rato, y es literal: para él el agua alta o baja explica casi todo. Cuenta las cosas por el orden en que pasaron, con los días contados, y se pierde en detalles del camino. Nunca dice que algo es peligroso; dice cuánto cuesta. Tutea a todo el mundo y llama a la gente por el oficio antes que por el nombre.',
+    procedencia: 'sauce',
+    historia: 'Cruza gente desde antes de que el puente de tablas se pudriera, y desde que se pudrió cobra el doble. Le tiene bronca al camino del norte porque el que llega por ahí no le paga a nadie. Sabe que Nevia lo curó dos veces y no le cobra a ella.',
+    knows: [],
+    agenda: { goal: 'rehacer el paso de tablas antes de que suba el agua', needs: null,
+      objeto: 'hoja templada' } },
+  { name: 'Beruta', trade: 'tejedor', place: 'sauce', home: 'sauce', teaches: true,
+    disposition: 'Teje de espaldas a la puerta y contesta sin levantar la vista. Enseña a quien se sienta al lado y se calla.',
+    voice: 'Frases largas y tranquilas, con el hilo de la conversación bien agarrado: retoma lo que le dijeron hace tres frases. Habla de las cosas por cómo están hechas —qué aguanta, qué se deshilacha, cuánto lleva— y de la gente casi nunca. Nunca interrumpe y no sube el tono. Trata de usted a todo el mundo, siempre, y no cambia ni con los que conoce hace años.',
+    procedencia: 'sauce',
+    historia: 'Se quedó en Sauce Quebrado cuando el resto de su casa se fue río abajo, y teje para los cinco techos que quedan. Guarda el telar de su hermana sin usarlo. Cuando le sobra paño se lo lleva a Nevia, que lo corta para los emplastos.',
+    knows: [],
+    agenda: { goal: 'que alguien se siente al lado y aprenda a tejer', needs: null } },
 ]
 
 async function main() {
@@ -293,8 +344,15 @@ async function main() {
     await db.from('agendas').insert({
       person_id: person.id,
       goal: spec.agenda.goal,
-      needs_kind: spec.agenda.needs ? 'knowledge' : null,
+      // Una agenda pide un saber o pide una COSA, nunca las dos. `objeto` es la
+      // rama nueva y es la que de verdad usa el jugador: `needs_object` guarda
+      // el kind y `case 'dar'` lo compara contra lo que le ponés en la mano.
+      // Hasta hoy la siembra sólo sabía de saberes y las agendas de objeto se
+      // parcheaban después con un `update` en una migración.
+      needs_kind: 'objeto' in spec.agenda && spec.agenda.objeto ? 'object'
+        : spec.agenda.needs ? 'knowledge' : null,
       needs_id: spec.agenda.needs ? knowledgeBySlug.get(spec.agenda.needs) : null,
+      needs_object: 'objeto' in spec.agenda ? spec.agenda.objeto : null,
       started_tick: 0,
     })
   }
