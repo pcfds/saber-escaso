@@ -527,7 +527,8 @@ export async function handler(
           .then(() => undefined)
 
         const [places, people, amenazas, objetos, saberes, vinculos, otros,
-               marcas, colgadas, hechosMios, suelo, plata, puestos, pueblos] = await Promise.all([
+               marcas, colgadas, hechosMios, suelo, plata, puestos, pueblos,
+               encargos] = await Promise.all([
           db.from('places').select('id, slug, name, kind, description').eq('region_id', region.id),
           db.from('people').select('id, name, trade, place_id, teaches, saludos, home_place_id, jornada_desde, jornada_hasta').eq('region_id', region.id).eq('alive', true),
           // Las muertas quedan en la tabla porque el director las narra después
@@ -605,6 +606,32 @@ export async function handler(
           // pega cada cinco segundos.
           db.from('peoples').select('name, aprecio, temor, agravio')
             .eq('region_id', region.id),
+          // ── LO QUE TE ENCARGARON ──────────────────────────────────────
+          //
+          // **El bucle de misión de este juego existía entero y era invisible.**
+          // La agenda de un NPC pide un objeto, te `encargás`, se lo `das` y
+          // cierra con +25 de aprecio, que es el salto más grande que da el
+          // juego. Todo eso estaba construido, probado y andando — y el
+          // jugador, después de encargarse, **no tenía dónde ver de qué se
+          // había encargado.** Ni acá, ni en la ficha, ni en la crónica.
+          //
+          // Eso explica el reclamo mejor que cualquier otra cosa: *"no hay nada
+          // para hacer"* dicho sobre un juego que sí tenía qué hacer. Una misión
+          // que no se puede consultar es una misión que no existe.
+          //
+          // **No es una tabla nueva ni un sistema nuevo**, y ése es el punto:
+          // `agendas` y `encargos` llevan escritas desde el primer día. Es la
+          // cuarta vez en este proyecto que la solución era mirar la tabla que
+          // ya estaba (ver §9.3d de `DISENO.md`).
+          //
+          // Viaja el `goal` tal cual lo escribió el mundo, qué le falta, de
+          // quién es y desde cuándo. El embed trae la agenda y su persona en la
+          // misma consulta: sin él serían tres round-trips en la ruta más
+          // caliente del juego.
+          db.from('encargos')
+            .select('taken_tick, agenda:agenda_id (goal, progress, state, needs_kind, needs_object, person:person_id (name, trade, place_id))')
+            .eq('player_id', player.id).eq('state', 'activo')
+            .order('taken_tick', { ascending: true }),
         ])
 
         // El cliente ubica todo por slug — los uuid de la base no le dicen nada
@@ -722,6 +749,31 @@ export async function handler(
               : 'te tratan como a uno más',
             teTemen: (p.temor ?? 0) >= 25,
           })),
+          // ── TUS ENCARGOS ──────────────────────────────────────────────
+          //
+          // Ver el comentario largo de la consulta. Va con el lugar resuelto a
+          // slug y con el nombre de quien te lo pidió, que es lo único que el
+          // cliente necesita para escribir «Ilde, en La Fragua» y para poner la
+          // marca en el mapa. `cerca` avisa que la agenda está por cerrarse sin
+          // vos: el mundo no te espera, y eso hay que poder verlo antes de que
+          // pase y no enterarse después.
+          encargos: (encargos.data ?? []).map((e) => {
+            const a = e.agenda as unknown as {
+              goal: string; progress: number; state: string
+              needs_kind: string | null; needs_object: string | null
+              person: { name: string; trade: string; place_id: string | null } | null
+            } | null
+            return {
+              goal: a?.goal ?? '',
+              falta: a?.needs_object ?? null,
+              de: a?.person?.name ?? '',
+              oficio: a?.person?.trade ?? '',
+              donde: slugDe(a?.person?.place_id ?? null),
+              desde_tick: e.taken_tick,
+              trabado: a?.state === 'bloqueada',
+              cerca: (a?.progress ?? 0) >= 60,
+            }
+          }).filter((e) => e.goal !== ''),
           primeros_pasos: pasos({
             places: places.data ?? [],
           // Cada persona viene con cómo te trata. Es lo que contesta el
@@ -756,6 +808,19 @@ export async function handler(
               kind: o.kind, made_by: o.made_by ?? null,
               dejado_por: o.left_by ?? null, place_slug: slugDe(o.holder_id),
             })),
+            // Lo que te encargaron encabeza la lista. Ver el bloque 0.
+            encargos: (encargos.data ?? []).map((e) => {
+              const a = e.agenda as unknown as {
+                goal: string; progress: number; state: string
+                needs_object: string | null
+                person: { name: string; place_id: string | null } | null
+              } | null
+              return {
+                goal: a?.goal ?? '', falta: a?.needs_object ?? null,
+                de: a?.person?.name ?? '', donde: slugDe(a?.person?.place_id ?? null),
+                cerca: (a?.progress ?? 0) >= 60, trabado: a?.state === 'bloqueada',
+              }
+            }).filter((e) => e.goal !== ''),
           }),
           // `nombre` no es adorno: los que no son humanos no son mobs, son
           // pueblos, y matar a alguien con nombre pesa distinto que matar a
@@ -1339,6 +1404,11 @@ function pasos(m: {
     kind: string; made_by: string | null
     dejado_por: string | null; place_slug: string
   }[]
+  /** De qué te encargaste y sigue abierto. Ver el bloque 0. */
+  encargos?: {
+    goal: string; falta: string | null; de: string
+    donde: string; cerca: boolean; trabado: boolean
+  }[]
 }): Paso[] {
   const out: Paso[] = []
   const slug = (id: string | null) => m.places.find((p) => p.id === id)?.slug ?? ''
@@ -1357,6 +1427,33 @@ function pasos(m: {
    *  cosas que llevás encima, se lee como una enumeración de inventario. */
   const yLista = (xs: string[]) => xs.length <= 1 ? (xs[0] ?? '')
     : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
+
+  // ── 0. LO QUE TE ENCARGARON, PRIMERO QUE TODO ────────────────────────
+  //
+  // Esta función es un motor de sugerencias: mira el mundo y adivina qué te
+  // conviene. Un encargo NO es una sugerencia — es lo único de esta lista que
+  // otro te pidió a vos, con nombre y apellido, y que se cierra o se pierde.
+  // Va arriba de todo y arriba de las runas, que hasta hoy encabezaban.
+  //
+  // Y hasta hoy no estaba en ninguna parte: te encargabas de algo y el juego no
+  // te lo volvía a mencionar nunca. **Un objetivo que no se puede consultar es
+  // un objetivo que no existe**, y eso explica el *"no hay nada para hacer"*
+  // mejor que cualquier otra cosa — sí había, y era invisible.
+  //
+  // El orden de adentro tampoco es libre: primero lo que se está por perder.
+  // «El valle no te esperó» es una lección buena la primera vez y una estafa si
+  // el juego te lo escondió hasta que pasó.
+  for (const e of [...(m.encargos ?? [])].sort((a, b) => Number(b.cerca) - Number(a.cerca))) {
+    const donde = m.places.find((p) => p.slug === e.donde)
+    out.push({
+      texto: e.cerca
+        ? `Te encargaste de ${e.goal}, y ${e.de} está por resolverlo sin ti. ${e.falta ? `Le hace falta ${e.falta}.` : ''}`
+        : e.trabado
+        ? `${e.de} sigue trabado con ${e.goal}. ${e.falta ? `Consigue ${e.falta} y llévaselo.` : 'Pregúntale qué le falta.'}`
+        : `Te encargaste de ${e.goal}${donde ? `, para ${e.de}` : ''}. ${e.falta ? `Le hace falta ${e.falta}: consíguelo y dáselo.` : ''}`,
+      donde: e.donde,
+    })
+  }
 
   // 1. Sin saberes no hay juego: todo lo demás sale de que alguien te enseñe.
   if (recetas.length === 0) {
