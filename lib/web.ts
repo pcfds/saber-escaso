@@ -665,6 +665,16 @@ export async function handler(
           // arreglarlo.
           player: {
             name: player.name, place_id: player.place_id,
+            // DÓNDE TE DEJÓ EL MUNDO, en slug.
+            //
+            // El cliente ubica todo por slug y **el jugador era la única cosa
+            // del mundo que no viajaba con el suyo**: `place_id` es un uuid que
+            // no le dice nada, así que el cuerpo aparecía siempre en el mismo
+            // punto junto a la aldea, escrito a mano en `_armar_jugador()`.
+            // Con un solo pueblo eso no se notaba nunca. Con dos, cerrás el
+            // juego en Sauce Quebrado y volvés a aparecer a noventa y siete
+            // metros de ahí, sin haber caminado.
+            place_slug: slugDe(player.place_id),
             health: player.health ?? 100, max_health: 100,
             caido: (player.health ?? 100) <= 0,
           },

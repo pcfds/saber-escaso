@@ -1,0 +1,30 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SAUCE QUEBRADO ES SU PROPIO `kind`
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Corrección de la migración de hace un rato, que lo creó con `kind = 'aldea'`
+-- y dejó escrito al lado que eso «no es pereza». Era un error, y de los que no
+-- avisan.
+--
+-- **`makes_at` se compara contra `places.kind`, no contra el slug.** Está en
+-- `tick.ts`: `lugarPorKind = (kind) => places.find(p => p.kind === kind)`, y
+-- tres lugares más hacen `c.makes_at === lugar?.kind`. Con el pueblo en
+-- `kind = 'aldea'` y el saber en `makes_at = 'sauce'`, la comparación no da
+-- nunca:
+--
+--   · `emplasto-de-sauce` es **imposible de fabricar**, estés donde estés;
+--   · el botón de trabajar no aparece, y si apareciera diría que no es el sitio;
+--   · Nevia no tiene taller propio, así que la simulación no sabe dónde vuelve
+--     cuando termina un mandado.
+--
+-- Y nada de eso tira un error. El saber existe, se puede aprender, se puede
+--enseñar, y **no se puede usar** — o sea la peor versión de todas, porque el
+-- jugador se gana a la curandera durante seis días para conseguir algo que el
+-- servidor nunca le iba a dejar hacer.
+--
+-- Lo que hacía verdadera la frase «los dos son aldeas» es que Vado Bajo tiene
+-- slug `aldea` Y kind `aldea`, así que en los cinco lugares originales slug y
+-- kind coinciden y la distinción no se ve. Sauce Quebrado es el primer lugar
+-- del valle donde no coinciden, y por eso es el primero que la pisa.
+
+update places set kind = 'sauce' where slug = 'sauce';

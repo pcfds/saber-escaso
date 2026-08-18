@@ -626,6 +626,18 @@ const LO_QUE_DA_EL_LUGAR: Record<string, { kind: string; peso: number }[]> = {
     { kind: 'caña de la orilla', peso: 2 },
     { kind: 'lino en rama', peso: 2 },
   ],
+  // Sauce Quebrado. La corteza CRECE —es un sauce— así que pasa la prueba de
+  // esta tabla: nadie la hace, y por eso la junta cualquiera. Lo que no crece
+  // es el emplasto, que sale de las manos de la única que sabe hervirla.
+  //
+  // Y es lo más generoso del valle (`NO_HAY_NADA` en 2, como el Sotobosque),
+  // a propósito: **es el pueblo lejos.** Noventa y siete metros de ida y
+  // noventa y siete de vuelta tienen que valer algo aunque no encuentres a
+  // Nevia despierta.
+  sauce: [
+    { kind: 'corteza de sauce', peso: 5 },
+    { kind: 'mimbre', peso: 3 },
+  ],
 }
 
 /** Cuántas veces de cada diez volvés con las manos vacías.
@@ -633,7 +645,7 @@ const LO_QUE_DA_EL_LUGAR: Record<string, { kind: string; peso: number }[]> = {
  *  Sin esto `buscar` es una máquina expendedora: apretás y sale. Que a veces
  *  no salga nada es lo que hace que traer la raíz sea traer algo. */
 const NO_HAY_NADA: Record<string, number> = {
-  bosque: 2, ruina: 3, camino: 5, aldea: 6,
+  bosque: 2, ruina: 3, camino: 5, aldea: 6, sauce: 2,
 }
 
 /** En qué TIPO de lugar se junta esto, si es que se junta en alguno.
@@ -3962,6 +3974,41 @@ async function abrirSiguienteMeta(
  *  sabe y se muere con esa persona. Cuando haya un segundo, esto es una lista
  *  de dos, no un sistema. */
 export const CUAJADA = 'cuenco de cuajada'
+export const EMPLASTO = 'emplasto de corteza'
+
+/** ── LO QUE SE PUEDE TOMAR, Y EN QUÉ SE DIFERENCIAN ────────────────────────
+ *
+ * Esta tabla existe porque el emplasto la necesitó, y **el modo en que la
+ * necesitó vale escribirlo**: `tomar()` estaba clavado en la cuajada de punta a
+ * punta —el filtro del `kind`, la frase, el evento— así que el emplasto se
+ * podía aprender, se podía fabricar, se podía dar y **no hacía nada**. El
+ * `para_que` que lee el jugador prometía que cierra una herida. Nada fallaba:
+ * el objeto quedaba en la bolsa y ahí se quedaba.
+ *
+ * Y no son la misma cosa con otro nombre. La diferencia es una sola y es la que
+ * les da identidad:
+ *
+ *   · **La cuajada te LEVANTA.** Es lo único del valle que te pone de pie donde
+ *     caíste en vez de amanecer en la aldea. Repone poco.
+ *   · **El emplasto NO levanta y cura más.** Cierra una herida de alguien que
+ *     está de pie. Si estás en el suelo no te sirve, y ésa es exactamente la
+ *     razón por la que las dos siguen valiendo la pena: la que te salva no es
+ *     la que te cura mejor.
+ *
+ * `repone` depende de la calidad en las dos, o sea de la destreza del que la
+ * hizo: la mano de otro se vuelve tu ventaja, y el que la recibe ve de quién
+ * era. Un emplasto de la primera vez levanta 34; uno de Nevia, 60.
+ */
+const TOMABLES: Record<string, {
+  repone: (q: number) => number
+  levanta: boolean
+  /** Cómo se cuenta en el evento. En infinitivo y sin el nombre del objeto: lo
+   *  pone quien arma la frase. */
+  gesto: string
+}> = {
+  [CUAJADA]: { repone: (q) => 25 + Math.floor(q / 3), levanta: true, gesto: 'se tomó' },
+  [EMPLASTO]: { repone: (q) => 30 + Math.floor(q / 3), levanta: false, gesto: 'se puso' },
+}
 
 /** Cuánto repone un cuenco, y por qué depende de la calidad.
  *
@@ -4016,8 +4063,18 @@ export async function tomar(args: {
 }): Promise<Tomada> {
   const { regionId, tick, player } = args
 
-  const pedido = args.que?.trim().toLowerCase()
-  if (pedido && !CUAJADA.includes(pedido) && !pedido.includes('cuajada')) {
+  const pedido = args.que?.trim().toLowerCase() ?? ''
+  const nombres = Object.keys(TOMABLES)
+  // Qué pidió, si pidió algo. Coincide por pedazo en las dos direcciones porque
+  // el jugador escribe «cuajada» o «emplasto» y el kind es la frase entera.
+  const quiere = pedido === '' ? null
+    : nombres.find((k) => {
+      const partes = k.split(' ')
+      return k.includes(pedido)
+        || pedido.includes(partes[0] ?? k)
+        || pedido.includes(partes.at(-1) ?? k)
+    })
+  if (pedido !== '' && !quiere) {
     return { ok: false, porque: `no hay forma de tomarse "${args.que}"` }
   }
 
@@ -4029,18 +4086,33 @@ export async function tomar(args: {
 
   // El mejor de los que lleve, igual que el regalo de `case 'dar'`: si estás en
   // el piso no es momento de administrar el inventario.
-  const cuencos = (await db.from('objects')
-    .select('id, quality, made_by').eq('region_id', regionId)
+  const llevados = (await db.from('objects')
+    .select('id, kind, quality, made_by').eq('region_id', regionId)
     .eq('holder_kind', 'player').eq('holder_id', player.id)
-    .eq('kind', CUAJADA)).data ?? []
-  const cuenco = cuencos.sort((a, b) => b.quality - a.quality)[0]
-  if (!cuenco) return { ok: false, porque: `no lleva ningún ${CUAJADA} encima` }
+    .in('kind', quiere ? [quiere] : nombres)).data ?? []
+  // Caído, el que te levante gana sobre el que cure más: en el piso no hay
+  // ninguna otra prioridad. De pie, el de mejor calidad. Sin esto, tirado con
+  // un emplasto y un cuenco encima el orden por calidad podía elegir el
+  // emplasto, que no te levanta, y contestar «no te sirve» con la cura en la
+  // mano.
+  const util = llevados.filter((o) => !caido || TOMABLES[o.kind]?.levanta)
+  const cuenco = util.sort((a, b) => b.quality - a.quality)[0]
+  if (!cuenco) {
+    return {
+      ok: false,
+      porque: caido && llevados.length > 0
+        ? `lleva ${llevados[0]!.kind} encima, y eso no levanta a nadie del suelo`
+        : quiere ? `no lleva ningún ${quiere} encima`
+        : 'no lleva nada que se pueda tomar',
+    }
+  }
+  const receta = TOMABLES[cuenco.kind]!
 
   if (!caido && estado.health >= 100) {
     return { ok: false, porque: 'está entero; no le hace falta' }
   }
 
-  const gana = repone(cuenco.quality)
+  const gana = receta.repone(cuenco.quality)
   // Caído: te levanta con lo que el cuenco te da y nada más. De pie: se suma a
   // lo que te quedaba. La diferencia es lo que hace que caerse siga costando.
   const vida = caido ? Math.min(100, gana) : Math.min(100, estado.health + gana)
@@ -4065,17 +4137,17 @@ export async function tomar(args: {
       // hecho es que se puso en pie. Lo que cambia es dónde, que es todo.
       kind: 'levantada', place_id: estado.place_id ?? null,
       summary: `${player.name} estaba en el suelo en ${donde} y se puso en pie sin que nadie lo llevara al pueblo:`
-        + ` se tomó un ${CUAJADA}.${autoria}`,
+        + ` ${receta.gesto} un ${cuenco.kind}.${autoria}`,
       detail: {
-        player: player.name, place: donde, object: CUAJADA,
+        player: player.name, place: donde, object: cuenco.kind,
         quality: cuenco.quality, made_by: cuenco.made_by ?? null, en_el_lugar: true,
       },
     }
     : {
       kind: 'cura', place_id: estado.place_id ?? null,
-      summary: `${player.name} se cerró la herida en ${donde} con un ${CUAJADA}.${autoria}`,
+      summary: `${player.name} se cerró la herida en ${donde} con un ${cuenco.kind}.${autoria}`,
       detail: {
-        player: player.name, place: donde, object: CUAJADA,
+        player: player.name, place: donde, object: cuenco.kind,
         quality: cuenco.quality, made_by: cuenco.made_by ?? null, en_el_lugar: false,
       },
     }
@@ -4086,12 +4158,12 @@ export async function tomar(args: {
   // puso en pie con un cuenco de cuajada de Eco» dicho a Eco es una firma en su
   // propia carta. Cuando es de otro, en cambio, es la mitad de la noticia.
   const cuenta = caido
-    ? `se puso en pie en ${donde} con un ${CUAJADA}${autoria ? ` de ${cuenco.made_by}` : ''}`
-    : `se tomó un ${CUAJADA}${autoria ? ` de ${cuenco.made_by}` : ''} en ${donde}`
+    ? `se puso en pie en ${donde} con un ${cuenco.kind}${autoria ? ` de ${cuenco.made_by}` : ''}`
+    : `${receta.gesto} un ${cuenco.kind}${autoria ? ` de ${cuenco.made_by}` : ''} en ${donde}`
   return {
     ok: true, health: vida, caido: false,
     lugar: lugar?.slug ?? '',
-    objeto: CUAJADA, hecho_por: cuenco.made_by ?? null,
+    objeto: cuenco.kind, hecho_por: cuenco.made_by ?? null,
     cuenta,
   }
 }
